@@ -3,10 +3,18 @@
 // project as an alternate runtime.
 // See docs/multi-sandbox-plan.md.
 
-/** Execution backend for a sandbox. */
-export const SANDBOX_KINDS = ["remote-vm"] as const;
+/**
+ * Execution backend for a sandbox. A `remote-vm` is a machine Mission Control
+ * created and can destroy; an `ssh-host` is a machine the user already owns,
+ * reached through their own SSH config, that Mission Control only borrows.
+ */
+export const SANDBOX_KINDS = ["remote-vm", "ssh-host"] as const;
 
 export type SandboxKind = (typeof SANDBOX_KINDS)[number];
+
+export function isSandboxKind(value: string | null | undefined): value is SandboxKind {
+  return !!value && (SANDBOX_KINDS as readonly string[]).includes(value);
+}
 
 export type SandboxGitAuthMode = "none" | "copy-host" | "generate";
 
@@ -31,6 +39,29 @@ export type RemoteVmLifecycleStatus =
   /** The cloud instance no longer exists (terminated/deleted out-of-band). Not
    *  resumable — the only recovery is to remove the local record or switch to Local. */
   | "missing";
+
+/** What happens to an SSH host's runtime when Mission Control disconnects. */
+export type SshHostPersistence = "persist" | "teardown";
+
+/** Minutes with no sessions before an SSH host's runtime stops. */
+export const DEFAULT_SSH_IDLE_WINDOW_MINUTES = 30;
+
+/**
+ * Per-host state Mission Control keeps for an SSH host: where it provisioned,
+ * whether the runtime outlives a disconnect, and how long it may sit idle.
+ * Keyed to the SSH host alias and stored in the sandbox row's remote config —
+ * never written back into the user's SSH config.
+ */
+export type SandboxSshHostConfig = {
+  /** Alias exactly as it appears in the user's SSH config. */
+  alias: string;
+  /** Directory Mission Control owns on the host. Null until first provision. */
+  prefix: string | null;
+  /** Persist by default; `teardown` stops the runtime when the client disconnects. */
+  onDisconnect: SshHostPersistence;
+  /** Minutes with no sessions before the runtime stops. 0 disables the idle stop. */
+  idleWindowMinutes: number;
+};
 
 export type SandboxRemoteConfig = {
   /** WebSocket endpoint for a user-managed remote agent. Stored without secrets. */
@@ -67,11 +98,45 @@ export type SandboxRemoteConfig = {
   localPort?: number | null;
   agentPort?: number | null;
   cloud?: Record<string, unknown>;
+  /** Present only on `ssh-host` rows. See {@link parseSshHostConfig}. */
+  ssh?: SandboxSshHostConfig;
   /** Project this sandbox was created from (project-scoped create flow). */
   projectId?: string | null;
   createdAt?: number;
   updatedAt?: number;
 };
+
+function toPersistence(value: unknown): SshHostPersistence {
+  return value === "teardown" ? "teardown" : "persist";
+}
+
+function toIdleWindowMinutes(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return DEFAULT_SSH_IDLE_WINDOW_MINUTES;
+  }
+  return Math.round(value);
+}
+
+/**
+ * Read the SSH host record out of a remote config, filling defaults for fields
+ * a row predating them never wrote. Returns null when the row carries no alias:
+ * an SSH host Mission Control cannot name is not one it can reach.
+ */
+export function parseSshHostConfig(
+  remote: SandboxRemoteConfig | null | undefined,
+): SandboxSshHostConfig | null {
+  const ssh = remote?.ssh;
+  if (!ssh || typeof ssh !== "object" || Array.isArray(ssh)) return null;
+  const raw = ssh as Partial<SandboxSshHostConfig>;
+  const alias = typeof raw.alias === "string" ? raw.alias.trim() : "";
+  if (!alias) return null;
+  return {
+    alias,
+    prefix: typeof raw.prefix === "string" && raw.prefix.trim() ? raw.prefix.trim() : null,
+    onDisconnect: toPersistence(raw.onDisconnect),
+    idleWindowMinutes: toIdleWindowMinutes(raw.idleWindowMinutes),
+  };
+}
 
 /** Launch-image metadata stamped at managed AWS deploy time (from `remote_config.cloud`). */
 export type SandboxImageProvenance = {

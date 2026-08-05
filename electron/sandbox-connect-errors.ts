@@ -1,13 +1,20 @@
+import type { SandboxKind } from "../src/shared/sandbox";
+
 export const CONNECT_BUDGET_REMOTE_MS = 90_000;
 
 export type ConnectFailureKind = "auth" | "host" | "tls" | "transient";
 
-export function connectBudgetMs(_kind: "remote-vm"): number {
+export function connectBudgetMs(_kind: SandboxKind): number {
   return CONNECT_BUDGET_REMOTE_MS;
 }
 
-export function connectTimeoutMessage(_kind: "remote-vm", budgetMs: number): string {
+export function connectTimeoutMessage(kind: SandboxKind, budgetMs: number): string {
   const budgetSec = Math.round(budgetMs / 1000);
+  // An SSH host has no URL or key for the user to check — the actionable thing
+  // is the SSH hop and whether the runtime came up on the other end.
+  if (kind === "ssh-host") {
+    return `Couldn't reach the runtime on this SSH host after ${budgetSec}s. Check that the host is reachable over SSH, then try again.`;
+  }
   return `Couldn't connect to the remote agent after ${budgetSec}s. Check the agent URL and API key, then try again.`;
 }
 

@@ -20,6 +20,7 @@ function config(id: string): SandboxConfig {
     remoteAgentCa: null,
     remoteStatus: null,
     remoteProvider: null,
+    sshHost: null,
   };
 }
 

@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_SSH_IDLE_WINDOW_MINUTES,
   filterProjectsByScope,
+  isSandboxKind,
   LOCAL_SCOPE_ID,
   normalizeRemoteAgentUrl,
   parseSandboxImageProvenance,
+  parseSshHostConfig,
+  SANDBOX_KINDS,
 } from "../sandbox";
 
 describe("normalizeRemoteAgentUrl", () => {
@@ -29,6 +33,79 @@ describe("normalizeRemoteAgentUrl", () => {
     expect(normalizeRemoteAgentUrl("http://203.0.113.10:9333", { allowPlaintextPublic: true })).toBe(
       "ws://203.0.113.10:9333/",
     );
+  });
+
+  it("accepts a forwarded loopback port for an SSH host without loosening the plaintext rule", () => {
+    expect(normalizeRemoteAgentUrl("ws://127.0.0.1:54321")).toBe("ws://127.0.0.1:54321/");
+    expect(normalizeRemoteAgentUrl("ws://192.168.1.42:9333")).toBeNull();
+  });
+});
+
+describe("sandbox kinds", () => {
+  it("recognizes every declared kind and rejects anything else", () => {
+    expect(SANDBOX_KINDS).toContain("ssh-host");
+    for (const kind of SANDBOX_KINDS) expect(isSandboxKind(kind)).toBe(true);
+    expect(isSandboxKind("local-docker")).toBe(false);
+    expect(isSandboxKind(null)).toBe(false);
+  });
+});
+
+describe("parseSshHostConfig", () => {
+  it("reads a fully-populated SSH host record", () => {
+    expect(
+      parseSshHostConfig({
+        agentUrl: "ws://127.0.0.1:54321/",
+        ssh: {
+          alias: "workshop",
+          prefix: "/home/sam/.mission-control",
+          onDisconnect: "teardown",
+          idleWindowMinutes: 5,
+        },
+      }),
+    ).toEqual({
+      alias: "workshop",
+      prefix: "/home/sam/.mission-control",
+      onDisconnect: "teardown",
+      idleWindowMinutes: 5,
+    });
+  });
+
+  it("defaults the fields a row predating them never wrote", () => {
+    expect(
+      parseSshHostConfig({
+        agentUrl: "ws://127.0.0.1:54321/",
+        ssh: { alias: "workshop" } as never,
+      }),
+    ).toEqual({
+      alias: "workshop",
+      prefix: null,
+      onDisconnect: "persist",
+      idleWindowMinutes: DEFAULT_SSH_IDLE_WINDOW_MINUTES,
+    });
+  });
+
+  it("falls back to the default window for a nonsense idle value", () => {
+    const parsed = parseSshHostConfig({
+      agentUrl: "ws://127.0.0.1:54321/",
+      ssh: { alias: "workshop", idleWindowMinutes: -1 } as never,
+    });
+    expect(parsed?.idleWindowMinutes).toBe(DEFAULT_SSH_IDLE_WINDOW_MINUTES);
+  });
+
+  it("keeps an explicit zero window, which disables the idle stop", () => {
+    const parsed = parseSshHostConfig({
+      agentUrl: "ws://127.0.0.1:54321/",
+      ssh: { alias: "workshop", idleWindowMinutes: 0 } as never,
+    });
+    expect(parsed?.idleWindowMinutes).toBe(0);
+  });
+
+  it("returns null for a remote config with no SSH host record", () => {
+    expect(parseSshHostConfig({ agentUrl: "wss://agent.example.com/" })).toBeNull();
+    expect(parseSshHostConfig(null)).toBeNull();
+    expect(
+      parseSshHostConfig({ agentUrl: "ws://127.0.0.1:1/", ssh: { alias: "  " } as never }),
+    ).toBeNull();
   });
 });
 

@@ -23,6 +23,9 @@ export const MINIMUM_REMOTE_NODE_VERSION = "24.0.0";
 /** The command the remote agent publishes on PATH. */
 export const REMOTE_AGENT_COMMAND = "mission-control-agent";
 
+/** The npm package that publishes {@link REMOTE_AGENT_COMMAND}. */
+export const REMOTE_AGENT_PACKAGE = "@agentsystemlabs/mission-control-agent";
+
 /** Everything one probe reports back. A null means "not found". */
 export type SshProbeResult = {
   /** Lowercased `uname -s`, e.g. `linux` or `darwin`. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSshHostAliases } from "../ssh-config";
+import { isSafeSshAlias, parseSshHostAliases } from "../ssh-config";
 
 describe("parseSshHostAliases", () => {
   it("yields each host block's alias in file order", () => {
@@ -91,5 +91,23 @@ describe("parseSshHostAliases", () => {
     expect(
       parseSshHostAliases("Host workshop\n  User sam\n\nHost workshop\n  Port 2222\n"),
     ).toEqual(["workshop"]);
+  });
+
+  it("drops an alias ssh would read as an option rather than a host", () => {
+    expect(parseSshHostAliases('Host -oProxyCommand=id "a;b" workshop\n')).toEqual(["workshop"]);
+  });
+});
+
+describe("isSafeSshAlias", () => {
+  it("accepts the shapes real SSH config aliases take", () => {
+    for (const alias of ["workshop", "web-01", "my.host", "box_2", "user@host"]) {
+      expect(isSafeSshAlias(alias)).toBe(true);
+    }
+  });
+
+  it("rejects anything ssh or a shell could take for something else", () => {
+    for (const alias of ["", "-oProxyCommand=x", "a b", "a;b", "a|b", "a$(b)", "a`b`", "a*"]) {
+      expect(isSafeSshAlias(alias)).toBe(false);
+    }
   });
 });

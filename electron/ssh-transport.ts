@@ -73,22 +73,29 @@ export type SshTunnelCallbacks = {
 const LOOPBACK = "127.0.0.1";
 
 /**
- * Flags that make `ssh` behave as a transport rather than a terminal session.
- * Notably absent: anything that would accept an unknown or changed host key.
- * Trust decisions stay with the user's SSH setup.
+ * Options every `ssh` invocation shares. Notably absent: anything that would
+ * accept an unknown or changed host key. Trust decisions stay with the user's
+ * SSH setup, which is the whole reason hosts are defined there.
  */
+export const SSH_COMMON_OPTIONS: readonly string[] = [
+  // Never prompt — Electron has no terminal to prompt in, so ssh must refuse.
+  "-o",
+  "BatchMode=yes",
+  "-o",
+  "ServerAliveInterval=15",
+  "-o",
+  "ServerAliveCountMax=3",
+];
+
+/** Flags that make `ssh` a transport rather than a terminal session. */
 export function sshTunnelArgs(options: SshTunnelOptions, localPort: number): string[] {
   return [
     "-N", // no remote command; this connection exists for the forward
     "-T", // no pty
+    ...SSH_COMMON_OPTIONS,
+    // A tunnel that silently forwards nothing is worse than no tunnel.
     "-o",
-    "BatchMode=yes", // never prompt — there is no terminal to prompt in
-    "-o",
-    "ExitOnForwardFailure=yes", // a tunnel that silently forwards nothing is worse than none
-    "-o",
-    "ServerAliveInterval=15",
-    "-o",
-    "ServerAliveCountMax=3",
+    "ExitOnForwardFailure=yes",
     "-L",
     `${LOOPBACK}:${localPort}:${LOOPBACK}:${options.remotePort}`,
     options.alias,

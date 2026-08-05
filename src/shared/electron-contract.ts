@@ -1,5 +1,6 @@
 import type { AgentCliUpdateRun } from "~/shared/agent-cli-update";
 import type { GitStatus, GitDiff } from "~/shared/git-status";
+import type { SshProbeOutcome } from "~/shared/ssh-provision";
 
 export const FILE_READ_ERRORS = ["invalid-path", "not-found", "binary", "too-large"] as const;
 export const FILE_WRITE_ERRORS = [
@@ -512,6 +513,12 @@ export type ElectronBridge = {
      * keeps no host list of its own — adding a machine means editing that file.
      */
     list: () => Promise<string[]>;
+    /**
+     * Ask a host what it already has and what Mission Control would install.
+     * Read-only: nothing is written to the host. The alias must be one `list`
+     * returned.
+     */
+    probe: (alias: string) => Promise<SshProbeOutcome>;
   };
   remoteVm: {
     deploy: (input: RemoteVmDeployInput) => Promise<RemoteVmDeployResult>;

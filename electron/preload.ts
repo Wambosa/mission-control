@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 import { IPC } from "./ipc-channels";
+// Type-only, so nothing from the renderer bundle is pulled into the preload.
+// Mirroring this shape by hand would only give it somewhere to drift.
+import type { SshProbeOutcome } from "../src/shared/ssh-provision";
 
 /** Subscribe to a main→renderer IPC channel; returns an unsubscribe fn. */
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -229,6 +232,8 @@ const electronAPI = {
   },
   sshHosts: {
     list: (): Promise<string[]> => ipcRenderer.invoke(IPC.sshHostsList),
+    probe: (alias: string): Promise<SshProbeOutcome> =>
+      ipcRenderer.invoke(IPC.sshHostsProbe, alias),
   },
   remoteVm: {
     deploy: (input: RemoteVmDeployInputBridge): Promise<RemoteVmDeployResultBridge> =>

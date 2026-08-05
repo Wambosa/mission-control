@@ -16,6 +16,8 @@ import {
 } from "./sandbox-settings";
 import { SandboxRegistry, type RegistryDeps } from "./sandbox-registry";
 import { readSshHostAliases } from "./ssh-hosts";
+import { probeSshHost } from "./ssh-provision-probe";
+import type { SshProbeOutcome } from "../src/shared/ssh-provision";
 import {
   openSshTunnel,
   type SshTunnelCallbacks,
@@ -1244,6 +1246,21 @@ export function registerSandboxManager(
   );
   safeHandle(IPC.sandboxDetectRemote, (_e, projectPath: string) => detectGitRemote(projectPath), ipcMain);
   safeHandle(IPC.sshHostsList, () => readSshHostAliases(), ipcMain);
+  safeHandle(
+    IPC.sshHostsProbe,
+    (_e, alias: string): Promise<SshProbeOutcome> => {
+      // The SSH config is the only source of hosts, so an alias that isn't in
+      // it is not a host — and never reaches an `ssh` argument list.
+      if (!readSshHostAliases().includes(alias)) {
+        return Promise.resolve({
+          ok: false,
+          error: `"${alias}" is not a host in your SSH config.`,
+        });
+      }
+      return probeSshHost(alias, { expectedAgentVersion: EXPECTED_SANDBOX_AGENT_VERSION });
+    },
+    ipcMain,
+  );
   safeHandle(IPC.sandboxRevealApiKey, (_e, sandboxId: string) => {
     const config = configFor(sandboxId);
     const apiKey = config?.kind === "remote-vm" ? config.pairingToken?.trim() : "";

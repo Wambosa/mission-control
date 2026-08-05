@@ -26,13 +26,23 @@ function splitArgs(rest: string): string[] {
   return args;
 }
 
+// An alias is handed to `ssh` as an argument, so one starting with `-` would
+// be read as an option rather than a host. The rest keeps anything shell-shaped
+// out of a value that travels through IPC.
+const UNSAFE_ALIAS = /^-|[\s"'`$\\;|&<>()*?]/;
+
+/** True when `ssh` will read this as a host name and nothing else. */
+export function isSafeSshAlias(value: string): boolean {
+  return value.length > 0 && value.length <= 255 && !UNSAFE_ALIAS.test(value);
+}
+
 /**
  * A pattern is a machine only if it names exactly one. A wildcard block is
  * defaults for many hosts and a negated pattern is an exclusion — neither is
  * something the user can connect to.
  */
 function isConnectableAlias(pattern: string): boolean {
-  return !!pattern && !pattern.startsWith("!") && !WILDCARD.test(pattern);
+  return !pattern.startsWith("!") && !WILDCARD.test(pattern) && isSafeSshAlias(pattern);
 }
 
 /** Host aliases the config defines, in file order, each listed once. */

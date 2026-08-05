@@ -227,6 +227,9 @@ const electronAPI = {
       subscribe(IPC.sandboxStateChange, cb),
     onLog: (cb: (line: string) => void) => subscribe(IPC.sandboxLog, cb),
   },
+  sshHosts: {
+    list: (): Promise<string[]> => ipcRenderer.invoke(IPC.sshHostsList),
+  },
   remoteVm: {
     deploy: (input: RemoteVmDeployInputBridge): Promise<RemoteVmDeployResultBridge> =>
       ipcRenderer.invoke(IPC.remoteVmDeploy, input),

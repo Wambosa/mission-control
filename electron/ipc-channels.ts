@@ -84,6 +84,7 @@ export const IPC = {
   sandboxUpgradeAgent: "sandbox:upgrade-agent",
   sandboxRevealApiKey: "sandbox:reveal-api-key",
   sandboxDetectRemote: "sandbox:detect-remote",
+  sshHostsList: "sshHosts:list",
   remoteVmDeploy: "remoteVm:deploy",
   remoteVmStartDeploy: "remoteVm:startDeploy",
   remoteVmListDeployJobs: "remoteVm:listDeployJobs",

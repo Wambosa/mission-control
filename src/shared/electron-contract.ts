@@ -506,6 +506,13 @@ export type ElectronBridge = {
     onStateChange: (cb: (e: { sandboxId: string; state: SandboxState }) => void) => () => void;
     onLog: (cb: (line: string) => void) => () => void;
   };
+  sshHosts: {
+    /**
+     * Host aliases from the user's SSH config, in file order. Mission Control
+     * keeps no host list of its own — adding a machine means editing that file.
+     */
+    list: () => Promise<string[]>;
+  };
   remoteVm: {
     deploy: (input: RemoteVmDeployInput) => Promise<RemoteVmDeployResult>;
     startDeploy: (input: RemoteVmDeployInput) => Promise<{ jobId: string }>;

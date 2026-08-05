@@ -15,6 +15,7 @@ import {
   type SandboxSettingsPatch,
 } from "./sandbox-settings";
 import { SandboxRegistry, type RegistryDeps } from "./sandbox-registry";
+import { readSshHostAliases } from "./ssh-hosts";
 import {
   listSandboxConfigs,
   readActiveSandboxId,
@@ -1225,6 +1226,7 @@ export function registerSandboxManager(
     ipcMain,
   );
   safeHandle(IPC.sandboxDetectRemote, (_e, projectPath: string) => detectGitRemote(projectPath), ipcMain);
+  safeHandle(IPC.sshHostsList, () => readSshHostAliases(), ipcMain);
   safeHandle(IPC.sandboxRevealApiKey, (_e, sandboxId: string) => {
     const config = configFor(sandboxId);
     const apiKey = config?.kind === "remote-vm" ? config.pairingToken?.trim() : "";

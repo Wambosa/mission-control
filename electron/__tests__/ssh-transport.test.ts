@@ -9,6 +9,8 @@ import {
   type SshProcessLike,
 } from "../ssh-transport";
 
+const noopExit = { onExit: () => {} };
+
 /** A stand-in for the `ssh` process, so no test needs a real SSH server. */
 function fakeSsh() {
   const listeners = { exit: [] as ((code: number | null) => void)[], error: [] as ((err: Error) => void)[] };
@@ -103,23 +105,23 @@ describe("classifySshFailure", () => {
 });
 
 describe("openSshTunnel", () => {
-  const noop = { onExit: () => {} };
-
   it("hands back a loopback agent URL on the port it reserved", async () => {
     const ssh = fakeSsh();
-    const result = await openSshTunnel({ alias: "workshop", remotePort: 9333 }, noop, {
+    const result = await openSshTunnel({ alias: "workshop", remotePort: 9333 }, noopExit, {
       spawnSsh: () => ssh.child,
       allocatePort: async () => 54321,
     });
     expect(result.ok && result.tunnel.agentUrl).toBe("ws://127.0.0.1:54321/");
     expect(result.ok && result.tunnel.localPort).toBe(54321);
+    // Release the reservation so a later test can claim the same port.
+    if (result.ok) result.tunnel.close();
   });
 
   it("gives two hosts distinct local ports while both forwards are live", async () => {
-    const first = await openSshTunnel({ alias: "workshop", remotePort: 9333 }, noop, {
+    const first = await openSshTunnel({ alias: "workshop", remotePort: 9333 }, noopExit, {
       spawnSsh: () => fakeSsh().child,
     });
-    const second = await openSshTunnel({ alias: "attic", remotePort: 9333 }, noop, {
+    const second = await openSshTunnel({ alias: "attic", remotePort: 9333 }, noopExit, {
       spawnSsh: () => fakeSsh().child,
     });
     expect(first.ok && second.ok).toBe(true);
@@ -179,7 +181,7 @@ describe("openSshTunnel", () => {
 
   it("fails without spawning when no local port can be reserved", async () => {
     const spawnSsh = vi.fn();
-    const result = await openSshTunnel({ alias: "workshop", remotePort: 9333 }, noop, {
+    const result = await openSshTunnel({ alias: "workshop", remotePort: 9333 }, noopExit, {
       spawnSsh,
       allocatePort: async () => {
         throw new Error("no ports");
@@ -195,5 +197,41 @@ describe("allocateLoopbackPort", () => {
     const port = await allocateLoopbackPort();
     expect(port).toBeGreaterThan(0);
     expect(port).toBeLessThanOrEqual(65535);
+  });
+});
+
+describe("port reservation", () => {
+  it("hands the next host a different port when the OS offers the same one twice", async () => {
+    const offered = [54_321, 54_321, 54_322];
+    const allocatePort = async () => offered.shift() ?? 0;
+    const first = await openSshTunnel({ alias: "workshop", remotePort: 9333 }, noopExit, {
+      spawnSsh: () => fakeSsh().child,
+      allocatePort,
+    });
+    const second = await openSshTunnel({ alias: "attic", remotePort: 9333 }, noopExit, {
+      spawnSsh: () => fakeSsh().child,
+      allocatePort,
+    });
+
+    expect(first.ok && first.tunnel.localPort).toBe(54_321);
+    expect(second.ok && second.tunnel.localPort).toBe(54_322);
+
+    if (first.ok) first.tunnel.close();
+    if (second.ok) second.tunnel.close();
+  });
+
+  it("frees the port again once the forward closes", async () => {
+    const open = () =>
+      openSshTunnel({ alias: "workshop", remotePort: 9333 }, noopExit, {
+        spawnSsh: () => fakeSsh().child,
+        allocatePort: async () => 54_323,
+      });
+
+    const first = await open();
+    if (first.ok) first.tunnel.close();
+    const second = await open();
+
+    expect(second.ok && second.tunnel.localPort).toBe(54_323);
+    if (second.ok) second.tunnel.close();
   });
 });

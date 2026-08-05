@@ -165,12 +165,13 @@ export function classifySshFailure(stderr: string, exitCode: number | null): Ssh
   };
 }
 
-// Ports handed to a live tunnel. The OS would happily hand the same free port
-// to two probes in a row, so two hosts connecting at once need this to keep
-// their forwards apart.
+// Ports held by a live tunnel. The OS will happily offer the same free port to
+// two probes in a row, so two hosts connecting at once need this to keep their
+// forwards apart.
 const portsInUse = new Set<number>();
 
-function probeFreePort(): Promise<number> {
+/** Ask the OS for a port nothing is listening on right now. */
+export function allocateLoopbackPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.on("error", reject);
@@ -182,11 +183,18 @@ function probeFreePort(): Promise<number> {
   });
 }
 
-/** A free loopback port no other live tunnel already holds. */
-export async function allocateLoopbackPort(): Promise<number> {
+/**
+ * Claim a port no live tunnel holds. The check and the claim sit together with
+ * no await between them, so a second host opening concurrently cannot slip in
+ * and take the same one.
+ */
+async function reserveLoopbackPort(allocate: () => Promise<number>): Promise<number> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const port = await probeFreePort();
-    if (!portsInUse.has(port)) return port;
+    const port = await allocate();
+    if (!portsInUse.has(port)) {
+      portsInUse.add(port);
+      return port;
+    }
   }
   throw new Error("could not find a free loopback port for the SSH forward");
 }
@@ -214,10 +222,9 @@ export async function openSshTunnel(
   callbacks: SshTunnelCallbacks,
   deps: SshTunnelDeps = {},
 ): Promise<SshTunnelResult> {
-  const allocate = deps.allocatePort ?? allocateLoopbackPort;
   let localPort: number;
   try {
-    localPort = await allocate();
+    localPort = await reserveLoopbackPort(deps.allocatePort ?? allocateLoopbackPort);
   } catch (err) {
     return { ok: false, error: `Could not reserve a local port for the SSH forward: ${String(err)}` };
   }
@@ -230,10 +237,10 @@ export async function openSshTunnel(
   try {
     child = spawnSsh(args);
   } catch (err) {
+    portsInUse.delete(localPort);
     return { ok: false, error: `Could not start ssh: ${String(err)}` };
   }
 
-  portsInUse.add(localPort);
   let stderr = "";
   let closed = false;
   let requested = false;

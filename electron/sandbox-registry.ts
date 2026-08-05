@@ -50,14 +50,13 @@ export type RegistryDeps = {
    * Forward the host's runtime port back to a loopback port here. Called only
    * for `ssh-host` sandboxes, whose agent URL exists only while the forward does.
    */
-  openSshTunnel?: (config: SandboxConfig, cb: SshTunnelCallbacks) => Promise<SshTunnelResult>;
+  openSshTunnel: (config: SandboxConfig, cb: SshTunnelCallbacks) => Promise<SshTunnelResult>;
 };
 
 const REMOTE_CONFIG_ERROR = "Remote sandbox is missing an agent URL or API key.";
 const REMOTE_PAUSED_ERROR = "Remote VM is paused. Resume the VM before connecting.";
 const SSH_RECORD_ERROR = "This SSH host is missing its host record. Remove it and add it again.";
 const SSH_UNPROVISIONED_ERROR = "This SSH host has not been provisioned yet.";
-const SSH_TRANSPORT_ERROR = "SSH hosts are not available in this build.";
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 15_000;
 
@@ -143,13 +142,16 @@ export class SandboxInstance {
     return this.config.kind === "ssh-host";
   }
 
-  /** Why this sandbox cannot be started at all, or null when it can. */
-  private configError(): string | null {
+  /** The token to authenticate with, or why this sandbox cannot start at all. */
+  private startPreflight(): { ok: true; token: string } | { ok: false; error: string } {
+    const token = this.config.pairingToken;
     if (this.isSshHost) {
-      if (!this.config.sshHost) return SSH_RECORD_ERROR;
-      return this.config.pairingToken ? null : SSH_UNPROVISIONED_ERROR;
+      if (!this.config.sshHost) return { ok: false, error: SSH_RECORD_ERROR };
+      if (!token) return { ok: false, error: SSH_UNPROVISIONED_ERROR };
+      return { ok: true, token };
     }
-    return this.config.remoteAgentUrl && this.config.pairingToken ? null : REMOTE_CONFIG_ERROR;
+    if (!this.config.remoteAgentUrl || !token) return { ok: false, error: REMOTE_CONFIG_ERROR };
+    return { ok: true, token };
   }
 
   async start(): Promise<OpResult> {
@@ -162,14 +164,13 @@ export class SandboxInstance {
         this.set({ status: "stopped", dockerAvailable: true });
         return { ok: false, error: REMOTE_PAUSED_ERROR };
       }
-      const configError = this.configError();
-      if (configError) {
-        this.set({ status: "error", message: configError });
-        return { ok: false, error: configError };
+      const preflight = this.startPreflight();
+      if (!preflight.ok) {
+        this.set({ status: "error", message: preflight.error });
+        return preflight;
       }
       const step = this.isSshHost ? "opening SSH connection" : "connecting to remote agent";
       this.set({ status: "starting", step, since: Date.now() });
-      const token = this.config.pairingToken as string;
       // A stop / destroy / newer start landed while we set up — don't clobber
       // that newer state or start connecting.
       if (this.isStale(epoch)) return { ok: true };
@@ -177,8 +178,8 @@ export class SandboxInstance {
       this.set({ status: "running", since: this.connectStartedAt ?? Date.now() });
       // An SSH host has no persisted URL — the forward supplies one per attempt.
       this.lastAgentUrl = this.isSshHost ? null : this.config.remoteAgentUrl;
-      this.lastToken = token;
-      this.connect(token, epoch);
+      this.lastToken = preflight.token;
+      this.connect(preflight.token, epoch);
       return { ok: true };
     } finally {
       this.opInFlight = false;
@@ -197,12 +198,6 @@ export class SandboxInstance {
     if (this.tunnel && !this.tunnel.isClosed) return this.tunnel.agentUrl;
     this.closeTunnel();
 
-    const open = this.deps.openSshTunnel;
-    if (!open) {
-      this.failConnect(SSH_TRANSPORT_ERROR, epoch);
-      return null;
-    }
-
     let opened: SshTunnelHandle | null = null;
     const callbacks: SshTunnelCallbacks = {
       onExit: (failure) => {
@@ -215,7 +210,7 @@ export class SandboxInstance {
       },
     };
 
-    const result = await open(this.config, callbacks);
+    const result = await this.deps.openSshTunnel(this.config, callbacks);
     if (!result.ok) {
       this.failConnect(result.error, epoch);
       return null;

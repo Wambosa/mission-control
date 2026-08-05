@@ -16,6 +16,7 @@ import {
 } from "./sandbox-settings";
 import { SandboxRegistry, type RegistryDeps } from "./sandbox-registry";
 import { readSshHostAliases } from "./ssh-hosts";
+import { isSafeSshAlias } from "../src/shared/ssh-config";
 import { probeSshHost } from "./ssh-provision-probe";
 import type { SshProbeOutcome } from "../src/shared/ssh-provision";
 import {
@@ -399,9 +400,10 @@ function openSshTunnelFor(
   config: SandboxConfig,
   cb: SshTunnelCallbacks,
 ): Promise<SshTunnelResult> {
+  // Last stop before the alias becomes an `ssh` argument.
   const alias = config.sshHost?.alias;
-  if (!alias) {
-    return Promise.resolve({ ok: false, error: "This SSH host is missing its alias." });
+  if (!alias || !isSafeSshAlias(alias)) {
+    return Promise.resolve({ ok: false, error: "This SSH host's alias is not usable." });
   }
   return openSshTunnel({ alias, remotePort: readSandboxSettings(kv()).agentPort }, cb);
 }

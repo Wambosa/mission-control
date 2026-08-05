@@ -64,22 +64,12 @@ const SSH_PREFIX_LOG = "log";
 const SSH_PREFIX_TMP = "tmp";
 const SSH_PREFIX_NPM_CACHE = "npm-cache";
 
-/** Node's own name for a platform in a release filename. */
-function nodePlatform(platform: SshHostPlatform): string {
-  return platform;
-}
-
-/** Node's own name for an architecture in a release filename. */
-function nodeArch(arch: SshHostArch): string {
-  return arch;
-}
-
 /**
  * Shared by every step: fail loudly, keep the prefix on PATH so a runtime this
  * sequence installed is the one later steps use, and keep npm's cache inside
  * the prefix so removing the host leaves nothing behind.
  */
-function prelude(prefix: string): string {
+export function sshPrefixPrelude(prefix: string): string {
   const quoted = shellQuote(prefix);
   return [
     "set -eu",
@@ -97,7 +87,7 @@ function createPrefixScript(prefix: string): string {
     .map((dir) => `"$MC_PREFIX/${dir}"`)
     .join(" ");
   return [
-    prelude(prefix),
+    sshPrefixPrelude(prefix),
     // 0700: the service env file under here holds the host's bearer secret.
     `mkdir -p ${dirs}`,
     `chmod 700 "$MC_PREFIX"`,
@@ -112,9 +102,10 @@ function createPrefixScript(prefix: string): string {
  * download, so nothing here pins a version that would rot.
  */
 function installRuntimeScript(prefix: string, platform: SshHostPlatform, arch: SshHostArch): string {
-  const slug = `${nodePlatform(platform)}-${nodeArch(arch)}`;
+  // The probe already normalizes to the names Node uses in a release filename.
+  const slug = `${platform}-${arch}`;
   return [
-    prelude(prefix),
+    sshPrefixPrelude(prefix),
     `mc_fetch() {`,
     `  if command -v curl >/dev/null 2>&1; then curl -fsSL "$1"`,
     `  elif command -v wget >/dev/null 2>&1; then wget -qO- "$1"`,
@@ -152,7 +143,7 @@ function installRuntimeScript(prefix: string, platform: SshHostPlatform, arch: S
  */
 function installAgentScript(prefix: string, agentVersion: string): string {
   return [
-    prelude(prefix),
+    sshPrefixPrelude(prefix),
     `npm install --global --prefix "$MC_PREFIX" --no-fund --no-audit ${shellQuote(`${REMOTE_AGENT_PACKAGE}@${agentVersion}`)}`,
     `if [ ! -x "$MC_PREFIX/${SSH_PREFIX_BIN}/${REMOTE_AGENT_COMMAND}" ]; then`,
     `  echo "${REMOTE_AGENT_COMMAND} is not in the prefix after install" >&2`,

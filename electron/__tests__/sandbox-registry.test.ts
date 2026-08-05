@@ -475,6 +475,174 @@ describe("SandboxInstance over SSH", () => {
   });
 });
 
+describe("SandboxInstance idle stop and teardown preference", () => {
+  /** An SSH host whose runtime the harness can watch being stopped. */
+  function idleHarness(options: { sessions?: number } = {}) {
+    const h = harness();
+    const stopped: string[] = [];
+    let sessions = options.sessions ?? 0;
+    const deps: RegistryDeps = {
+      ...h.deps,
+      countSshSessions: () => sessions,
+      stopSshRuntime: async (cfg) => void stopped.push(cfg.sshHost?.alias ?? cfg.id),
+    };
+    return { ...h, deps, stopped, setSessions: (n: number) => (sessions = n) };
+  }
+
+  it("leaves the runtime up on disconnect for a host set to persist", async () => {
+    const h = idleHarness();
+    const inst = new SandboxInstance(sshConfig("sb-ssh"), h.deps);
+    await inst.start();
+    await settle();
+
+    await inst.stop();
+
+    expect(h.stopped).toEqual([]);
+  });
+
+  it("stops the runtime on disconnect for a host set to tear down", async () => {
+    const h = idleHarness();
+    const cfg = sshConfig("sb-ssh");
+    const inst = new SandboxInstance(
+      { ...cfg, sshHost: { ...cfg.sshHost!, onDisconnect: "teardown" } },
+      h.deps,
+    );
+    await inst.start();
+    await settle();
+
+    await inst.stop();
+    await settle();
+
+    expect(h.stopped).toEqual(["workshop"]);
+  });
+
+  it("never stops a remote VM's runtime, which has no such preference", async () => {
+    const h = idleHarness();
+    const inst = new SandboxInstance(config("sb-1"), h.deps);
+    await inst.start();
+
+    await inst.stop();
+    await settle();
+
+    expect(h.stopped).toEqual([]);
+  });
+
+  it("stops an idle host once its window elapses (AE7)", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = idleHarness({ sessions: 0 });
+      const cfg = sshConfig("sb-ssh");
+      const inst = new SandboxInstance(
+        { ...cfg, sshHost: { ...cfg.sshHost!, idleWindowMinutes: 1 } },
+        h.deps,
+      );
+      await inst.start();
+      await vi.advanceTimersByTimeAsync(0);
+      h.lastAgentCb()!.onReady(EXPECTED_SANDBOX_AGENT_VERSION, {});
+
+      await vi.advanceTimersByTimeAsync(70_000);
+
+      expect(h.stopped).toEqual(["workshop"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds the runtime open for a session waiting at a prompt (AE6)", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = idleHarness({ sessions: 1 });
+      const cfg = sshConfig("sb-ssh");
+      const inst = new SandboxInstance(
+        { ...cfg, sshHost: { ...cfg.sshHost!, idleWindowMinutes: 1 } },
+        h.deps,
+      );
+      await inst.start();
+      await vi.advanceTimersByTimeAsync(0);
+      h.lastAgentCb()!.onReady(EXPECTED_SANDBOX_AGENT_VERSION, {});
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(h.stopped).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("restarts the idle clock when a session appears and then goes away", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = idleHarness({ sessions: 1 });
+      const cfg = sshConfig("sb-ssh");
+      const inst = new SandboxInstance(
+        { ...cfg, sshHost: { ...cfg.sshHost!, idleWindowMinutes: 2 } },
+        h.deps,
+      );
+      await inst.start();
+      await vi.advanceTimersByTimeAsync(0);
+      h.lastAgentCb()!.onReady(EXPECTED_SANDBOX_AGENT_VERSION, {});
+
+      // Busy well past the window, so nothing stops.
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(h.stopped).toEqual([]);
+
+      // The last session ends; the window starts from here, not from connect.
+      h.setSessions(0);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(h.stopped).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(80_000);
+      expect(h.stopped).toEqual(["workshop"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never stops a host whose idle window is zero", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = idleHarness({ sessions: 0 });
+      const cfg = sshConfig("sb-ssh");
+      const inst = new SandboxInstance(
+        { ...cfg, sshHost: { ...cfg.sshHost!, idleWindowMinutes: 0 } },
+        h.deps,
+      );
+      await inst.start();
+      await vi.advanceTimersByTimeAsync(0);
+      h.lastAgentCb()!.onReady(EXPECTED_SANDBOX_AGENT_VERSION, {});
+
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+
+      expect(h.stopped).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops watching once the instance is disposed", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = idleHarness({ sessions: 0 });
+      const cfg = sshConfig("sb-ssh");
+      const inst = new SandboxInstance(
+        { ...cfg, sshHost: { ...cfg.sshHost!, idleWindowMinutes: 1 } },
+        h.deps,
+      );
+      await inst.start();
+      await vi.advanceTimersByTimeAsync(0);
+      h.lastAgentCb()!.onReady(EXPECTED_SANDBOX_AGENT_VERSION, {});
+
+      inst.dispose();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      // Disposal is the app quitting, not the user asking for a teardown.
+      expect(h.stopped).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("SandboxRegistry", () => {
   it("keeps per-sandbox state isolated", async () => {
     const h = harness();

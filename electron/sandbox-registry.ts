@@ -19,6 +19,7 @@ import {
   type SshTunnelHandle,
   type SshTunnelResult,
 } from "./ssh-transport";
+import { sshDisconnectAction, sshIdleDecision } from "./ssh-idle-policy";
 
 // Phase 2 core: one remote agent connection per sandbox, all running
 // concurrently. This module owns the per-sandbox state machine + the staleness
@@ -51,6 +52,13 @@ export type RegistryDeps = {
    * for `ssh-host` sandboxes, whose agent URL exists only while the forward does.
    */
   openSshTunnel: (config: SandboxConfig, cb: SshTunnelCallbacks) => Promise<SshTunnelResult>;
+  /**
+   * Sessions on this host right now, running or waiting at a prompt. Only an
+   * `ssh-host` asks. Absent means the idle stop cannot run, so it does not.
+   */
+  countSshSessions?: (config: SandboxConfig) => number;
+  /** Stop an `ssh-host`'s runtime on the far side. */
+  stopSshRuntime?: (config: SandboxConfig) => Promise<void>;
 };
 
 const REMOTE_CONFIG_ERROR = "Remote sandbox is missing an agent URL or API key.";
@@ -59,6 +67,12 @@ const SSH_RECORD_ERROR = "This SSH host is missing its host record. Remove it an
 const SSH_UNPROVISIONED_ERROR = "This SSH host has not been provisioned yet.";
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 15_000;
+/**
+ * How often an SSH host is asked whether it has gone idle. Well under the
+ * shortest window a user would set, so the stop lands close to the deadline
+ * without polling the session store constantly.
+ */
+const IDLE_CHECK_MS = 30_000;
 
 export class SandboxInstance {
   readonly id: string;
@@ -82,6 +96,10 @@ export class SandboxInstance {
   // Only an `ssh-host` has one. Its agent URL lives and dies with the forward,
   // so a reconnect reopens the tunnel rather than reusing a stale port.
   private tunnel: SshTunnelHandle | null = null;
+  // The idle stop is a property of the runtime on the host, so it is watched
+  // for as long as this instance is connected to one.
+  private idleTimer: ReturnType<typeof setInterval> | null = null;
+  private idleSince: number | null = null;
 
   constructor(config: SandboxConfig, deps: RegistryDeps) {
     this.id = config.id;
@@ -260,6 +278,7 @@ export class SandboxInstance {
         if (this.agent !== handle || this.manualStop || epoch !== this.opEpoch) return;
         this.reconnectAttempts = 0;
         this.connectStartedAt = null;
+        this.startIdleWatch();
         if (isSandboxAgentVersionCurrent(version)) {
           this.set({ status: "connected", version, agents });
         } else {
@@ -337,13 +356,93 @@ export class SandboxInstance {
     old?.close();
   }
 
+  // ── The idle stop ────────────────────────────────────────────────────────
+
+  /**
+   * Watch a connected SSH host for going idle. Nothing to watch without a way
+   * to count sessions or a way to stop the runtime, so the timer never starts
+   * in that case rather than ticking to no purpose.
+   */
+  private startIdleWatch(): void {
+    if (this.idleTimer || !this.isSshHost) return;
+    if (!this.deps.countSshSessions || !this.deps.stopSshRuntime) return;
+    this.idleSince = Date.now();
+    this.idleTimer = setInterval(() => this.checkIdle(), IDLE_CHECK_MS);
+    // Node keeps the process alive for a pending interval; an idle check is
+    // never a reason for the app not to exit.
+    this.idleTimer.unref?.();
+  }
+
+  private stopIdleWatch(): void {
+    if (this.idleTimer) clearInterval(this.idleTimer);
+    this.idleTimer = null;
+    this.idleSince = null;
+  }
+
+  private checkIdle(): void {
+    const host = this.config.sshHost;
+    if (!host || !this.hasAgent) return;
+
+    const sessionCount = this.deps.countSshSessions?.(this.config) ?? 0;
+    // Any session at all restarts the clock, so the window always measures
+    // time since the host last had work — not time since it connected.
+    if (sessionCount > 0) {
+      this.idleSince = Date.now();
+      return;
+    }
+    if (this.idleSince == null) this.idleSince = Date.now();
+
+    const decision = sshIdleDecision({
+      sessionCount,
+      idleWindowMinutes: host.idleWindowMinutes,
+      idleSinceMs: Date.now() - this.idleSince,
+    });
+    if (decision.action !== "stop") return;
+
+    this.stopIdleWatch();
+    void this.stopRuntimeThenSelf();
+  }
+
+  /**
+   * Stop the runtime on the host, then this instance. A runtime that refuses
+   * to stop is not a reason to keep a connection the user is not using, so the
+   * local stop happens either way.
+   */
+  private async stopRuntimeThenSelf(): Promise<void> {
+    await this.stopRemoteRuntime();
+    await this.stop();
+  }
+
+  /** Ask the far side to stop, swallowing a host that cannot be reached. */
+  private async stopRemoteRuntime(): Promise<void> {
+    if (!this.isSshHost || !this.deps.stopSshRuntime) return;
+    try {
+      await this.deps.stopSshRuntime(this.config);
+    } catch {
+      /* an unreachable host has already stopped serving us */
+    }
+  }
+
+  /**
+   * What a disconnect means for the runtime on the far side. Persistence is
+   * the default; only a host the user set to tear down stops here.
+   */
+  private stopRuntimeIfTearDown(): void {
+    const host = this.config.sshHost;
+    if (!this.isSshHost || !host) return;
+    if (sshDisconnectAction(host.onDisconnect).action !== "stop") return;
+    void this.stopRemoteRuntime();
+  }
+
   async stop(): Promise<OpResult> {
     if (this.opInFlight) return { ok: false, error: "A sandbox operation is already in progress." };
     this.opInFlight = true;
     this.opEpoch += 1;
     this.manualStop = true;
     this.clearReconnect();
+    this.stopIdleWatch();
     try {
+      this.stopRuntimeIfTearDown();
       this.closeAgent();
       this.closeTunnel();
       this.connectStartedAt = null;
@@ -380,16 +479,22 @@ export class SandboxInstance {
     this.opEpoch += 1;
     this.manualStop = true;
     this.clearReconnect();
+    this.stopIdleWatch();
     this.closeAgent();
     this.closeTunnel();
     return { ok: true };
   }
 
-  /** Detach (app quit). */
+  /**
+   * Detach (app quit). Deliberately not a teardown: quitting Mission Control
+   * is what R14 promises sessions survive, and the runtime's own idle stop
+   * handles a host nobody comes back to.
+   */
   dispose(): void {
     this.opEpoch += 1;
     this.manualStop = true;
     this.clearReconnect();
+    this.stopIdleWatch();
     this.closeAgent();
     this.closeTunnel();
   }

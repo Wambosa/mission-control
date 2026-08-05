@@ -86,6 +86,8 @@ export const IPC = {
   sandboxDetectRemote: "sandbox:detect-remote",
   sshHostsList: "sshHosts:list",
   sshHostsProbe: "sshHosts:probe",
+  sshHostsProvision: "sshHosts:provision",
+  sshHostsProvisionProgress: "sshHosts:provisionProgress",
   remoteVmDeploy: "remoteVm:deploy",
   remoteVmStartDeploy: "remoteVm:startDeploy",
   remoteVmListDeployJobs: "remoteVm:listDeployJobs",

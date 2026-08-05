@@ -431,6 +431,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  /** Record a provisioned SSH host as a scope. Idempotent by alias. */
+  registerSshHost: (input: {
+    alias: string;
+    name: string;
+    prefix: string;
+    platform: "linux" | "darwin";
+    apiKey: string;
+  }) =>
+    req<{ sandbox: SandboxPublicView }>("/api/sandboxes/ssh-host", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   updateSandbox: (id: string, body: Record<string, unknown>) =>
     req<{ sandbox: SandboxPublicView }>(`/api/sandboxes/${id}`, {
       method: "PATCH",

@@ -18,11 +18,16 @@ import { SandboxRegistry, type RegistryDeps } from "./sandbox-registry";
 import { readSshHostAliases } from "./ssh-hosts";
 import { isSafeSshAlias } from "../src/shared/ssh-config";
 import { probeSshHost } from "./ssh-provision-probe";
-import { removeSshHost } from "./ssh-provision";
-import { stopSshService } from "./ssh-service-unit";
+import { removeSshHost, runSshProvision, sshProvisionCommands } from "./ssh-provision";
+import { installSshHarnesses } from "./ssh-provision-harnesses";
+import { generateSshApiKey, installSshService, stopSshService } from "./ssh-service-unit";
 import type { AgentCliUpdateTarget } from "./agent-cli-update";
 import { LOCAL_SCOPE_ID } from "../src/shared/sandbox";
-import type { SshHostPlatform, SshProbeOutcome } from "../src/shared/ssh-provision";
+import type {
+  SshHostPlatform,
+  SshProbeOutcome,
+  SshProvisionResult,
+} from "../src/shared/ssh-provision";
 import {
   openSshTunnel,
   type SshTunnelCallbacks,
@@ -1346,6 +1351,76 @@ export function registerSandboxManager(
         });
       }
       return probeSshHost(alias, { expectedAgentVersion: EXPECTED_SANDBOX_AGENT_VERSION });
+    },
+    ipcMain,
+  );
+  safeHandle(
+    IPC.sshHostsProvision,
+    async (event, alias: string): Promise<SshProvisionResult> => {
+      // Same guard as the probe: the SSH config is the only source of hosts.
+      if (!readSshHostAliases().includes(alias) || !isSafeSshAlias(alias)) {
+        return { ok: false, error: `"${alias}" is not a host in your SSH config.` };
+      }
+
+      const probed = await probeSshHost(alias, {
+        expectedAgentVersion: EXPECTED_SANDBOX_AGENT_VERSION,
+      });
+      if (!probed.ok) return { ok: false, error: probed.error };
+      if (!probed.plan.ok) return { ok: false, error: probed.plan.message };
+      const plan = probed.plan;
+      const homeDir = probed.probe.homeDir ?? "";
+
+      const sendProgress = (step: string, index: number, total: number) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send(IPC.sshHostsProvisionProgress, { alias, step, index, total });
+        }
+      };
+
+      // Harnesses and the service registration are steps the user waits on
+      // too, so they are counted into the same progress the prefix steps use.
+      const prefixSteps = sshProvisionCommands(plan).length;
+      const harnessSteps = plan.steps.filter((step) => step.kind === "harness").length;
+      const total = prefixSteps + harnessSteps + 1;
+
+      const provisioned = await runSshProvision(alias, plan, {
+        onProgress: ({ command, index, status }) => {
+          if (status === "running") sendProgress(command.label, index, total);
+        },
+      });
+      if (!provisioned.ok) return { ok: false, error: provisioned.error };
+
+      const harnessResults = await installSshHarnesses(alias, plan, {
+        onProgress: ({ agent, index, status }) => {
+          if (status === "running") sendProgress(`Installing ${agent}`, prefixSteps + index, total);
+        },
+      });
+
+      sendProgress("Registering the Mission Control service", total - 1, total);
+      const apiKey = generateSshApiKey();
+      const service = await installSshService(alias, {
+        platform: plan.platform,
+        homeDir,
+        prefix: plan.prefix,
+        agentPort: readSandboxSettings(kv()).agentPort,
+        apiKey,
+      });
+      if (!service.ok) return { ok: false, error: service.error };
+
+      return {
+        ok: true,
+        alias,
+        prefix: plan.prefix,
+        platform: plan.platform,
+        apiKey,
+        harnesses: harnessResults.map((result) => ({
+          agent: result.agent,
+          status: result.status,
+          detail: result.status === "installed" ? undefined : result.status === "failed" ? result.error : result.reason,
+        })),
+        // Without lingering, a Linux host stops the runtime when the user logs
+        // out — worth saying rather than promising persistence it cannot give.
+        survivesLogout: service.lingering !== "unavailable",
+      };
     },
     ipcMain,
   );

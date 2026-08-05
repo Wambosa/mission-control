@@ -245,6 +245,9 @@ async function dispatch(
   if (pathname === "/api/sandboxes/connect" && method === "POST") {
     return sandboxesController.connect(request);
   }
+  if (pathname === "/api/sandboxes/ssh-host" && method === "POST") {
+    return sandboxesController.registerSsh(request);
+  }
   if (pathname === "/api/sandboxes/active" && method === "PUT") {
     return sandboxesController.setActive(request);
   }

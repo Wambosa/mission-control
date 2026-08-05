@@ -74,6 +74,30 @@ export type SshProbeOutcome =
   | { ok: true; probe: SshProbeResult; plan: SshProvisionOutcome }
   | { ok: false; error: string };
 
+/**
+ * What provisioning a host produced, or why it stopped. The caller records the
+ * result as a scope; the API key was generated here and the user never sees,
+ * types, or pastes it — that absence is the point of R5.
+ */
+export type SshProvisionResult =
+  | {
+      ok: true;
+      alias: string;
+      /** The one directory Mission Control owns on the host. */
+      prefix: string;
+      platform: SshHostPlatform;
+      apiKey: string;
+      /** Per-harness outcome; one that failed did not fail the host. */
+      harnesses: Array<{
+        agent: TaskAgent;
+        status: "installed" | "failed" | "unavailable";
+        detail?: string;
+      }>;
+      /** False when the runtime will not survive the user logging out of the host. */
+      survivesLogout: boolean;
+    }
+  | { ok: false; error: string };
+
 export type SshProvisionRequirements = {
   /** The agent version this build of Mission Control speaks. */
   expectedAgentVersion: string;

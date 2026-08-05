@@ -41,6 +41,22 @@ export function sandboxUsableForProject(
  * project's sandboxes. Manually connected sandboxes appear on every project.
  * With no current project (e.g. the dashboard) the full list is returned.
  */
+/**
+ * Split the scope list into the two kinds of remote, in switcher order. A
+ * sandbox is a machine Mission Control created and can destroy; an SSH host is
+ * one the user owns and Mission Control only borrows. Presenting them as one
+ * undifferentiated list would suggest Mission Control can do the same things
+ * to both, which it deliberately cannot.
+ */
+export function groupScopesByKind<S extends ScopeSandbox>(
+  sandboxes: S[],
+): { sandboxes: S[]; sshHosts: S[] } {
+  return {
+    sandboxes: sandboxes.filter((s) => s.kind !== "ssh-host"),
+    sshHosts: sandboxes.filter((s) => s.kind === "ssh-host"),
+  };
+}
+
 export function scopedSandboxesForProject<S extends ScopeSandbox>(
   sandboxes: S[],
   allProjects: ScopeProject[],

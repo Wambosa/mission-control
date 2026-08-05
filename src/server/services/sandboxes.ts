@@ -2,13 +2,16 @@ import type { Sandbox } from "~/db/schema";
 import { MAX_TCP_PORT } from "~/shared/tcp-port";
 import { safeJsonParse } from "~/shared/safe-json";
 import {
+  DEFAULT_SSH_IDLE_WINDOW_MINUTES,
   LOCAL_SCOPE_ID,
   normalizeRemoteAgentUrl,
   parseSandboxImageProvenance,
+  parseSshHostConfig,
   type SandboxGitAuthMode,
   type SandboxPublicView,
   type SandboxRemoteConfig,
 } from "~/shared/sandbox";
+import type { SshHostPlatform } from "~/shared/ssh-provision";
 import { ACTIVE_SCOPE_KEY, SANDBOXES_ENABLED_KEY } from "~/db/migrate-multi-sandbox";
 import { randomUUID } from "node:crypto";
 import {
@@ -172,6 +175,66 @@ export function connectRemoteSandbox(
   const row = findSandboxById(id);
   // The row was just written; a miss is a server fault, not a bad request.
   if (!row) throw new Error("sandbox row missing after connect write");
+  return toPublicSandbox(row);
+}
+
+export type RegisterSshHostInput = {
+  /** Alias exactly as it appears in the user's SSH config. */
+  alias: string;
+  name: string;
+  /** Directory Mission Control provisioned into on the host. */
+  prefix: string;
+  platform: SshHostPlatform;
+  /** Bearer secret Mission Control generated for this host's runtime. */
+  apiKey: string;
+};
+
+/**
+ * Record a provisioned SSH host as a scope. Idempotent by alias: setting up a
+ * host twice — a retry, a re-provision after a failure — updates the one row
+ * rather than piling up duplicates of a machine the user has only one of.
+ *
+ * The row carries no agent URL. An SSH host's URL is the forward, which does
+ * not exist until it connects.
+ */
+export function registerSshHost(input: RegisterSshHostInput): SandboxPublicView {
+  const alias = input.alias.trim();
+  const now = Date.now();
+
+  const existing = findAllSandboxes().find((row) => {
+    if (row.kind !== "ssh-host") return false;
+    return parseSshHostConfig(parseRemoteConfig(row.remoteConfig))?.alias === alias;
+  });
+  const id = existing?.id ?? randomUUID();
+  const previous = existing ? parseRemoteConfig(existing.remoteConfig) : null;
+  const previousHost = parseSshHostConfig(previous);
+
+  const remoteConfig: SandboxRemoteConfig = {
+    agentUrl: "",
+    ssh: {
+      alias,
+      prefix: input.prefix,
+      platform: input.platform,
+      // Re-provisioning must not quietly reset choices the user made.
+      onDisconnect: previousHost?.onDisconnect ?? "persist",
+      idleWindowMinutes: previousHost?.idleWindowMinutes ?? DEFAULT_SSH_IDLE_WINDOW_MINUTES,
+    },
+    createdAt: previous?.createdAt ?? now,
+    updatedAt: now,
+  };
+
+  const fields = {
+    name: input.name.trim() || alias,
+    pairingToken: input.apiKey,
+    remoteConfig: JSON.stringify(remoteConfig),
+    updatedAt: now,
+  };
+  if (existing) updateSandboxRow(id, fields);
+  else insertSandbox({ id, kind: "ssh-host", createdAt: now, ...fields });
+
+  setBooleanSetting(SANDBOXES_ENABLED_KEY, true);
+  const row = findSandboxById(id);
+  if (!row) throw new Error("sandbox row missing after SSH host write");
   return toPublicSandbox(row);
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  groupScopesByKind,
   isManualRemoteSandbox,
   sandboxUsableForProject,
   scopedSandboxesForProject,
@@ -112,5 +113,40 @@ describe("sandboxUsableForProject", () => {
     expect(sandboxUsableForProject(aws, "p-a")).toBe(true);
     expect(sandboxUsableForProject(aws, "p-b")).toBe(false);
     expect(isManualRemoteSandbox(aws)).toBe(false);
+  });
+});
+
+describe("groupScopesByKind", () => {
+  const scope = (id: string, kind: string) => ({ id, kind, remoteProvider: null });
+
+  it("keeps SSH hosts apart from sandboxes, per KD8", () => {
+    const grouped = groupScopesByKind([
+      scope("vm-1", "remote-vm"),
+      scope("host-1", "ssh-host"),
+      scope("vm-2", "remote-vm"),
+    ]);
+
+    expect(grouped.sandboxes.map((s) => s.id)).toEqual(["vm-1", "vm-2"]);
+    expect(grouped.sshHosts.map((s) => s.id)).toEqual(["host-1"]);
+  });
+
+  it("preserves order within each group", () => {
+    const grouped = groupScopesByKind([
+      scope("host-b", "ssh-host"),
+      scope("host-a", "ssh-host"),
+    ]);
+
+    expect(grouped.sshHosts.map((s) => s.id)).toEqual(["host-b", "host-a"]);
+  });
+
+  it("puts a kind it does not know with the sandboxes rather than dropping it", () => {
+    const grouped = groupScopesByKind([scope("future", "warp-drive")]);
+
+    expect(grouped.sandboxes.map((s) => s.id)).toEqual(["future"]);
+    expect(grouped.sshHosts).toEqual([]);
+  });
+
+  it("handles an empty scope list", () => {
+    expect(groupScopesByKind([])).toEqual({ sandboxes: [], sshHosts: [] });
   });
 });

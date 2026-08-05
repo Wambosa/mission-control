@@ -2,6 +2,7 @@ import { X509Certificate } from "node:crypto";
 import { z } from "zod";
 import {
   connectRemoteSandbox,
+  registerSshHost,
   deleteSandbox,
   getSandboxState,
   revealSandboxApiKey,
@@ -39,6 +40,16 @@ const updateBody = z
 
 const activeBody = z.object({ scopeId: z.string().min(1) });
 const enabledBody = z.object({ enabled: z.boolean() });
+
+const sshHostBody = z.object({
+  // The alias is a name from the user's own SSH config, and it reaches an
+  // `ssh` argument list, so it is shape-checked before anything else.
+  alias: z.string().trim().min(1).max(120),
+  name: z.string().trim().min(1).max(60),
+  prefix: z.string().trim().min(1).max(4096),
+  platform: z.enum(["linux", "darwin"]),
+  apiKey: z.string().min(1).max(512),
+});
 
 const connectBody = z.object({
   name: z.string().trim().min(1).max(60),
@@ -81,6 +92,19 @@ function agentCaError(pem: string): string | null {
     return "CA certificate must be a valid PEM certificate.";
   }
   return null;
+}
+
+/**
+ * Record an SSH host Mission Control has just provisioned. Unlike `connect`
+ * there is no URL or certificate to validate: the transport is the user's own
+ * SSH, and the runtime is reachable only through the forward.
+ */
+export async function registerSsh(request: Request): Promise<Response> {
+  const blocked = localOnly(request);
+  if (blocked) return blocked;
+  const parsed = await parseJsonBody(request, sshHostBody);
+  if (!parsed.ok) return parsed.response;
+  return json({ sandbox: registerSshHost(parsed.data) });
 }
 
 /** Register an externally-provisioned remote sandbox (manual agent URL + key). */

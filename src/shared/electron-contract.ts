@@ -1,6 +1,6 @@
 import type { AgentCliUpdateRun } from "~/shared/agent-cli-update";
 import type { GitStatus, GitDiff } from "~/shared/git-status";
-import type { SshProbeOutcome } from "~/shared/ssh-provision";
+import type { SshProbeOutcome, SshProvisionResult } from "~/shared/ssh-provision";
 
 export const FILE_READ_ERRORS = ["invalid-path", "not-found", "binary", "too-large"] as const;
 export const FILE_WRITE_ERRORS = [
@@ -523,6 +523,15 @@ export type ElectronBridge = {
      * returned.
      */
     probe: (alias: string) => Promise<SshProbeOutcome>;
+    /**
+     * Install whatever the host is missing and register the runtime with the
+     * user's own service manager. Returns the material for the scope row; the
+     * caller records it. Progress arrives on `onProvisionProgress`.
+     */
+    provision: (alias: string) => Promise<SshProvisionResult>;
+    onProvisionProgress: (
+      cb: (e: { alias: string; step: string; index: number; total: number }) => void,
+    ) => () => void;
   };
   remoteVm: {
     deploy: (input: RemoteVmDeployInput) => Promise<RemoteVmDeployResult>;

@@ -404,8 +404,12 @@ export type ElectronBridge = {
     command: string,
     opts?: { verifyVersion?: boolean; fresh?: boolean },
   ) => Promise<CliCheckResult>;
-  /** Run the managed CLI's update command in the main process (input is only an agent id). */
-  cliRunUpdate: (agent: PtySpawnAgent) => Promise<AgentCliUpdateRun>;
+  /**
+   * Run the managed CLI's update command in the main process (input is only an
+   * agent id). Pass a sandbox id to update that host's own installation
+   * instead of this machine's; omit it for the local one.
+   */
+  cliRunUpdate: (agent: PtySpawnAgent, sandboxId?: string | null) => Promise<AgentCliUpdateRun>;
   pty: {
     spawn: (opts: PtySpawnOptions) => Promise<{ ptyId: string }>;
     write: (ptyId: string, data: string) => Promise<boolean>;

@@ -16,7 +16,13 @@ import {
 import { AGENT_META } from "~/lib/design-meta";
 import { getElectron } from "~/lib/electron";
 import { reorderPinnedIds } from "~/lib/pinned-project-order";
-import { queryKeys, useAgentAccounts, useAgentLatestVersions, useSettings } from "~/queries";
+import {
+  queryKeys,
+  useAgentAccounts,
+  useAgentLatestVersions,
+  useSandboxes,
+  useSettings,
+} from "~/queries";
 import { AGENT_REGISTRY } from "~/shared/agents";
 import {
   AGENT_CLI_CONFIG,
@@ -30,6 +36,7 @@ import {
 } from "~/shared/agent-launcher-config";
 import type { AgentLatestVersion } from "~/shared/agent-launchers";
 import type { TaskAgent } from "~/shared/domain";
+import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 
 const DRAG_THRESHOLD_PX = 4;
 
@@ -126,11 +133,19 @@ export function ProvidersSettingsPage() {
   const config = settings?.agentLauncherConfig ?? DEFAULT_AGENT_LAUNCHER_CONFIG;
   const { data: accounts } = useAgentAccounts();
   const { data: latestVersions } = useAgentLatestVersions();
+  const { data: scopes } = useSandboxes();
   const { copied, copy } = useCopy();
   const [refreshing, setRefreshing] = useState<Partial<Record<TaskAgent, boolean>>>({});
   const [updating, setUpdating] = useState<Partial<Record<TaskAgent, boolean>>>({});
 
   const { installed, refreshInstalled } = useInstalledVersions(config.order);
+
+  /** How to name the machine an update lands on, in a toast. */
+  const scopeLabel = useMemo(() => {
+    const id = scopes?.activeScopeId;
+    if (!id || id === LOCAL_SCOPE_ID) return "this machine";
+    return scopes?.sandboxes.find((s) => s.id === id)?.name ?? "the active scope";
+  }, [scopes?.activeScopeId, scopes?.sandboxes]);
 
   const accountByAgent = useMemo(
     () => new Map((accounts ?? []).map((account) => [account.agent, account])),
@@ -287,16 +302,24 @@ export function ProvidersSettingsPage() {
     const electron = getElectron();
     if (!electron?.cliRunUpdate) return;
     const label = AGENT_META[agent].label;
+    // An update acts on whichever machine the active scope names. Updating
+    // this laptop while the user is working on a remote host would be the
+    // wrong installation entirely.
+    const scopeId = scopes?.activeScopeId ?? null;
+    const onRemote = !!scopeId && scopeId !== LOCAL_SCOPE_ID;
+    const where = onRemote ? ` on ${scopeLabel}` : "";
     setUpdating((current) => ({ ...current, [agent]: true }));
-    const toastId = mcToastLoading(`Updating ${label}…`, {
+    const toastId = mcToastLoading(`Updating ${label}${where}…`, {
       description: "This can take a few minutes.",
     });
     try {
-      const result = await electron.cliRunUpdate(agent);
+      const result = await electron.cliRunUpdate(agent, scopeId);
       if (result.ok) {
         toast.success(
-          result.version ? `${label} updated to v${result.version}` : `${label} update finished`,
-          { id: toastId, description: result.command },
+          result.version
+            ? `${label} updated to v${result.version}${where}`
+            : `${label} update finished${where}`,
+          { id: toastId, description: result.command ?? undefined },
         );
       } else {
         toast.dismiss(toastId);

@@ -16,6 +16,8 @@ import {
 import { resolveAgentCommandOnPath } from "./agent-cli-resolution";
 import { sanitizedProcessEnv, resolveShell } from "./shell-env";
 import { checkAgentCliVersion, clearAgentCliVersionCache } from "./agent-cli-version";
+import { updateSshHarness } from "./ssh-provision-harnesses";
+import type { SshExec } from "./ssh-exec";
 
 // npm/brew installs routinely take minutes on cold caches; the timeout only
 // guards against a truly hung installer.
@@ -135,25 +137,58 @@ async function executeUpdate(agent: TaskAgent): Promise<AgentCliUpdateRun> {
   return { ok: true, agent, command, version: check.version ?? null };
 }
 
-const inflightUpdates = new Map<TaskAgent, Promise<AgentCliUpdateRun>>();
+/**
+ * Which machine an update acts on. A harness on a remote host is that host's
+ * installation, so updating it must never reach for the local one — the whole
+ * point of R12.
+ */
+export type AgentCliUpdateTarget =
+  | { kind: "local" }
+  | { kind: "ssh-host"; alias: string; prefix: string };
+
+const LOCAL_TARGET: AgentCliUpdateTarget = { kind: "local" };
+
+async function executeRemoteUpdate(
+  agent: TaskAgent,
+  target: Extract<AgentCliUpdateTarget, { kind: "ssh-host" }>,
+  exec?: SshExec,
+): Promise<AgentCliUpdateRun> {
+  const result = await updateSshHarness(target.alias, agent, target.prefix, exec);
+  if (result.ok) return { ok: true, agent, command: null, version: result.version };
+  if (result.reason === "no-update-command") return { ok: false, agent, reason: "no-update-command" };
+  return { ok: false, agent, reason: "failed", output: result.output };
+}
+
+const inflightUpdates = new Map<string, Promise<AgentCliUpdateRun>>();
 
 /**
  * Run the update command for a managed agent CLI. Input is an untrusted
  * renderer string — it is only ever used to index the compiled-in config.
- * Single-flight per agent: a second call while one runs joins the first.
+ * Single-flight per agent *and target*, so updating a harness on a host does
+ * not join, or get joined by, an update of the local copy.
  */
-export function runAgentCliUpdate(agentInput: string): Promise<AgentCliUpdateRun> {
+export function runAgentCliUpdate(
+  agentInput: string,
+  target: AgentCliUpdateTarget = LOCAL_TARGET,
+  options: { exec?: SshExec } = {},
+): Promise<AgentCliUpdateRun> {
   const agent = (MANAGED_AGENTS as readonly string[]).includes(agentInput)
     ? (agentInput as TaskAgent)
     : null;
   if (!agent) {
     return Promise.resolve({ ok: false, agent: agentInput as TaskAgent, reason: "unsupported-agent" });
   }
-  const running = inflightUpdates.get(agent);
+
+  const key = target.kind === "local" ? `local:${agent}` : `${target.alias}:${agent}`;
+  const running = inflightUpdates.get(key);
   if (running) return running;
-  const run = executeUpdate(agent).finally(() => {
-    inflightUpdates.delete(agent);
+  const run = (
+    target.kind === "local"
+      ? executeUpdate(agent)
+      : executeRemoteUpdate(agent, target, options.exec)
+  ).finally(() => {
+    inflightUpdates.delete(key);
   });
-  inflightUpdates.set(agent, run);
+  inflightUpdates.set(key, run);
   return run;
 }

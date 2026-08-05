@@ -18,7 +18,9 @@ import type { TaskAgent } from "./domain";
 export type AgentCliInstallMethod = "npm" | "homebrew" | "other";
 
 export type AgentCliUpdateRun =
-  | { ok: true; agent: TaskAgent; command: string; version: string | null }
+  // `command` is null for a remote update: the work happened on the host, and
+  // there is no local shell command to name.
+  | { ok: true; agent: TaskAgent; command: string | null; version: string | null }
   | {
       ok: false;
       agent: TaskAgent;

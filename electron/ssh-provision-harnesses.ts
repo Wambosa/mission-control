@@ -47,7 +47,7 @@ export type SshHarnessOptions = {
  * installer decides — usually `~/.local/bin` — which R8 rules out and removing
  * the host could not clean up. Such a harness is reported, not force-fitted.
  */
-function harnessInstallScript(agent: TaskAgent, prefix: string): SshHarnessInstall {
+export function harnessInstallScript(agent: TaskAgent, prefix: string): SshHarnessInstall {
   const config = AGENT_CLI_CONFIG[agent];
   if (!config.npmPackage) {
     return {
@@ -67,6 +67,40 @@ function harnessInstallScript(agent: TaskAgent, prefix: string): SshHarnessInsta
       "",
     ].join("\n"),
   };
+}
+
+export type SshHarnessUpdate =
+  | { ok: true; version: string | null }
+  | { ok: false; reason: "no-update-command" }
+  | { ok: false; reason: "failed"; output: string };
+
+/**
+ * Update a harness on a host, in that host's own prefix. Installing `@latest`
+ * over the prefix copy *is* the update — the prefix is Mission Control's, so
+ * there is nothing of the user's to disturb.
+ *
+ * A harness with no npm package was never installed into the prefix (see
+ * {@link harnessInstallScript}), so there is nothing here to update and the
+ * user's own copy is not ours to touch.
+ */
+export async function updateSshHarness(
+  alias: string,
+  agent: TaskAgent,
+  prefix: string,
+  exec: SshExec = defaultSshExec,
+): Promise<SshHarnessUpdate> {
+  const install = harnessInstallScript(agent, prefix);
+  if (install.kind !== "install") return { ok: false, reason: "no-update-command" };
+
+  const config = AGENT_CLI_CONFIG[agent];
+  // Report the version back in the same round trip, read through the prefix
+  // PATH so it is the host's copy that answers, never this machine's.
+  const script = `${install.script}${shellQuote(`${prefix}/bin/${config.command}`)} --version 2>/dev/null | head -n 1 || true\n`;
+  const result = await exec(sshShellArgs(alias), script);
+  if (result.code !== 0) {
+    return { ok: false, reason: "failed", output: sshStepFailure(install.label, result) };
+  }
+  return { ok: true, version: result.stdout.trim() || null };
 }
 
 /** What the plan's harness gaps turn into, in plan order. */

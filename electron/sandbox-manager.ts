@@ -20,6 +20,8 @@ import { isSafeSshAlias } from "../src/shared/ssh-config";
 import { probeSshHost } from "./ssh-provision-probe";
 import { removeSshHost } from "./ssh-provision";
 import { stopSshService } from "./ssh-service-unit";
+import type { AgentCliUpdateTarget } from "./agent-cli-update";
+import { LOCAL_SCOPE_ID } from "../src/shared/sandbox";
 import type { SshHostPlatform, SshProbeOutcome } from "../src/shared/ssh-provision";
 import {
   openSshTunnel,
@@ -435,6 +437,24 @@ function countSshSessions(config: SandboxConfig): number {
   let count = 0;
   for (const owner of ptyOwner.values()) if (owner === config.id) count += 1;
   return count;
+}
+
+/**
+ * Where a harness update should run for a given scope. Returns null for a
+ * scope that names an SSH host we cannot address — deliberately never falling
+ * back to local, because silently updating this machine when the user asked
+ * about their host is the exact confusion R12 exists to remove.
+ */
+export function agentCliUpdateTargetFor(
+  sandboxId: string | null | undefined,
+): AgentCliUpdateTarget | null {
+  if (!sandboxId || sandboxId === LOCAL_SCOPE_ID) return { kind: "local" };
+  const config = configFor(sandboxId);
+  if (!config) return null;
+  if (config.kind !== "ssh-host") return { kind: "local" };
+  const host = config.sshHost;
+  if (!host?.prefix || !isSafeSshAlias(host.alias)) return null;
+  return { kind: "ssh-host", alias: host.alias, prefix: host.prefix };
 }
 
 /** Ask a host to stop its runtime, leaving it registered to start again. */

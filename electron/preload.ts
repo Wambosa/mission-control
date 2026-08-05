@@ -429,8 +429,8 @@ const electronAPI = {
       }
   > =>
     ipcRenderer.invoke(IPC.cliCheck, command, opts),
-  cliRunUpdate: (agent: string): Promise<
-    | { ok: true; agent: string; command: string; version: string | null }
+  cliRunUpdate: (agent: string, sandboxId?: string | null): Promise<
+    | { ok: true; agent: string; command: string | null; version: string | null }
     | {
         ok: false;
         agent: string;
@@ -440,7 +440,7 @@ const electronAPI = {
         output?: string;
       }
   > =>
-    ipcRenderer.invoke(IPC.cliRunUpdate, agent),
+    ipcRenderer.invoke(IPC.cliRunUpdate, agent, sandboxId ?? null),
   pty: {
     spawn: (opts: {
       taskId: string;

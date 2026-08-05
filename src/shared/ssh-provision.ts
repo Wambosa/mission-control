@@ -92,6 +92,14 @@ export function sshPrefixPath(homeDir: string): string {
   return `${homeDir.replace(/\/+$/, "")}/.mission-control`;
 }
 
+/**
+ * POSIX single-quoting. Every host path Mission Control interpolates into a
+ * script goes through here, because a home directory is the user's to name.
+ */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 function normalizePlatform(uname: string): string {
   const value = uname.trim().toLowerCase();
   if (value === "darwin") return "darwin";

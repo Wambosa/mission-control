@@ -1,6 +1,11 @@
 import { EXPECTED_SANDBOX_AGENT_VERSION } from "./sandbox-types";
-import { defaultSshExec, shellQuote, sshShellArgs, type SshExec } from "./ssh-exec";
-import { classifySshFailure } from "./ssh-transport";
+import {
+  defaultSshExec,
+  shellQuote,
+  sshShellArgs,
+  sshStepFailure,
+  type SshExec,
+} from "./ssh-exec";
 import {
   REMOTE_AGENT_COMMAND,
   REMOTE_AGENT_PACKAGE,
@@ -199,14 +204,6 @@ export function sshProvisionCommands(
   return commands;
 }
 
-function stepFailure(command: SshProvisionCommand, stderr: string, code: number | null): string {
-  // 255 is ssh's own exit code, not the script's — the connection is the
-  // failure, and SSH says why better than we could.
-  if (code === 255 || code === null) return classifySshFailure(stderr, code).message;
-  const detail = stderr.trim().split(/\r?\n/).filter(Boolean).at(-1);
-  return detail ? `${command.label} failed: ${detail}` : `${command.label} failed (exit ${code}).`;
-}
-
 /**
  * Walk the sequence against a host, one SSH exec per step. A step that fails
  * stops the run and names itself, because a half-built prefix is worth
@@ -226,11 +223,7 @@ export async function runSshProvision(
     const result = await exec(sshShellArgs(alias), command.script);
     if (result.code !== 0) {
       options.onProgress?.({ command, index, total, status: "failed" });
-      return {
-        ok: false,
-        failedStep: command.id,
-        error: stepFailure(command, result.stderr, result.code),
-      };
+      return { ok: false, failedStep: command.id, error: sshStepFailure(command.label, result) };
     }
     options.onProgress?.({ command, index, total, status: "done" });
   }

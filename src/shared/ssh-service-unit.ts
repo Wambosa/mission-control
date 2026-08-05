@@ -1,4 +1,4 @@
-import { REMOTE_AGENT_COMMAND, type SshHostPlatform } from "./ssh-provision";
+import { REMOTE_AGENT_COMMAND, shellQuote, type SshHostPlatform } from "./ssh-provision";
 
 // The runtime on a host belongs to the SSH user's own service manager, not to
 // the client that provisioned it — that is what lets sessions outlive Mission
@@ -84,10 +84,6 @@ function servicePaths(description: SshServiceDescription): {
     runner: `${prefix}/service/run-agent.sh`,
     logFile: `${prefix}/log/agent.log`,
   };
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function xmlEscape(value: string): string {

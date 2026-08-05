@@ -1,7 +1,13 @@
 import { AGENT_CLI_CONFIG } from "../src/shared/agent-cli-config";
 import type { TaskAgent } from "../src/shared/domain";
 import type { SshProvisionPlan } from "../src/shared/ssh-provision";
-import { defaultSshExec, shellQuote, sshShellArgs, type SshExec } from "./ssh-exec";
+import {
+  defaultSshExec,
+  shellQuote,
+  sshShellArgs,
+  sshStepFailure,
+  type SshExec,
+} from "./ssh-exec";
 import { sshPrefixPrelude } from "./ssh-provision";
 
 // Harness CLIs go into the same prefix the runtime and agent did, during first
@@ -70,11 +76,6 @@ export function sshHarnessInstalls(plan: SshProvisionPlan): SshHarnessInstall[] 
     .map((step) => harnessInstallScript(step.agent, plan.prefix));
 }
 
-function installFailure(label: string, stderr: string, code: number | null): string {
-  const detail = stderr.trim().split(/\r?\n/).filter(Boolean).at(-1);
-  return detail ? `${label} failed: ${detail}` : `${label} failed (exit ${code ?? "unknown"}).`;
-}
-
 /**
  * Install each missing harness against a host, one SSH exec each. Unlike the
  * prefix sequence this does not stop at a failure: the host is still worth
@@ -112,7 +113,7 @@ export async function installSshHarnesses(
       results.push({
         agent: install.agent,
         status: "failed",
-        error: installFailure(install.label, outcome.stderr, outcome.code),
+        error: sshStepFailure(install.label, outcome),
       });
     }
   }

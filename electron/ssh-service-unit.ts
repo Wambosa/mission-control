@@ -6,8 +6,13 @@ import {
   type SshServiceDescription,
   type SshServiceFile,
 } from "../src/shared/ssh-service-unit";
-import { defaultSshExec, shellQuote, sshShellArgs, type SshExec } from "./ssh-exec";
-import { classifySshFailure } from "./ssh-transport";
+import {
+  defaultSshExec,
+  shellQuote,
+  sshShellArgs,
+  sshStepFailure,
+  type SshExec,
+} from "./ssh-exec";
 
 // Writing the rendered service onto a host and handing it to the user's own
 // service manager. Everything here runs as the SSH user: `systemctl --user`
@@ -108,14 +113,6 @@ function readLingering(
   return stdout.includes(`${LINGER_MARKER}enabled`) ? "enabled" : "unavailable";
 }
 
-function installFailure(stderr: string, code: number | null): string {
-  if (code === 255 || code === null) return classifySshFailure(stderr, code).message;
-  const detail = stderr.trim().split(/\r?\n/).filter(Boolean).at(-1);
-  return detail
-    ? `Could not register the Mission Control service on this host: ${detail}`
-    : `Could not register the Mission Control service on this host (exit ${code}).`;
-}
-
 /**
  * Register the runtime with the host user's service manager. One SSH exec:
  * the files and the registration travel together, so a host is never left with
@@ -129,7 +126,7 @@ export async function installSshService(
   const definition = sshServiceDefinition(description);
   const result = await exec(sshShellArgs(alias), sshServiceInstallScript(description));
   if (result.code !== 0) {
-    return { ok: false, error: installFailure(result.stderr, result.code) };
+    return { ok: false, error: sshStepFailure("Registering the Mission Control service", result) };
   }
   return {
     ok: true,

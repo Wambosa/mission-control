@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn } from "node:child_process";
-import { SSH_COMMON_OPTIONS } from "./ssh-transport";
+import { classifySshFailure, SSH_COMMON_OPTIONS } from "./ssh-transport";
 
 // One-shot commands over SSH. The probe reads, provisioning writes, and both
 // want the same thing: a POSIX shell on the far side fed a script it never has
@@ -31,10 +31,18 @@ export const defaultSshExec: SshExec = (args, stdin) =>
     child.stdin.end(stdin);
   });
 
+export { shellQuote } from "../src/shared/ssh-provision";
+
 /**
- * POSIX single-quoting. Every host path Mission Control interpolates into a
- * script goes through here, because a home directory is the user's to name.
+ * Why a step against a host did not work. Exit 255 is `ssh` itself refusing —
+ * a host key, a login, an unreachable machine — and SSH says why better than
+ * any wrapper could, so that message passes through untouched. Anything else
+ * is the script's own failure, named by the step that ran it.
  */
-export function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
+export function sshStepFailure(step: string, result: SshExecResult): string {
+  if (result.code === 255 || result.code === null) {
+    return classifySshFailure(result.stderr, result.code).message;
+  }
+  const detail = result.stderr.trim().split(/\r?\n/).filter(Boolean).at(-1);
+  return detail ? `${step} failed: ${detail}` : `${step} failed (exit ${result.code}).`;
 }

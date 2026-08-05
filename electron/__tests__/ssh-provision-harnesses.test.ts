@@ -90,6 +90,22 @@ describe("installSshHarnesses", () => {
     expect(results[1]).toEqual({ agent: "opencode", status: "installed" });
   });
 
+  it("surfaces an SSH refusal in SSH's terms rather than as an install failure", async () => {
+    const run: SshExec = async () => ({
+      code: 255,
+      stdout: "",
+      stderr: "Host key verification failed.\n",
+    });
+
+    const [result] = await installSshHarnesses("workshop", plan(["codex"]), { exec: run });
+
+    expect(result).toMatchObject({ agent: "codex", status: "failed" });
+    expect(result).toHaveProperty(
+      "error",
+      expect.stringMatching(/will not accept a host key on your behalf/i),
+    );
+  });
+
   it("never touches the host for a harness it cannot install into the prefix", async () => {
     const run = vi.fn<SshExec>(async () => ({ code: 0, stdout: "", stderr: "" }));
 

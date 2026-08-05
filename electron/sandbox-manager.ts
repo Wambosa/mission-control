@@ -17,6 +17,11 @@ import {
 import { SandboxRegistry, type RegistryDeps } from "./sandbox-registry";
 import { readSshHostAliases } from "./ssh-hosts";
 import {
+  openSshTunnel,
+  type SshTunnelCallbacks,
+  type SshTunnelResult,
+} from "./ssh-transport";
+import {
   listSandboxConfigs,
   readActiveSandboxId,
   readSandboxConfig,
@@ -387,9 +392,21 @@ function connectAgent(
   };
 }
 
+/** Forward an SSH host's loopback runtime port back to a loopback port here. */
+function openSshTunnelFor(
+  config: SandboxConfig,
+  cb: SshTunnelCallbacks,
+): Promise<SshTunnelResult> {
+  const alias = config.sshHost?.alias;
+  if (!alias) {
+    return Promise.resolve({ ok: false, error: "This SSH host is missing its alias." });
+  }
+  return openSshTunnel({ alias, remotePort: readSandboxSettings(kv()).agentPort }, cb);
+}
+
 function getRegistry(): SandboxRegistry {
   if (registry) return registry;
-  const deps: RegistryDeps = { connectAgent, emitState };
+  const deps: RegistryDeps = { connectAgent, emitState, openSshTunnel: openSshTunnelFor };
   registry = new SandboxRegistry(deps);
   return registry;
 }

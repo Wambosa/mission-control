@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { SandboxInstance, SandboxRegistry, type RegistryDeps, type AgentCallbacks } from "../sandbox-registry";
 import { EXPECTED_SANDBOX_AGENT_VERSION, type SandboxConfig, type SandboxState } from "../sandbox-types";
+import type { SshFailure, SshTunnelCallbacks, SshTunnelResult } from "../ssh-transport";
+import { DEFAULT_SSH_IDLE_WINDOW_MINUTES } from "../../src/shared/sandbox";
 
 function config(id: string): SandboxConfig {
   return {
@@ -24,23 +26,86 @@ function config(id: string): SandboxConfig {
   };
 }
 
+function sshConfig(id: string, alias = "workshop"): SandboxConfig {
+  return {
+    ...config(id),
+    kind: "ssh-host",
+    // An SSH host has no persisted URL — the forward supplies one per attempt.
+    remoteAgentUrl: null,
+    sshHost: {
+      alias,
+      prefix: "/home/sam/.mission-control",
+      onDisconnect: "persist",
+      idleWindowMinutes: DEFAULT_SSH_IDLE_WINDOW_MINUTES,
+    },
+  };
+}
+
+/** One `ssh` forward the harness handed out, plus the levers to end it. */
+type TunnelDouble = {
+  alias: string | undefined;
+  localPort: number;
+  closed: boolean;
+  /** Simulate `ssh` exiting on its own. */
+  die: (failure: SshFailure) => void;
+};
+
 type Harness = {
   deps: RegistryDeps;
   states: (id: string) => string[];
   lastAgentCb: () => AgentCallbacks | null;
+  lastAgentUrl: () => string | null;
   connectCount: () => number;
   setConnectBudgetMs: (ms: number) => void;
+  tunnels: TunnelDouble[];
+  failTunnelOpen: (error: string) => void;
 };
 
 function harness(): Harness {
   const emitted = new Map<string, string[]>();
   let agentCb: AgentCallbacks | null = null;
+  let agentUrl: string | null = null;
   let connects = 0;
   let budgetMs = 180_000;
+  let openError: string | null = null;
+  let nextPort = 40_000;
+  const tunnels: TunnelDouble[] = [];
+
+  const openSshTunnel = (
+    cfg: SandboxConfig,
+    cb: SshTunnelCallbacks,
+  ): Promise<SshTunnelResult> => {
+    if (openError) return Promise.resolve({ ok: false, error: openError });
+    const localPort = nextPort++;
+    const entry: TunnelDouble = {
+      alias: cfg.sshHost?.alias,
+      localPort,
+      closed: false,
+      die: (failure) => {
+        entry.closed = true;
+        cb.onExit(failure);
+      },
+    };
+    tunnels.push(entry);
+    return Promise.resolve({
+      ok: true,
+      tunnel: {
+        agentUrl: `ws://127.0.0.1:${localPort}/`,
+        localPort,
+        get isClosed() {
+          return entry.closed;
+        },
+        close: () => {
+          entry.closed = true;
+        },
+      },
+    });
+  };
 
   const deps: RegistryDeps = {
-    connectAgent: (_c, _p, _t, cb) => {
+    connectAgent: (_c, url, _t, cb) => {
       agentCb = cb;
+      agentUrl = url;
       connects += 1;
       return { close: () => {} };
     },
@@ -50,16 +115,23 @@ function harness(): Harness {
       emitted.set(id, arr);
     },
     connectBudgetMs: () => budgetMs,
+    openSshTunnel,
   };
 
   return {
     deps,
     states: (id) => emitted.get(id) ?? [],
     lastAgentCb: () => agentCb,
+    lastAgentUrl: () => agentUrl,
     connectCount: () => connects,
     setConnectBudgetMs: (ms) => (budgetMs = ms),
+    tunnels,
+    failTunnelOpen: (error) => (openError = error),
   };
 }
+
+/** Let the SSH connect path's awaits settle before asserting. */
+const settle = (): Promise<void> => new Promise((resolve) => process.nextTick(resolve));
 
 describe("SandboxInstance lifecycle", () => {
   it("starts → running → connected when the agent reports a current version", async () => {
@@ -212,6 +284,194 @@ describe("SandboxInstance lifecycle", () => {
     await inst.rebuild();
     expect(inst.state.status).toBe("running");
     expect(h.connectCount()).toBe(2); // initial start, then rebuild reconnect
+  });
+});
+
+describe("SandboxInstance over SSH", () => {
+  it("connects through the loopback port the forward hands back", async () => {
+    const h = harness();
+    const inst = new SandboxInstance(sshConfig("sb-ssh"), h.deps);
+
+    await inst.start();
+    await settle();
+
+    expect(h.tunnels).toHaveLength(1);
+    expect(h.tunnels[0].alias).toBe("workshop");
+    expect(h.lastAgentUrl()).toBe(`ws://127.0.0.1:${h.tunnels[0].localPort}/`);
+
+    h.lastAgentCb()!.onReady(EXPECTED_SANDBOX_AGENT_VERSION, { claude: "2.1" });
+    expect(inst.state.status).toBe("connected");
+  });
+
+  it("surfaces SSH's host key refusal and never reaches connected", async () => {
+    const h = harness();
+    const inst = new SandboxInstance(sshConfig("sb-ssh"), h.deps);
+    await inst.start();
+    await settle();
+
+    h.tunnels[0].die({
+      kind: "host-key",
+      message: "SSH refused this host: Host key verification failed.",
+    });
+
+    expect(inst.state).toMatchObject({
+      status: "error",
+      message: expect.stringMatching(/host key verification failed/i),
+    });
+    expect(h.states("sb-ssh")).not.toContain("connected");
+  });
+
+  it("errors without opening a forward when the host record is missing", async () => {
+    const h = harness();
+    const inst = new SandboxInstance({ ...sshConfig("sb-ssh"), sshHost: null }, h.deps);
+
+    const result = await inst.start();
+    await settle();
+
+    expect(result.ok).toBe(false);
+    expect(inst.state.status).toBe("error");
+    expect(h.tunnels).toHaveLength(0);
+    expect(h.connectCount()).toBe(0);
+  });
+
+  it("reports a host it has not provisioned yet rather than dialing it", async () => {
+    const h = harness();
+    const inst = new SandboxInstance({ ...sshConfig("sb-ssh"), pairingToken: null }, h.deps);
+
+    const result = await inst.start();
+    await settle();
+
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/not been provisioned/i) });
+    expect(h.tunnels).toHaveLength(0);
+  });
+
+  it("surfaces a forward that could not be opened at all", async () => {
+    const h = harness();
+    h.failTunnelOpen("This SSH host is missing its alias.");
+    const inst = new SandboxInstance(sshConfig("sb-ssh"), h.deps);
+
+    await inst.start();
+    await settle();
+
+    expect(inst.state).toMatchObject({ status: "error", message: /missing its alias/ });
+    expect(h.connectCount()).toBe(0);
+  });
+
+  it("tears the forward down on stop, leaving no ssh behind", async () => {
+    const h = harness();
+    const inst = new SandboxInstance(sshConfig("sb-ssh"), h.deps);
+    await inst.start();
+    await settle();
+    expect(h.tunnels[0].closed).toBe(false);
+
+    await inst.stop();
+
+    expect(h.tunnels[0].closed).toBe(true);
+  });
+
+  it("tears the forward down on dispose", async () => {
+    const h = harness();
+    const inst = new SandboxInstance(sshConfig("sb-ssh"), h.deps);
+    await inst.start();
+    await settle();
+
+    inst.dispose();
+
+    expect(h.tunnels[0].closed).toBe(true);
+  });
+
+  it("gives two hosts connected at once their own forwards", async () => {
+    const h = harness();
+    const reg = new SandboxRegistry(h.deps);
+
+    await reg.start(sshConfig("sb-a", "workshop"));
+    await reg.start(sshConfig("sb-b", "attic"));
+    await settle();
+
+    expect(h.tunnels.map((t) => t.alias)).toEqual(["workshop", "attic"]);
+    expect(h.tunnels[0].localPort).not.toBe(h.tunnels[1].localPort);
+  });
+
+  it("reopens the forward on the existing backoff when ssh drops for a passing reason", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      const inst = new SandboxInstance(sshConfig("sb-ssh"), h.deps);
+      await inst.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.connectCount()).toBe(1);
+
+      // The laptop slept: ssh times out, and the agent WS drops with it. Both
+      // paths must land on one retry, not two competing timers.
+      h.tunnels[0].die({ kind: "network", message: "Could not reach this host over SSH." });
+      h.lastAgentCb()!.onClose();
+      expect(inst.state.status).toBe("running");
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(h.connectCount()).toBe(2);
+      expect(h.tunnels).toHaveLength(2);
+      expect(h.lastAgentUrl()).toBe(`ws://127.0.0.1:${h.tunnels[1].localPort}/`);
+
+      // Nothing else dropped, so nothing else retries.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(h.connectCount()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps retrying a refused loopback port — the runtime may still be starting", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      const inst = new SandboxInstance(sshConfig("sb-ssh"), h.deps);
+      await inst.start();
+      await vi.advanceTimersByTimeAsync(0);
+
+      h.lastAgentCb()!.onError?.(new Error("connect ECONNREFUSED 127.0.0.1:40000"));
+
+      expect(inst.state.status).toBe("running");
+      h.lastAgentCb()!.onClose();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(h.connectCount()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still gives up on an unauthorized agent, forward or not", async () => {
+    const h = harness();
+    const inst = new SandboxInstance(sshConfig("sb-ssh"), h.deps);
+    await inst.start();
+    await settle();
+
+    h.lastAgentCb()!.onError?.(new Error("Unexpected server response: 401"));
+
+    expect(inst.state).toMatchObject({ status: "error", message: /Invalid API key/i });
+    expect(h.tunnels[0].closed).toBe(true);
+  });
+
+  it("times out with SSH wording rather than pointing at a URL and key", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      h.setConnectBudgetMs(5_000);
+      const inst = new SandboxInstance(sshConfig("sb-ssh"), h.deps);
+      await inst.start();
+      await vi.advanceTimersByTimeAsync(0);
+
+      while (inst.state.status !== "error") {
+        h.lastAgentCb()!.onClose();
+        await vi.advanceTimersByTimeAsync(15_000);
+      }
+
+      expect(inst.state).toMatchObject({
+        status: "error",
+        message: expect.stringMatching(/reachable over SSH/i),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

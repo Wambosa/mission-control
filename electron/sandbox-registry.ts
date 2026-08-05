@@ -11,7 +11,14 @@ import {
   connectBudgetMs,
   connectTimeoutMessage,
   isFailFastConnectError,
+  type ConnectFailureKind,
 } from "./sandbox-connect-errors";
+import {
+  isFailFastSshFailure,
+  type SshTunnelCallbacks,
+  type SshTunnelHandle,
+  type SshTunnelResult,
+} from "./ssh-transport";
 
 // Phase 2 core: one remote agent connection per sandbox, all running
 // concurrently. This module owns the per-sandbox state machine + the staleness
@@ -39,10 +46,18 @@ export type RegistryDeps = {
   emitState: (sandboxId: string, state: SandboxState) => void;
   /** Override connect retry budget (tests). */
   connectBudgetMs?: (kind: SandboxConfig["kind"]) => number;
+  /**
+   * Forward the host's runtime port back to a loopback port here. Called only
+   * for `ssh-host` sandboxes, whose agent URL exists only while the forward does.
+   */
+  openSshTunnel?: (config: SandboxConfig, cb: SshTunnelCallbacks) => Promise<SshTunnelResult>;
 };
 
 const REMOTE_CONFIG_ERROR = "Remote sandbox is missing an agent URL or API key.";
 const REMOTE_PAUSED_ERROR = "Remote VM is paused. Resume the VM before connecting.";
+const SSH_RECORD_ERROR = "This SSH host is missing its host record. Remove it and add it again.";
+const SSH_UNPROVISIONED_ERROR = "This SSH host has not been provisioned yet.";
+const SSH_TRANSPORT_ERROR = "SSH hosts are not available in this build.";
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 15_000;
 
@@ -65,6 +80,9 @@ export class SandboxInstance {
   private connectStartedAt: number | null = null;
   private lastAgentUrl: string | null = null;
   private lastToken: string | null = null;
+  // Only an `ssh-host` has one. Its agent URL lives and dies with the forward,
+  // so a reconnect reopens the tunnel rather than reusing a stale port.
+  private tunnel: SshTunnelHandle | null = null;
 
   constructor(config: SandboxConfig, deps: RegistryDeps) {
     this.id = config.id;
@@ -111,6 +129,7 @@ export class SandboxInstance {
     if (this.manualStop || epoch !== this.opEpoch || this._state.status === "error") return;
     this.clearReconnect();
     this.closeAgent();
+    this.closeTunnel();
     this.set({ status: "error", message });
   }
 
@@ -118,6 +137,19 @@ export class SandboxInstance {
     if (!this.isConnectBudgetExceeded()) return false;
     this.failConnect(connectTimeoutMessage(this.config.kind, this.budgetMs()), epoch);
     return true;
+  }
+
+  private get isSshHost(): boolean {
+    return this.config.kind === "ssh-host";
+  }
+
+  /** Why this sandbox cannot be started at all, or null when it can. */
+  private configError(): string | null {
+    if (this.isSshHost) {
+      if (!this.config.sshHost) return SSH_RECORD_ERROR;
+      return this.config.pairingToken ? null : SSH_UNPROVISIONED_ERROR;
+    }
+    return this.config.remoteAgentUrl && this.config.pairingToken ? null : REMOTE_CONFIG_ERROR;
   }
 
   async start(): Promise<OpResult> {
@@ -130,21 +162,23 @@ export class SandboxInstance {
         this.set({ status: "stopped", dockerAvailable: true });
         return { ok: false, error: REMOTE_PAUSED_ERROR };
       }
-      if (!this.config.remoteAgentUrl || !this.config.pairingToken) {
-        this.set({ status: "error", message: REMOTE_CONFIG_ERROR });
-        return { ok: false, error: REMOTE_CONFIG_ERROR };
+      const configError = this.configError();
+      if (configError) {
+        this.set({ status: "error", message: configError });
+        return { ok: false, error: configError };
       }
-      this.set({ status: "starting", step: "connecting to remote agent", since: Date.now() });
-      const agentUrl = this.config.remoteAgentUrl;
-      const token = this.config.pairingToken;
+      const step = this.isSshHost ? "opening SSH connection" : "connecting to remote agent";
+      this.set({ status: "starting", step, since: Date.now() });
+      const token = this.config.pairingToken as string;
       // A stop / destroy / newer start landed while we set up — don't clobber
       // that newer state or start connecting.
       if (this.isStale(epoch)) return { ok: true };
       this.beginConnectAttempt();
       this.set({ status: "running", since: this.connectStartedAt ?? Date.now() });
-      this.lastAgentUrl = agentUrl;
+      // An SSH host has no persisted URL — the forward supplies one per attempt.
+      this.lastAgentUrl = this.isSshHost ? null : this.config.remoteAgentUrl;
       this.lastToken = token;
-      this.connect(agentUrl, token, epoch);
+      this.connect(token, epoch);
       return { ok: true };
     } finally {
       this.opInFlight = false;
@@ -155,8 +189,76 @@ export class SandboxInstance {
     return epoch !== this.opEpoch || this.manualStop;
   }
 
-  private connect(agentUrl: string, token: string, epoch: number): void {
+  /**
+   * The loopback URL an SSH host's forward exposes, opening the forward when
+   * there isn't a live one. Null means the attempt already failed and said so.
+   */
+  private async resolveTunnelUrl(epoch: number): Promise<string | null> {
+    if (this.tunnel && !this.tunnel.isClosed) return this.tunnel.agentUrl;
+    this.closeTunnel();
+
+    const open = this.deps.openSshTunnel;
+    if (!open) {
+      this.failConnect(SSH_TRANSPORT_ERROR, epoch);
+      return null;
+    }
+
+    let opened: SshTunnelHandle | null = null;
+    const callbacks: SshTunnelCallbacks = {
+      onExit: (failure) => {
+        if (opened && this.tunnel === opened) this.tunnel = null;
+        if (!failure) return;
+        // A forward that dies takes the agent with it, so ssh's own refusal is
+        // the useful message — not the WebSocket's hang-up a moment later.
+        if (isFailFastSshFailure(failure.kind)) this.failConnect(failure.message, epoch);
+        else this.scheduleReconnect(epoch);
+      },
+    };
+
+    const result = await open(this.config, callbacks);
+    if (!result.ok) {
+      this.failConnect(result.error, epoch);
+      return null;
+    }
+    opened = result.tunnel;
+    // ssh can die inside the await; a stop can land there too.
+    if (this.isStale(epoch) || result.tunnel.isClosed) {
+      result.tunnel.close();
+      return null;
+    }
+    this.tunnel = result.tunnel;
+    return result.tunnel.agentUrl;
+  }
+
+  /**
+   * A refused connection normally means a wrong URL and is worth giving up on.
+   * Against an SSH host the URL is our own forward, so a refusal only means the
+   * runtime on the far side has not started listening yet — keep retrying.
+   */
+  private isFailFastAgentError(kind: ConnectFailureKind): boolean {
+    if (this.isSshHost && kind === "host") return false;
+    return isFailFastConnectError(kind);
+  }
+
+  private connect(token: string, epoch: number): void {
     if (this.failConnectIfBudgetExceeded(epoch)) return;
+    // A remote VM's URL is already known, so its connect stays synchronous.
+    // Only an SSH host has to open a forward first.
+    if (this.isSshHost) {
+      void this.connectOverSsh(token, epoch);
+      return;
+    }
+    if (this.lastAgentUrl) this.openAgent(this.lastAgentUrl, token, epoch);
+  }
+
+  private async connectOverSsh(token: string, epoch: number): Promise<void> {
+    const agentUrl = await this.resolveTunnelUrl(epoch);
+    if (agentUrl === null || this.isStale(epoch)) return;
+    this.lastAgentUrl = agentUrl;
+    this.openAgent(agentUrl, token, epoch);
+  }
+
+  private openAgent(agentUrl: string, token: string, epoch: number): void {
     this.closeAgent();
     const handle = this.deps.connectAgent(this.config, agentUrl, token, {
       onReady: (version, agents) => {
@@ -197,7 +299,7 @@ export class SandboxInstance {
           return;
         }
         const failure = classifyConnectError(err);
-        if (isFailFastConnectError(failure.kind)) {
+        if (this.isFailFastAgentError(failure.kind)) {
           this.failConnect(failure.message, epoch);
         }
       },
@@ -209,14 +311,14 @@ export class SandboxInstance {
     if (this.reconnectTimer || this.manualStop || epoch !== this.opEpoch || this._state.status === "error") {
       return;
     }
-    if (!this.lastAgentUrl || !this.lastToken) return;
+    if (!this.lastToken || (!this.isSshHost && !this.lastAgentUrl)) return;
     if (this.failConnectIfBudgetExceeded(epoch)) return;
     const delay = Math.min(RECONNECT_BASE_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_MS);
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.manualStop || epoch !== this.opEpoch) return;
-      this.connect(this.lastAgentUrl!, this.lastToken!, epoch);
+      this.connect(this.lastToken!, epoch);
     }, delay);
   }
 
@@ -233,6 +335,13 @@ export class SandboxInstance {
     old?.close();
   }
 
+  /** Tear the forward down so no `ssh` outlives the sandbox that opened it. */
+  private closeTunnel(): void {
+    const old = this.tunnel;
+    this.tunnel = null;
+    old?.close();
+  }
+
   async stop(): Promise<OpResult> {
     if (this.opInFlight) return { ok: false, error: "A sandbox operation is already in progress." };
     this.opInFlight = true;
@@ -241,6 +350,7 @@ export class SandboxInstance {
     this.clearReconnect();
     try {
       this.closeAgent();
+      this.closeTunnel();
       this.connectStartedAt = null;
       this.set({ status: "stopped", dockerAvailable: true });
       return { ok: true };
@@ -261,12 +371,12 @@ export class SandboxInstance {
     if (this._state.status !== "running" && this._state.status !== "error") {
       return Promise.resolve({ ok: false, error: "Sandbox is not waiting to connect." });
     }
-    if (!this.lastAgentUrl || !this.lastToken) return this.start();
+    if (!this.lastToken || (!this.isSshHost && !this.lastAgentUrl)) return this.start();
     this.manualStop = false;
     this.clearReconnect();
     this.beginConnectAttempt();
     this.set({ status: "running", since: this.connectStartedAt ?? Date.now() });
-    this.connect(this.lastAgentUrl, this.lastToken, this.opEpoch);
+    this.connect(this.lastToken, this.opEpoch);
     return Promise.resolve({ ok: true });
   }
 
@@ -276,6 +386,7 @@ export class SandboxInstance {
     this.manualStop = true;
     this.clearReconnect();
     this.closeAgent();
+    this.closeTunnel();
     return { ok: true };
   }
 
@@ -285,6 +396,7 @@ export class SandboxInstance {
     this.manualStop = true;
     this.clearReconnect();
     this.closeAgent();
+    this.closeTunnel();
   }
 }
 

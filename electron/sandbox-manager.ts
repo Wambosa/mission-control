@@ -18,7 +18,9 @@ import { SandboxRegistry, type RegistryDeps } from "./sandbox-registry";
 import { readSshHostAliases } from "./ssh-hosts";
 import { isSafeSshAlias } from "../src/shared/ssh-config";
 import { probeSshHost } from "./ssh-provision-probe";
-import type { SshProbeOutcome } from "../src/shared/ssh-provision";
+import { removeSshHost } from "./ssh-provision";
+import { stopSshService } from "./ssh-service-unit";
+import type { SshHostPlatform, SshProbeOutcome } from "../src/shared/ssh-provision";
 import {
   openSshTunnel,
   type SshTunnelCallbacks,
@@ -408,9 +410,73 @@ function openSshTunnelFor(
   return openSshTunnel({ alias, remotePort: readSandboxSettings(kv()).agentPort }, cb);
 }
 
+/**
+ * The service target for a host, or null when its record cannot say which
+ * service manager to address. Guessing would mean sending `launchctl` to a
+ * Linux box, so an unknown platform simply does nothing.
+ */
+function sshServiceTargetFor(
+  config: SandboxConfig,
+): { alias: string; platform: SshHostPlatform; homeDir: string } | null {
+  const host = config.sshHost;
+  if (!host?.platform || !host.prefix) return null;
+  if (!isSafeSshAlias(host.alias)) return null;
+  // The prefix was derived from the home directory; this walks that back.
+  const homeDir = host.prefix.replace(/\/[^/]+\/?$/, "") || "/";
+  return { alias: host.alias, platform: host.platform, homeDir };
+}
+
+/**
+ * Sessions live on the host as PTYs, and `ptyOwner` already says which
+ * sandbox owns each one. A session waiting at a prompt still holds its PTY,
+ * which is exactly the case R15 protects.
+ */
+function countSshSessions(config: SandboxConfig): number {
+  let count = 0;
+  for (const owner of ptyOwner.values()) if (owner === config.id) count += 1;
+  return count;
+}
+
+/** Ask a host to stop its runtime, leaving it registered to start again. */
+async function stopSshRuntime(config: SandboxConfig): Promise<void> {
+  const target = sshServiceTargetFor(config);
+  if (!target) return;
+  await stopSshService(target.alias, target);
+}
+
+/**
+ * Take Mission Control back off a host being removed: unregister the service,
+ * delete the prefix, leave the SSH config alone. Returns what survived, if
+ * anything — never an error, because a host that cannot be reached must not
+ * stop the user from forgetting it.
+ */
+async function removeSshFootprint(config: SandboxConfig): Promise<string | null> {
+  if (config.kind !== "ssh-host") return null;
+  const target = sshServiceTargetFor(config);
+  if (!target) return null;
+  try {
+    const removal = await removeSshHost(target.alias, {
+      platform: target.platform,
+      homeDir: target.homeDir,
+      prefix: config.sshHost?.prefix ?? "",
+    });
+    return removal.leftBehind
+      ? `${removal.leftBehind.reason} You may want to delete ${removal.leftBehind.prefix} on that host yourself.`
+      : null;
+  } catch (err) {
+    return `Could not clean up this host: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
 function getRegistry(): SandboxRegistry {
   if (registry) return registry;
-  const deps: RegistryDeps = { connectAgent, emitState, openSshTunnel: openSshTunnelFor };
+  const deps: RegistryDeps = {
+    connectAgent,
+    emitState,
+    openSshTunnel: openSshTunnelFor,
+    countSshSessions,
+    stopSshRuntime,
+  };
   registry = new SandboxRegistry(deps);
   return registry;
 }
@@ -1310,10 +1376,14 @@ export function registerSandboxManager(
   );
   safeHandle(
     IPC.sandboxDestroy,
-    (_e, sandboxId: string) => {
+    async (_e, sandboxId: string) => {
       const config = configFor(sandboxId);
-      if (!config) return Promise.resolve({ ok: true as const });
-      return getRegistry().destroy(config);
+      if (!config) return { ok: true as const };
+      const result = await getRegistry().destroy(config);
+      // Disconnect first, then clean the host — a live forward would keep the
+      // runtime busy while we try to unregister it.
+      const leftBehind = await removeSshFootprint(config);
+      return leftBehind ? { ...result, warning: leftBehind } : result;
     },
     ipcMain,
   );

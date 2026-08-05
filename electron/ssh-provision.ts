@@ -13,6 +13,11 @@ import {
   type SshHostPlatform,
   type SshProvisionPlan,
 } from "../src/shared/ssh-provision";
+import {
+  SSH_SERVICE_LABEL,
+  SSH_SERVICE_UNIT_NAME,
+  sshServiceUnitPath,
+} from "../src/shared/ssh-service-unit";
 
 // The install half of first connect. Everything Mission Control lays down goes
 // under one directory the SSH user already owns, so provisioning needs no root,
@@ -202,6 +207,87 @@ export function sshProvisionCommands(
     });
   }
   return commands;
+}
+
+// ── Removal ────────────────────────────────────────────────────────────────
+
+export type SshHostTarget = {
+  platform: SshHostPlatform;
+  /** The SSH user's home directory, as the host reported it. */
+  homeDir: string;
+  /** The prefix this host was provisioned into. */
+  prefix: string;
+};
+
+export type SshRemovalResult = {
+  /**
+   * Always true: the local record must go even when the host does not answer,
+   * or a machine that died takes its Mission Control entry hostage.
+   */
+  ok: true;
+  /** What is still on the host, when anything is. */
+  leftBehind?: { prefix: string; reason: string };
+};
+
+/**
+ * Undo provisioning, in the one order that works: unregister the service, then
+ * delete what it pointed at. The reverse leaves the user's service manager
+ * holding a unit whose binary is gone, retrying forever.
+ *
+ * Deliberately not `set -e`. Removal runs against half-provisioned hosts, hosts
+ * whose service never registered, and hosts already partly cleaned by hand —
+ * every step is best-effort, and stopping at the first "already gone" would
+ * leave the rest behind.
+ */
+export function sshRemovalScript(target: SshHostTarget): string {
+  const prefix = shellQuote(target.prefix);
+  const unitPath = sshServiceUnitPath(target);
+  const unregister =
+    target.platform === "darwin"
+      ? [
+          `launchctl bootout gui/$(id -u)/${SSH_SERVICE_LABEL} >/dev/null 2>&1 || true`,
+          `launchctl unload ${shellQuote(unitPath)} >/dev/null 2>&1 || true`,
+        ]
+      : [
+          `systemctl --user stop ${SSH_SERVICE_UNIT_NAME} >/dev/null 2>&1 || true`,
+          `systemctl --user disable ${SSH_SERVICE_UNIT_NAME} >/dev/null 2>&1 || true`,
+        ];
+
+  return [
+    "set -u",
+    ...unregister,
+    `rm -f ${shellQuote(unitPath)} || true`,
+    target.platform === "darwin"
+      ? `true`
+      : `systemctl --user daemon-reload >/dev/null 2>&1 || true`,
+    // Only now, with nothing pointing at it.
+    `rm -rf ${prefix} || true`,
+    // The user's SSH config is theirs; the alias still works for ordinary ssh.
+    "",
+  ].join("\n");
+}
+
+/**
+ * Clean a host and say what, if anything, survived. This never reports
+ * failure: the caller's job is to drop the local record, and a host that
+ * cannot be reached must not block that. What it could not remove is named
+ * so the user can finish by hand.
+ */
+export async function removeSshHost(
+  alias: string,
+  target: SshHostTarget,
+  options: { exec?: SshExec } = {},
+): Promise<SshRemovalResult> {
+  const exec = options.exec ?? defaultSshExec;
+  const result = await exec(sshShellArgs(alias), sshRemovalScript(target));
+  if (result.code === 0) return { ok: true };
+  return {
+    ok: true,
+    leftBehind: {
+      prefix: target.prefix,
+      reason: sshStepFailure("Removing Mission Control from this host", result),
+    },
+  };
 }
 
 /**

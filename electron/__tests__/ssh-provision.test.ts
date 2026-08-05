@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  removeSshHost,
   runSshProvision,
   sshProvisionCommands,
+  sshRemovalScript,
   type SshProvisionProgress,
 } from "../ssh-provision";
 import type { SshExec } from "../ssh-exec";
 import type { SshProvisionPlan } from "../../src/shared/ssh-provision";
 
 const AGENT_VERSION = "0.3.1";
+const PREFIX = "/home/sam/.mission-control";
 
 function plan(overrides: Partial<SshProvisionPlan> = {}): SshProvisionPlan {
   return {
@@ -139,6 +142,99 @@ describe("sshProvisionCommands", () => {
 
   it("verifies the runtime download against the checksums it publishes", () => {
     expect(scriptsFor()).toMatch(/SHASUMS256\.txt/);
+  });
+});
+
+describe("sshRemovalScript", () => {
+  const script = () => sshRemovalScript({ platform: "linux", homeDir: "/home/sam", prefix: PREFIX });
+  const macScript = () =>
+    sshRemovalScript({ platform: "darwin", homeDir: "/Users/ada", prefix: "/Users/ada/.mc" });
+
+  it("unregisters the service before deleting what it points at", () => {
+    const text = script();
+    const unregister = text.indexOf("systemctl --user disable");
+    const remove = text.indexOf(`rm -rf '${PREFIX}'`);
+
+    expect(unregister).toBeGreaterThan(-1);
+    expect(remove).toBeGreaterThan(-1);
+    expect(unregister).toBeLessThan(remove);
+  });
+
+  it("unloads the LaunchAgent before deleting what it points at", () => {
+    const text = macScript();
+
+    expect(text.indexOf("launchctl")).toBeLessThan(text.indexOf("rm -rf '/Users/ada/.mc'"));
+  });
+
+  it("deletes the unit file too, which lives outside the prefix", () => {
+    expect(script()).toContain("/home/sam/.config/systemd/user/mission-control-agent.service");
+    expect(macScript()).toContain("/Users/ada/Library/LaunchAgents/com.mission-control.agent.plist");
+  });
+
+  it("never touches the user's SSH config", () => {
+    for (const text of [script(), macScript()]) {
+      expect(text).not.toMatch(/\.ssh\b/);
+      expect(text).not.toMatch(/ssh[_/]config/);
+      expect(text).not.toMatch(/known_hosts|authorized_keys/);
+    }
+  });
+
+  it("never asks for root and deletes nothing but its own directory", () => {
+    for (const text of [script(), macScript()]) {
+      expect(text).not.toMatch(/\bsudo\b/);
+      for (const target of text.match(/rm -rf [^\n]*/g) ?? []) {
+        expect(target).toMatch(/\.mission-control|\.mc|LaunchAgents|systemd\/user/);
+      }
+    }
+  });
+
+  it("finishes even when the service was never registered", () => {
+    // Removal has to work on a host that failed halfway through provisioning.
+    expect(script()).not.toContain("set -e\n");
+    expect(script()).toMatch(/\|\| true/);
+  });
+});
+
+describe("removeSshHost", () => {
+  const target = { platform: "linux" as const, homeDir: "/home/sam", prefix: PREFIX };
+
+  it("reports a host it fully cleaned up", async () => {
+    const { run, scripts } = exec([{ code: 0 }]);
+
+    const result = await removeSshHost("workshop", target, { exec: run });
+
+    expect(result).toEqual({ ok: true });
+    expect(scripts).toHaveLength(1);
+  });
+
+  it("still succeeds for an unreachable host, naming what it left behind", async () => {
+    const { run } = exec([{ code: 255, stderr: "ssh: connect to host workshop port 22: No route to host\n" }]);
+
+    const result = await removeSshHost("workshop", target, { exec: run });
+
+    // The local record goes either way — the caller must not be blocked from
+    // forgetting a host it can no longer reach.
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.leftBehind).toMatchObject({ prefix: PREFIX });
+    expect(result.ok && result.leftBehind?.reason).toMatch(/could not reach|unreachable/i);
+  });
+
+  it("names the leftovers when the host answers but cleanup fails", async () => {
+    const { run } = exec([{ code: 1, stderr: "rm: cannot remove: Permission denied\n" }]);
+
+    const result = await removeSshHost("workshop", target, { exec: run });
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.leftBehind?.reason).toMatch(/Permission denied/);
+  });
+
+  it("touches only the host it was asked about", async () => {
+    const { run, scripts } = exec([{ code: 0 }]);
+
+    await removeSshHost("workshop", target, { exec: run });
+
+    expect(scripts[0]).toContain(PREFIX);
+    expect(scripts[0]).not.toContain("/home/other");
   });
 });
 

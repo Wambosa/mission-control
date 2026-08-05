@@ -66,6 +66,7 @@ describe("sandbox-store", () => {
           ssh: {
             alias: "workshop",
             prefix: "/home/sam/.mission-control",
+            platform: "linux",
             onDisconnect: "teardown",
             idleWindowMinutes: 5,
           },
@@ -79,6 +80,7 @@ describe("sandbox-store", () => {
     expect(config?.sshHost).toEqual({
       alias: "workshop",
       prefix: "/home/sam/.mission-control",
+      platform: "linux",
       onDisconnect: "teardown",
       idleWindowMinutes: 5,
     });
@@ -96,6 +98,7 @@ describe("sandbox-store", () => {
     expect(readSandboxConfig(dir, "sb-ssh")?.sshHost).toEqual({
       alias: "workshop",
       prefix: null,
+      platform: null,
       onDisconnect: "persist",
       idleWindowMinutes: DEFAULT_SSH_IDLE_WINDOW_MINUTES,
     });

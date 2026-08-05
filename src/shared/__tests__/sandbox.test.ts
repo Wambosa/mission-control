@@ -58,6 +58,7 @@ describe("parseSshHostConfig", () => {
         ssh: {
           alias: "workshop",
           prefix: "/home/sam/.mission-control",
+          platform: "linux",
           onDisconnect: "teardown",
           idleWindowMinutes: 5,
         },
@@ -65,9 +66,30 @@ describe("parseSshHostConfig", () => {
     ).toEqual({
       alias: "workshop",
       prefix: "/home/sam/.mission-control",
+      platform: "linux",
       onDisconnect: "teardown",
       idleWindowMinutes: 5,
     });
+  });
+
+  it("remembers which service manager a host speaks", () => {
+    // Stopping or removing a host has to know whether to address launchd or
+    // systemd, long after the probe that found out has gone.
+    const parsed = parseSshHostConfig({
+      agentUrl: "ws://127.0.0.1:54321/",
+      ssh: { alias: "workshop", platform: "darwin" } as never,
+    });
+
+    expect(parsed?.platform).toBe("darwin");
+  });
+
+  it("treats a platform it cannot act on as unknown rather than guessing", () => {
+    const parsed = parseSshHostConfig({
+      agentUrl: "ws://127.0.0.1:54321/",
+      ssh: { alias: "workshop", platform: "windows" } as never,
+    });
+
+    expect(parsed?.platform).toBeNull();
   });
 
   it("defaults the fields a row predating them never wrote", () => {
@@ -79,6 +101,7 @@ describe("parseSshHostConfig", () => {
     ).toEqual({
       alias: "workshop",
       prefix: null,
+      platform: null,
       onDisconnect: "persist",
       idleWindowMinutes: DEFAULT_SSH_IDLE_WINDOW_MINUTES,
     });

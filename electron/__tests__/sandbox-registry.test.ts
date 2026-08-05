@@ -35,6 +35,7 @@ function sshConfig(id: string, alias = "workshop"): SandboxConfig {
     sshHost: {
       alias,
       prefix: "/home/sam/.mission-control",
+      platform: "linux",
       onDisconnect: "persist",
       idleWindowMinutes: DEFAULT_SSH_IDLE_WINDOW_MINUTES,
     },

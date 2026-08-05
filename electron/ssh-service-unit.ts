@@ -114,6 +114,30 @@ function readLingering(
 }
 
 /**
+ * Stop the runtime without unregistering it, so the next connect can start it
+ * again. This is the idle stop and the tear-down-on-disconnect preference;
+ * removing the host entirely is a different, heavier thing.
+ */
+export function sshServiceStopScript(
+  target: Pick<SshServiceDescription, "platform" | "homeDir">,
+): string {
+  return target.platform === "darwin"
+    ? // `bootout` stops the agent and unloads it; `bootstrap` on next connect
+      // brings it back. Nothing is deleted either way.
+      `launchctl bootout gui/$(id -u)/${SSH_SERVICE_LABEL} >/dev/null 2>&1 || true\n`
+    : `systemctl --user stop ${SSH_SERVICE_UNIT_NAME} >/dev/null 2>&1 || true\n`;
+}
+
+/** Ask a host to stop its runtime. Best effort: an unreachable host is stopped. */
+export async function stopSshService(
+  alias: string,
+  target: Pick<SshServiceDescription, "platform" | "homeDir">,
+  exec: SshExec = defaultSshExec,
+): Promise<void> {
+  await exec(sshShellArgs(alias), sshServiceStopScript(target));
+}
+
+/**
  * Register the runtime with the host user's service manager. One SSH exec:
  * the files and the registration travel together, so a host is never left with
  * a written unit nobody loaded.

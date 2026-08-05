@@ -3,6 +3,8 @@
 // project as an alternate runtime.
 // See docs/multi-sandbox-plan.md.
 
+import { SSH_TARGET_PLATFORMS, type SshHostPlatform } from "./ssh-provision";
+
 /**
  * Execution backend for a sandbox. A `remote-vm` is a machine Mission Control
  * created and can destroy; an `ssh-host` is a machine the user already owns,
@@ -57,6 +59,12 @@ export type SandboxSshHostConfig = {
   alias: string;
   /** Directory Mission Control owns on the host. Null until first provision. */
   prefix: string | null;
+  /**
+   * Which service manager this host speaks, as the probe found it. Stopping or
+   * removing a host has to know that long after the probe is gone. Null until
+   * first probe, or for a platform Mission Control cannot act on.
+   */
+  platform: SshHostPlatform | null;
   /** Persist by default; `teardown` stops the runtime when the client disconnects. */
   onDisconnect: SshHostPersistence;
   /** Minutes with no sessions before the runtime stops. 0 disables the idle stop. */
@@ -110,6 +118,16 @@ function toPersistence(value: unknown): SshHostPersistence {
   return value === "teardown" ? "teardown" : "persist";
 }
 
+/**
+ * A platform outside the ones Mission Control provisions reads as unknown.
+ * Guessing would mean addressing the wrong service manager on removal.
+ */
+function toHostPlatform(value: unknown): SshHostPlatform | null {
+  return typeof value === "string" && (SSH_TARGET_PLATFORMS as readonly string[]).includes(value)
+    ? (value as SshHostPlatform)
+    : null;
+}
+
 function toIdleWindowMinutes(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return DEFAULT_SSH_IDLE_WINDOW_MINUTES;
@@ -133,6 +151,7 @@ export function parseSshHostConfig(
   return {
     alias,
     prefix: typeof raw.prefix === "string" && raw.prefix.trim() ? raw.prefix.trim() : null,
+    platform: toHostPlatform(raw.platform),
     onDisconnect: toPersistence(raw.onDisconnect),
     idleWindowMinutes: toIdleWindowMinutes(raw.idleWindowMinutes),
   };

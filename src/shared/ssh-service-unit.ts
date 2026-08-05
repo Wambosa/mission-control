@@ -186,8 +186,14 @@ function renderSystemdUnit(description: SshServiceDescription): string {
   ].join("\n");
 }
 
-/** Where the platform's service manager expects to find the unit. */
-export function sshServiceUnitPath(description: SshServiceDescription): string {
+/**
+ * Where the platform's service manager expects to find the unit. Takes only
+ * the platform and home so removal, which has no key or port to hand, can ask
+ * the same question provisioning did.
+ */
+export function sshServiceUnitPath(
+  description: Pick<SshServiceDescription, "platform" | "homeDir">,
+): string {
   const home = trimTrailingSlash(description.homeDir);
   return description.platform === "darwin"
     ? `${home}/Library/LaunchAgents/${SSH_SERVICE_LABEL}.plist`

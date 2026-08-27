@@ -150,3 +150,43 @@ describe("groupScopesByKind", () => {
     expect(groupScopesByKind([])).toEqual({ sandboxes: [], sshHosts: [] });
   });
 });
+
+describe("SSH hosts in the scope switcher", () => {
+  const sshHost = (id: string) => ({ id, kind: "ssh-host" });
+
+  it("offers an SSH host on a project screen", () => {
+    // Both other branches test for `remote-vm`, so an ssh-host row used to
+    // match neither and vanish from the switcher — and since the switcher only
+    // renders on a project screen, a provisioned host could never be selected.
+    expect(sandboxUsableForProject(sshHost("ssh-1"), "proj-1")).toBe(true);
+  });
+
+  it("offers the same host from every project, because it is a machine", () => {
+    for (const projectId of ["proj-1", "proj-2", "proj-3"]) {
+      expect(sandboxUsableForProject(sshHost("ssh-1"), projectId)).toBe(true);
+    }
+  });
+
+  it("keeps an SSH host in the list a project screen narrows to", () => {
+    const result = scopedSandboxesForProject(
+      [sandbox("sb-1"), sshHost("ssh-1")],
+      [],
+      project("proj-1"),
+      LOCAL_SCOPE_ID,
+    );
+
+    expect(result.map((s) => s.id)).toContain("ssh-1");
+  });
+
+  it("still keeps another project's managed sandbox out", () => {
+    const owned = { id: "sb-1", kind: "remote-vm", remoteProvider: "aws", projectId: "proj-2" };
+    const result = scopedSandboxesForProject(
+      [owned, sshHost("ssh-1")],
+      [],
+      project("proj-1"),
+      LOCAL_SCOPE_ID,
+    );
+
+    expect(result.map((s) => s.id)).toEqual(["ssh-1"]);
+  });
+});

@@ -69,6 +69,18 @@ export type SandboxSshHostConfig = {
   onDisconnect: SshHostPersistence;
   /** Minutes with no sessions before the runtime stops. 0 disables the idle stop. */
   idleWindowMinutes: number;
+  /**
+   * Loopback port this host's runtime listens on. Kept with the host because a
+   * runtime adopted from another Mission Control chose its own port, which
+   * this client's global setting knows nothing about. Null for hosts recorded
+   * before the port was tracked per-host.
+   */
+  agentPort: number | null;
+  /**
+   * Directory on the host the runtime may work in. Null means the SSH user's
+   * home, which is the default and what every host recorded before this used.
+   */
+  workspaceRoot: string | null;
 };
 
 export type SandboxRemoteConfig = {
@@ -154,6 +166,17 @@ export function parseSshHostConfig(
     platform: toHostPlatform(raw.platform),
     onDisconnect: toPersistence(raw.onDisconnect),
     idleWindowMinutes: toIdleWindowMinutes(raw.idleWindowMinutes),
+    agentPort:
+      typeof raw.agentPort === "number" &&
+      Number.isInteger(raw.agentPort) &&
+      raw.agentPort > 0 &&
+      raw.agentPort <= 65535
+        ? raw.agentPort
+        : null,
+    workspaceRoot:
+      typeof raw.workspaceRoot === "string" && raw.workspaceRoot.trim()
+        ? raw.workspaceRoot.trim()
+        : null,
   };
 }
 

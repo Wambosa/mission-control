@@ -38,6 +38,8 @@ function sshConfig(id: string, alias = "workshop"): SandboxConfig {
       platform: "linux",
       onDisconnect: "persist",
       idleWindowMinutes: DEFAULT_SSH_IDLE_WINDOW_MINUTES,
+      agentPort: null,
+      workspaceRoot: null,
     },
   };
 }

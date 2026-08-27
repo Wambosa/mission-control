@@ -4,13 +4,13 @@ import { FormErrorBox } from "~/components/ui/FormErrorBox";
 import { Icon } from "~/components/ui/Icon";
 import { Modal } from "~/components/ui/Modal";
 import { EscTooltip } from "~/components/ui/Tooltip";
-import { toast } from "sonner";
 import { api } from "~/lib/api";
 import { getElectron } from "~/lib/electron";
 import {
   canProvision,
   describeExistingHarnesses,
   defaultHostName,
+  provisionNotes,
   provisioningLabel,
   sshHostRowFromProbe,
   type SshHostRowState,
@@ -31,23 +31,78 @@ const sectionLabelStyle = {
 
 const dimText = { fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.5 } as const;
 
+const statusText = { ...dimText, flex: "1 1 auto", minWidth: 0, textAlign: "right" } as const;
+
 function StateLine({ state }: { state: SshHostRowState }) {
   const progress = provisioningLabel(state);
   if (progress) {
-    return <span style={{ ...dimText, fontFamily: "var(--mono)", fontSize: 11 }}>{progress}</span>;
+    return <span style={{ ...statusText, fontFamily: "var(--mono)", fontSize: 11 }}>{progress}</span>;
   }
-  if (state.kind === "probing") return <span style={dimText}>Checking…</span>;
-  if (state.kind === "connected") return <span style={dimText}>Connected</span>;
+  if (state.kind === "probing") return <span style={statusText}>Checking…</span>;
+  if (state.kind === "connected") return <span style={statusText}>Connected</span>;
   // A refusal is SSH's own words. It is shown as-is, with nothing beside it
   // that would offer to get past it.
   if (state.kind === "refused" || state.kind === "unsupported" || state.kind === "failed") {
     return (
-      <span style={{ ...dimText, color: "var(--danger)", whiteSpace: "pre-wrap" }}>
+      <span
+        style={{
+          ...statusText,
+          color: "var(--danger)",
+          whiteSpace: "pre-wrap",
+        }}
+      >
         {state.message}
       </span>
     );
   }
   return null;
+}
+
+/**
+ * What a finished provision left worth reading. This is deliberately a panel
+ * and not a toast: the host is set up, and the notes here are the only record
+ * of what did not go perfectly, so they wait for the user rather than expiring.
+ */
+function ProvisionReport({ state }: { state: SshHostRowState }) {
+  if (state.kind !== "done") return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <span style={{ ...dimText, color: "var(--text)" }}>
+        <strong style={{ fontFamily: "var(--mono)" }}>{state.alias}</strong> is set up and ready to
+        use.
+      </span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {state.notes.map((note) => (
+          <div
+            key={note.title}
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "flex-start",
+              padding: "10px 12px",
+              borderRadius: 6,
+              background: "var(--surface-1)",
+              borderLeft: `2px solid ${note.tone === "warn" ? "var(--danger)" : "var(--accent-ink)"}`,
+            }}
+          >
+            <Icon
+              name={note.tone === "warn" ? "shield" : "info"}
+              size={13}
+              style={{
+                flexShrink: 0,
+                marginTop: 2,
+                color: note.tone === "warn" ? "var(--danger)" : "var(--accent-ink)",
+              }}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
+              <span style={{ ...dimText, color: "var(--text)" }}>{note.title}</span>
+              {note.detail && <span style={dimText}>{note.detail}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function PlanSummary({ state }: { state: SshHostRowState }) {
@@ -154,23 +209,21 @@ export function AddSshHostDialog({
         prefix: result.prefix,
         platform: result.platform,
         apiKey: result.apiKey,
+        agentPort: result.agentPort,
       });
-      setState({ kind: "connected" });
-      for (const harness of result.harnesses) {
-        if (harness.status !== "installed") {
-          toast.warning(`${harness.agent} is not available on ${result.alias}`, {
-            description: harness.detail,
-          });
-        }
-      }
-      if (!result.survivesLogout) {
-        toast.warning(`${result.alias} could not enable lingering`, {
-          description:
-            "Sessions survive Mission Control quitting, but the runtime stops when you log out of that host.",
-        });
-      }
+      // The host is usable either way, so the switcher learns about it now.
       onAdded?.(sandbox.id);
-      onClose();
+
+      // Anything worth reading keeps the dialog open. Toasting these was the
+      // bug: they fired as the modal closed, so the one line that mattered —
+      // a harness that did not install — was gone before it could be read.
+      const notes = provisionNotes(result);
+      if (notes.length === 0) {
+        setState({ kind: "connected" });
+        onClose();
+        return;
+      }
+      setState({ kind: "done", alias: result.alias, notes });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setState({ kind: "failed", message });
@@ -190,24 +243,35 @@ export function AddSshHostDialog({
       title="Add an SSH host"
       width={560}
       footer={
-        <>
-          <EscTooltip label="Cancel">
-            <Btn variant="ghost" onClick={onClose} disabled={busy}>
-              Cancel
-            </Btn>
-          </EscTooltip>
-          <Btn
-            variant="primary"
-            icon="terminal"
-            onClick={() => void provision()}
-            disabled={!canProvision(state) || busy}
-          >
-            {busy ? "Setting up…" : "Set up host"}
+        state.kind === "done" ? (
+          // The host is already added; this button only dismisses the report.
+          <Btn variant="primary" onClick={onClose}>
+            Done
           </Btn>
-        </>
+        ) : (
+          <>
+            <EscTooltip label="Cancel">
+              <Btn variant="ghost" onClick={onClose} disabled={busy}>
+                Cancel
+              </Btn>
+            </EscTooltip>
+            <Btn
+              variant="primary"
+              icon="terminal"
+              onClick={() => void provision()}
+              disabled={!canProvision(state) || busy}
+            >
+              {busy ? "Setting up…" : "Set up host"}
+            </Btn>
+          </>
+        )
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {state.kind === "done" ? (
+          <ProvisionReport state={state} />
+        ) : (
+          <>
         <p style={{ margin: 0, ...dimText }}>
           These are the hosts in your SSH config. Mission Control connects the way you already do —
           your keys, your <code style={{ fontFamily: "var(--mono)" }}>known_hosts</code>, your
@@ -258,8 +322,8 @@ export function AddSshHostDialog({
                     cursor: busy ? "default" : "pointer",
                   }}
                 >
-                  <Icon name="terminal" size={13} />
-                  <span style={{ flex: 1, minWidth: 0 }}>{alias}</span>
+                  <Icon name="terminal" size={13} style={{ flexShrink: 0 }} />
+                  <span style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}>{alias}</span>
                   {selected === alias && <StateLine state={state} />}
                 </button>
               ))}
@@ -269,6 +333,8 @@ export function AddSshHostDialog({
 
         <PlanSummary state={state} />
         <FormErrorBox error={error} />
+          </>
+        )}
       </div>
     </Modal>
   );

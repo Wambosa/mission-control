@@ -49,6 +49,14 @@ const sshHostBody = z.object({
   prefix: z.string().trim().min(1).max(4096),
   platform: z.enum(["linux", "darwin"]),
   apiKey: z.string().min(1).max(512),
+  // The port the host's runtime actually listens on. Recorded per host rather
+  // than read from this client's global setting, because a runtime adopted
+  // from another Mission Control chose its own — and a tunnel forwarding to
+  // the wrong port fails in a way that looks like the host is down.
+  agentPort: z.number().int().min(1).max(65535).optional(),
+  // Absolute POSIX path on the host. Bounded, and never interpolated into a
+  // script — it is written into the unit as an Environment value.
+  workspaceRoot: z.string().trim().min(1).max(4096).startsWith("/").optional(),
 });
 
 const connectBody = z.object({

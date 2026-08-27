@@ -188,6 +188,13 @@ const electronAPI = {
     getState: (sandboxId?: string): Promise<SandboxStateBridge> =>
       ipcRenderer.invoke(IPC.sandboxGetState, sandboxId),
     getSettings: (): Promise<SandboxSettingsBridge> => ipcRenderer.invoke(IPC.sandboxGetSettings),
+    /**
+     * Directory on the active scope that its projects live under. `/workspace`
+     * inside a Mission Control VM; the user's own home (or a configured root)
+     * on an SSH host, where no such container path exists.
+     */
+    getRemoteRoot: (sandboxId?: string): Promise<string | null> =>
+      ipcRenderer.invoke(IPC.sandboxGetRemoteRoot, sandboxId),
     updateSettings: (patch: SandboxSettingsPatchBridge): Promise<SandboxSettingsBridge> =>
       ipcRenderer.invoke(IPC.sandboxUpdateSettings, patch),
     up: (sandboxId?: string): Promise<{ ok: true } | { ok: false; error: string }> =>

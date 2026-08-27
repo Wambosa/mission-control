@@ -90,14 +90,24 @@ describe("runAgentCliUpdate against an SSH host", () => {
   });
 
   it("declines a harness it did not install on that host", async () => {
-    const { run, scripts } = exec();
+    // Cursor CLI is installed by a shell installer redirected into the prefix.
+    // On a host where the copy is the user's own there is nothing of ours to
+    // update, and planting one would shadow theirs — so the script asks first
+    // and backs out.
+    const { run, scripts } = exec({ stdout: "mc:not-installed-by-us\n" });
 
-    // Cursor CLI has no npm package, so there is nothing in the prefix to
-    // update — and updating the user's own copy is not ours to do.
     const result = await runAgentCliUpdate("cursor-cli", HOST, { exec: run });
 
     expect(result).toMatchObject({ ok: false, reason: "no-update-command" });
-    expect(scripts).toEqual([]);
+    expect(scripts[0]).toMatch(/if \[ ! -e .*bin\/cursor-agent/);
+  });
+
+  it("updates a shell-installed harness that is Mission Control's own", async () => {
+    const { run } = exec({ stdout: "2026.08.25\n" });
+
+    const result = await runAgentCliUpdate("cursor-cli", HOST, { exec: run });
+
+    expect(result).toMatchObject({ ok: true, version: "2026.08.25" });
   });
 
   it("rejects an agent id it does not manage without touching the host", async () => {

@@ -53,13 +53,43 @@ describe("sshHarnessInstalls", () => {
     }
   });
 
-  it("declines a harness whose installer would write outside the prefix", () => {
-    // cursor-cli ships no npm package; its documented installer drops a binary
-    // in ~/.local/bin, which removing the host could not clean up.
+  it("redirects a shell installer's HOME so its tree lands inside the prefix", () => {
+    // cursor-cli ships no npm package, and its installer places everything
+    // relative to $HOME. Giving it a $HOME under the prefix is what keeps
+    // "removing the host is rm -rf on one directory" true.
     const cursor = sshHarnessInstalls(plan(["cursor-cli"]))[0];
 
-    expect(cursor.kind).toBe("unavailable");
-    expect(cursor.kind === "unavailable" && cursor.reason).toMatch(/outside|prefix/i);
+    expect(cursor.kind).toBe("install");
+    const script = cursor.kind === "install" ? cursor.script : "";
+    expect(script).toContain('mc_home="$MC_PREFIX/cursor"');
+    expect(script).toMatch(/HOME="\$mc_home" bash/);
+  });
+
+  it("leaves nothing of a shell-installed harness outside the prefix", () => {
+    const script = sshHarnessInstalls(plan(["cursor-cli"]))[0];
+    const text = script.kind === "install" ? script.script : "";
+
+    // Every path it writes or links is anchored to the prefix.
+    expect(text).not.toMatch(/(^|[^/\w])~\/\.local/);
+    expect(text).not.toMatch(/\$HOME\/\.local/);
+    expect(text).not.toMatch(/\.(bashrc|zshrc|profile|bash_profile|zprofile)/);
+  });
+
+  it("links the harness into the prefix bin the service PATH already searches", () => {
+    const script = sshHarnessInstalls(plan(["cursor-cli"]))[0];
+    const text = script.kind === "install" ? script.script : "";
+
+    expect(text).toContain('"$MC_PREFIX/bin/cursor-agent"');
+    // The installer's own exit status is not the question; the binary is.
+    expect(text).toMatch(/if \[ ! -e "\$MC_PREFIX\/bin\/cursor-agent" \]/);
+  });
+
+  it("can install every harness it manages, so a connected host has them all", () => {
+    // The connect-and-go property: nothing is left for the user to go and set
+    // up by hand after adding a host.
+    const installs = sshHarnessInstalls(plan(TASK_AGENTS));
+
+    expect(installs.every((i) => i.kind === "install")).toBe(true);
   });
 });
 
@@ -106,13 +136,13 @@ describe("installSshHarnesses", () => {
     );
   });
 
-  it("never touches the host for a harness it cannot install into the prefix", async () => {
-    const run = vi.fn<SshExec>(async () => ({ code: 0, stdout: "", stderr: "" }));
+  it("installs a shell-distributed harness rather than handing it to the user", async () => {
+    const { run, scripts } = exec();
 
     const results = await installSshHarnesses("workshop", plan(["cursor-cli"]), { exec: run });
 
-    expect(results[0]).toMatchObject({ agent: "cursor-cli", status: "unavailable" });
-    expect(run).not.toHaveBeenCalled();
+    expect(results[0]).toMatchObject({ agent: "cursor-cli", status: "installed" });
+    expect(scripts[0]).toContain("cursor.com/install");
   });
 
   it("never touches the host when every harness is already present", async () => {

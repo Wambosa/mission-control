@@ -2137,10 +2137,16 @@ app.whenReady().then(() => {
     width: MAIN_WINDOW_MIN_WIDTH,
     height: MAIN_WINDOW_MIN_HEIGHT,
   });
-  registerSandboxManager(ipcMain, () => win, missionControlUserDataDir, app.getAppPath(), () =>
-    runtimePort
-      ? { port: runtimePort, token: getOrCreateApiToken(missionControlUserDataDir) }
-      : null,
+  registerSandboxManager(
+    ipcMain,
+    () => win,
+    missionControlUserDataDir,
+    app.getAppPath(),
+    () =>
+      runtimePort
+        ? { port: runtimePort, token: getOrCreateApiToken(missionControlUserDataDir) }
+        : null,
+    () => app.getVersion(),
   );
   return createWindow();
 }).catch((err) => {

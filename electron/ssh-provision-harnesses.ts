@@ -42,18 +42,89 @@ export type SshHarnessOptions = {
 };
 
 /**
- * npm is the only installer that can be pointed at a directory Mission Control
- * owns. A harness distributed as a shell installer writes wherever that
- * installer decides — usually `~/.local/bin` — which R8 rules out and removing
- * the host could not clean up. Such a harness is reported, not force-fitted.
+ * Harnesses that ship a shell installer instead of an npm package.
+ *
+ * Such an installer decides its own destination, which is why these used to be
+ * reported as unavailable and left for the user — telling someone to go and
+ * install something by hand is most of the friction in connecting a host.
+ *
+ * But these installers place everything relative to `$HOME`, so giving one a
+ * `$HOME` inside the prefix puts its whole tree inside the prefix. Nothing
+ * lands in the user's own `~/.local`, removing the host is still `rm -rf` on
+ * one directory, and the binary reaches sessions through a symlink in
+ * `<prefix>/bin` — which the service PATH already searches first.
+ *
+ * At run time the harness gets the user's real `$HOME`; only installation is
+ * redirected, so logins and config stay where the user expects them.
+ */
+/** Printed by an update that found no prefix copy of its own to update. */
+const NOT_OURS = "mc:not-installed-by-us";
+
+const SHELL_INSTALLERS: Partial<Record<TaskAgent, { url: string; binaries: string[] }>> = {
+  // Installs to $HOME/.local/share/cursor-agent/versions/<v>, symlinked from
+  // $HOME/.local/bin as both `agent` and `cursor-agent`.
+  "cursor-cli": { url: "https://cursor.com/install", binaries: ["cursor-agent", "agent"] },
+};
+
+/** Install a shell-distributed harness into a `$HOME` inside the prefix. */
+function shellInstallerScript(
+  prefix: string,
+  installer: { url: string; binaries: string[] },
+): string {
+  const lines = [
+    sshPrefixPrelude(prefix),
+    `mc_home="$MC_PREFIX/cursor"`,
+    `mkdir -p "$mc_home"`,
+    // Same fetch shape the runtime step uses: a host has one of these, not both.
+    `mc_fetch() {`,
+    `  if command -v curl >/dev/null 2>&1; then curl -fsSL "$1"`,
+    `  elif command -v wget >/dev/null 2>&1; then wget -qO- "$1"`,
+    `  else echo "this host has neither curl nor wget" >&2; return 1`,
+    `  fi`,
+    `}`,
+    // The installer is a bash script, not a POSIX one.
+    `if ! command -v bash >/dev/null 2>&1; then echo "this host has no bash to run the installer" >&2; exit 1; fi`,
+    `mc_fetch ${shellQuote(installer.url)} > "$mc_home/install.sh"`,
+    `HOME="$mc_home" bash "$mc_home/install.sh" >/dev/null 2>&1 || true`,
+    `rm -f "$mc_home/install.sh"`,
+  ];
+  for (const binary of installer.binaries) {
+    lines.push(
+      `if [ -e "$mc_home/.local/bin/${binary}" ]; then ln -sf "$mc_home/.local/bin/${binary}" "$MC_PREFIX/bin/${binary}"; fi`,
+    );
+  }
+  // The installer's own exit code is not trustworthy enough to rely on; what
+  // matters is whether the binary is there and reachable.
+  const primary = installer.binaries[0];
+  lines.push(
+    `if [ ! -e "$MC_PREFIX/bin/${primary}" ]; then echo "the installer ran but left no ${primary} in the prefix" >&2; exit 1; fi`,
+    "",
+  );
+  return lines.join("\n");
+}
+
+/**
+ * npm is the installer that can be pointed straight at a directory Mission
+ * Control owns. A harness distributed as a shell installer is redirected into
+ * the prefix instead (see {@link SHELL_INSTALLERS}); one that offers neither is
+ * reported rather than force-fitted.
  */
 export function harnessInstallScript(agent: TaskAgent, prefix: string): SshHarnessInstall {
   const config = AGENT_CLI_CONFIG[agent];
+  const installer = SHELL_INSTALLERS[agent];
+  if (!config.npmPackage && installer) {
+    return {
+      agent,
+      kind: "install",
+      label: `Installing ${config.label}`,
+      script: shellInstallerScript(prefix, installer),
+    };
+  }
   if (!config.npmPackage) {
     return {
       agent,
       kind: "unavailable",
-      reason: `${config.label} has no npm package to install into the prefix; its installer writes outside the directory Mission Control owns. Install it on the host yourself and Mission Control will use it as-is.`,
+      reason: `${config.label} has no npm package and no installer Mission Control can redirect into the prefix. Install it on the host yourself and Mission Control will use it as-is.`,
     };
   }
 
@@ -93,13 +164,22 @@ export async function updateSshHarness(
   if (install.kind !== "install") return { ok: false, reason: "no-update-command" };
 
   const config = AGENT_CLI_CONFIG[agent];
+  // Only ever update a copy Mission Control put there. Running a shell
+  // installer against a host where the harness is the user's own would plant a
+  // second copy in the prefix and shadow theirs on the service PATH — the one
+  // thing this module promises not to do. npm harnesses carry no such risk:
+  // `--prefix` already scopes them, and a prefix copy is by definition ours.
+  const guard = SHELL_INSTALLERS[agent]
+    ? `if [ ! -e ${shellQuote(`${prefix}/bin/${config.command}`)} ]; then printf '%s\\n' "${NOT_OURS}"; exit 0; fi\n`
+    : "";
   // Report the version back in the same round trip, read through the prefix
   // PATH so it is the host's copy that answers, never this machine's.
-  const script = `${install.script}${shellQuote(`${prefix}/bin/${config.command}`)} --version 2>/dev/null | head -n 1 || true\n`;
+  const script = `${guard}${install.script}${shellQuote(`${prefix}/bin/${config.command}`)} --version 2>/dev/null | head -n 1 || true\n`;
   const result = await exec(sshShellArgs(alias), script);
   if (result.code !== 0) {
     return { ok: false, reason: "failed", output: sshStepFailure(install.label, result) };
   }
+  if (result.stdout.includes(NOT_OURS)) return { ok: false, reason: "no-update-command" };
   return { ok: true, version: result.stdout.trim() || null };
 }
 

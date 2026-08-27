@@ -438,6 +438,10 @@ export const api = {
     prefix: string;
     platform: "linux" | "darwin";
     apiKey: string;
+    /** Port the host's runtime listens on; omitted for pre-per-host records. */
+    agentPort?: number;
+    /** Directory on the host the runtime may work in; omit for the user's home. */
+    workspaceRoot?: string;
   }) =>
     req<{ sandbox: SandboxPublicView }>("/api/sandboxes/ssh-host", {
       method: "POST",

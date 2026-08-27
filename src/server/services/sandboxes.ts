@@ -61,6 +61,13 @@ function parseRemoteConfig(raw: string | null | undefined): SandboxRemoteConfig 
   const parsed = safeJsonParse<SandboxRemoteConfig | null>(raw, null);
   if (!parsed || typeof parsed.agentUrl !== "string") return null;
   const allowPlaintextPublic = parsed.allowPlaintextPublic === true;
+  // An SSH host has no agent URL to store: it is reached through a tunnel this
+  // client opens, on a loopback port chosen at connect time. Empty is that
+  // host's normal, correct value — and rejecting the whole config for it made
+  // every ssh-host row unreadable here, so the alias lookup below could never
+  // match one and re-adding a host silently created a duplicate every time.
+  // A URL that is present must still survive normalization.
+  if (!parsed.agentUrl.trim()) return { ...parsed, agentUrl: "" };
   const agentUrl = normalizeRemoteAgentUrl(parsed.agentUrl, { allowPlaintextPublic });
   return agentUrl ? { ...parsed, agentUrl, ...(allowPlaintextPublic ? { allowPlaintextPublic } : {}) } : null;
 }
@@ -187,6 +194,14 @@ export type RegisterSshHostInput = {
   platform: SshHostPlatform;
   /** Bearer secret Mission Control generated for this host's runtime. */
   apiKey: string;
+  /**
+   * Port the host's runtime listens on. Optional so a host recorded before
+   * ports were kept per-host still registers; the tunnel then falls back to
+   * the client-global setting.
+   */
+  agentPort?: number;
+  /** Directory on the host the runtime may work in; omit for the user's home. */
+  workspaceRoot?: string | null;
 };
 
 /**
@@ -215,6 +230,14 @@ export function registerSshHost(input: RegisterSshHostInput): SandboxPublicView 
       alias,
       prefix: input.prefix,
       platform: input.platform,
+      // What this host's runtime listens on, kept with the host rather than in
+      // a client-global setting: an adopted runtime picked its own port, and
+      // the tunnel has to follow it.
+      agentPort: input.agentPort ?? previousHost?.agentPort ?? null,
+      // A root the user chose survives re-provisioning, like their other
+      // per-host choices above.
+      workspaceRoot:
+        input.workspaceRoot?.trim() || previousHost?.workspaceRoot || null,
       // Re-provisioning must not quietly reset choices the user made.
       onDisconnect: previousHost?.onDisconnect ?? "persist",
       idleWindowMinutes: previousHost?.idleWindowMinutes ?? DEFAULT_SSH_IDLE_WINDOW_MINUTES,

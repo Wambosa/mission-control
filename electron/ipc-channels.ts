@@ -67,6 +67,7 @@ export const IPC = {
   notificationsSessionFinishedClick: "notifications:sessionFinishedClick",
   sandboxGetState: "sandbox:get-state",
   sandboxGetSettings: "sandbox:get-settings",
+  sandboxGetRemoteRoot: "sandbox:get-remote-root",
   sandboxUpdateSettings: "sandbox:update-settings",
   sandboxUp: "sandbox:up",
   sandboxRebuild: "sandbox:rebuild",

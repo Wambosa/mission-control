@@ -479,6 +479,8 @@ export type ElectronBridge = {
     // Phase 2: lifecycle is per-sandbox (sandboxId; omitted = the active scope).
     getState: (sandboxId?: string) => Promise<SandboxState>;
     getSettings: () => Promise<SandboxSettingsView>;
+    /** Directory the active scope keeps its projects under; null when local. */
+    getRemoteRoot: (sandboxId?: string) => Promise<string | null>;
     updateSettings: (patch: SandboxSettingsPatch) => Promise<SandboxSettingsView>;
     up: (sandboxId?: string) => Promise<{ ok: true } | { ok: false; error: string }>;
     /** Tear down and restart with a forced default-image rebuild (update flow). */

@@ -13,6 +13,7 @@ function description(overrides: Partial<SshServiceDescription> = {}): SshService
     prefix: "/home/sam/.mission-control",
     agentPort: 9333,
     apiKey: "b8f1c2d3e4",
+    agentVersion: "1.2.3",
     ...overrides,
   };
 }
@@ -117,5 +118,41 @@ describe("sshServiceDefinition", () => {
 
     expect(plist).toContain("/Users/a&amp;b");
     expect(plist).not.toMatch(/\/Users\/a&b/);
+  });
+});
+
+describe("workspace root", () => {
+  it("confines the runtime to the SSH user's home by default", () => {
+    expect(serviceEnv(description(), "MC_WORKSPACE_ROOT")).toBe("/home/sam");
+  });
+
+  it("uses a root the host was configured with instead", () => {
+    // A host may keep its work on another volume; confining the runtime to
+    // $HOME would put those projects out of reach.
+    const desc = description({ workspaceRoot: "/Volumes/work" });
+
+    expect(serviceEnv(desc, "MC_WORKSPACE_ROOT")).toBe("/Volumes/work");
+  });
+
+  it("falls back to home for a blank or absent root", () => {
+    expect(serviceEnv(description({ workspaceRoot: "   " }), "MC_WORKSPACE_ROOT")).toBe("/home/sam");
+    expect(serviceEnv(description({ workspaceRoot: null }), "MC_WORKSPACE_ROOT")).toBe("/home/sam");
+  });
+
+  it("trims a trailing slash so the value matches what the agent compares against", () => {
+    expect(serviceEnv(description({ workspaceRoot: "/srv/code/" }), "MC_WORKSPACE_ROOT")).toBe(
+      "/srv/code",
+    );
+  });
+
+  it("carries the root onto macOS too", () => {
+    const desc = description({
+      platform: "darwin",
+      homeDir: "/Users/ada",
+      prefix: "/Users/ada/.mission-control",
+      workspaceRoot: "/Volumes/work",
+    });
+
+    expect(serviceEnv(desc, "MC_WORKSPACE_ROOT")).toBe("/Volumes/work");
   });
 });

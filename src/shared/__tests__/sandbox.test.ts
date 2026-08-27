@@ -61,6 +61,8 @@ describe("parseSshHostConfig", () => {
           platform: "linux",
           onDisconnect: "teardown",
           idleWindowMinutes: 5,
+          agentPort: 9333,
+          workspaceRoot: null,
         },
       }),
     ).toEqual({
@@ -69,7 +71,30 @@ describe("parseSshHostConfig", () => {
       platform: "linux",
       onDisconnect: "teardown",
       idleWindowMinutes: 5,
+      agentPort: 9333,
+      workspaceRoot: null,
     });
+  });
+
+  it("reports no port for a host recorded before ports were kept per-host", () => {
+    // The tunnel then falls back to the client-global setting, which is what
+    // every such host was already using.
+    const parsed = parseSshHostConfig({
+      agentUrl: "ws://127.0.0.1:54321/",
+      ssh: { alias: "workshop", platform: "linux" } as never,
+    });
+
+    expect(parsed?.agentPort).toBeNull();
+  });
+
+  it("ignores a port that is not a usable TCP port", () => {
+    for (const bad of [0, -1, 70000, 1.5, "9333"]) {
+      const parsed = parseSshHostConfig({
+        agentUrl: "ws://127.0.0.1:54321/",
+        ssh: { alias: "workshop", agentPort: bad } as never,
+      });
+      expect(parsed?.agentPort, String(bad)).toBeNull();
+    }
   });
 
   it("remembers which service manager a host speaks", () => {
@@ -104,6 +129,8 @@ describe("parseSshHostConfig", () => {
       platform: null,
       onDisconnect: "persist",
       idleWindowMinutes: DEFAULT_SSH_IDLE_WINDOW_MINUTES,
+      agentPort: null,
+      workspaceRoot: null,
     });
   });
 

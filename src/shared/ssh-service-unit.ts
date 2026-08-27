@@ -30,6 +30,15 @@ export type SshServiceDescription = {
   agentPort: number;
   /** Bearer secret Mission Control generated for this host. Never the user's. */
   apiKey: string;
+  /** Agent version being registered, recorded in the runtime manifest. */
+  agentVersion: string;
+  /**
+   * Directory on the host the runtime treats as the root it may work in.
+   * Null means the SSH user's own home, which is the right default but not
+   * always the right answer: a host may keep its projects on another volume,
+   * and confining the runtime to `$HOME` puts those out of reach.
+   */
+  workspaceRoot?: string | null;
 };
 
 export type SshServiceFile = {
@@ -60,6 +69,17 @@ export function sshServicePath(description: SshServiceDescription): string {
   return [`${prefix}/bin`, `${prefix}/runtime/bin`, "/usr/local/bin", "/usr/bin", "/bin"].join(":");
 }
 
+/**
+ * The directory the runtime is confined to. Falls back to the SSH user's home,
+ * which is what every host recorded before this was configurable used.
+ */
+export function sshWorkspaceRoot(
+  description: Pick<SshServiceDescription, "homeDir" | "workspaceRoot">,
+): string {
+  const configured = description.workspaceRoot?.trim();
+  return configured ? trimTrailingSlash(configured) : trimTrailingSlash(description.homeDir);
+}
+
 /** Non-secret settings both platforms declare on the unit itself. */
 function serviceEnvironment(description: SshServiceDescription): Array<[string, string]> {
   return [
@@ -68,21 +88,59 @@ function serviceEnvironment(description: SshServiceDescription): Array<[string, 
     ["MC_AGENT_BIND_HOST", LOOPBACK],
     ["MC_AGENT_PORT", String(description.agentPort)],
     // The user owns this machine, so their own home is the confinement root —
-    // a project on an SSH host lives where they already keep it.
-    ["MC_WORKSPACE_ROOT", description.homeDir],
+    // a project on an SSH host lives where they already keep it. A host that
+    // keeps its work somewhere else (another volume, a shared checkout dir)
+    // can name that instead.
+    ["MC_WORKSPACE_ROOT", sshWorkspaceRoot(description)],
   ];
+}
+
+/**
+ * What the runtime on a host is, in a form a later client can read without
+ * knowing which service manager wrote it. Provisioning has always described
+ * the runtime to the *host*; this describes it to the *next Mission Control*,
+ * which is what makes adopting an existing runtime possible instead of
+ * overwriting it. Deliberately holds no secret — the key stays in agent.env,
+ * which is the only 600 file here.
+ */
+export type SshRuntimeManifest = {
+  agentPort: number;
+  agentVersion: string;
+};
+
+export function renderSshRuntimeManifest(manifest: SshRuntimeManifest): string {
+  return `${JSON.stringify(manifest, null, 2)}
+`;
+}
+
+export function parseSshRuntimeManifest(text: string): SshRuntimeManifest | null {
+  try {
+    const value: unknown = JSON.parse(text);
+    if (!value || typeof value !== "object") return null;
+    const record = value as Record<string, unknown>;
+    const agentPort = typeof record.agentPort === "number" ? record.agentPort : NaN;
+    if (!Number.isInteger(agentPort) || agentPort <= 0 || agentPort > 65535) return null;
+    return {
+      agentPort,
+      agentVersion: typeof record.agentVersion === "string" ? record.agentVersion : "",
+    };
+  } catch {
+    return null;
+  }
 }
 
 function servicePaths(description: SshServiceDescription): {
   envFile: string;
   runner: string;
   logFile: string;
+  manifest: string;
 } {
   const prefix = trimTrailingSlash(description.prefix);
   return {
     envFile: `${prefix}/service/agent.env`,
     runner: `${prefix}/service/run-agent.sh`,
     logFile: `${prefix}/log/agent.log`,
+    manifest: `${prefix}/service/runtime.json`,
   };
 }
 
@@ -200,6 +258,60 @@ export function sshServiceUnitPath(
     : `${home}/.config/systemd/user/${SSH_SERVICE_UNIT_NAME}`;
 }
 
+/** What a host reported about a runtime it already has. */
+export type SshExistingRuntime = {
+  /** The key the running service is already using. Adopted, never rotated. */
+  apiKey: string;
+  /** Null when the runtime predates the manifest; the caller then falls back. */
+  manifest: SshRuntimeManifest | null;
+};
+
+/**
+ * Ask a host what runtime it already has. This is the read that provisioning
+ * never did — without it, a second Mission Control writes a fresh key over the
+ * one the first is still holding, and the first starts getting 401s it has no
+ * way to explain.
+ *
+ * The reply carries the host's bearer secret, so its stdout is the one place
+ * in this module that must never reach a log or a progress event.
+ */
+export function sshRuntimeReadScript(
+  description: Pick<SshServiceDescription, "platform" | "homeDir" | "prefix">,
+): string {
+  const prefix = trimTrailingSlash(description.prefix);
+  const envFile = shellQuote(`${prefix}/service/agent.env`);
+  const manifestFile = shellQuote(`${prefix}/service/runtime.json`);
+  const unitPath = shellQuote(sshServiceUnitPath(description));
+  return [
+    "set -u",
+    // A key with no unit is a leftover, not a runtime: treat it as absent so
+    // the caller provisions cleanly rather than adopting something dead.
+    `if [ -f ${envFile} ] && [ -f ${unitPath} ]; then`,
+    `  printf 'present=1\\n'`,
+    `  printf 'manifest=%s\\n' "$(tr -d '\\n' < ${manifestFile} 2>/dev/null || true)"`,
+    `  printf 'key=%s\\n' "$(sed -n 's/^MC_AGENT_API_KEY=//p' ${envFile} 2>/dev/null | head -n 1)"`,
+    "else",
+    `  printf 'present=0\\n'`,
+    "fi",
+    "",
+  ].join("\n");
+}
+
+/** Read {@link sshRuntimeReadScript}'s reply. Absent or keyless means no runtime. */
+export function parseSshRuntimeRead(stdout: string): SshExistingRuntime | null {
+  const fields = new Map<string, string>();
+  for (const line of stdout.split(/\r?\n/)) {
+    const separator = line.indexOf("=");
+    if (separator <= 0) continue;
+    fields.set(line.slice(0, separator).trim(), line.slice(separator + 1));
+  }
+  if (fields.get("present") !== "1") return null;
+  const apiKey = (fields.get("key") ?? "").trim();
+  if (!apiKey) return null;
+  const rawManifest = (fields.get("manifest") ?? "").trim();
+  return { apiKey, manifest: rawManifest ? parseSshRuntimeManifest(rawManifest) : null };
+}
+
 /**
  * Everything one host needs written, in write order. The unit lands where the
  * service manager looks — the one thing this design places outside the prefix,
@@ -207,12 +319,22 @@ export function sshServiceUnitPath(
  * removal deletes it by this same path.
  */
 export function sshServiceDefinition(description: SshServiceDescription): SshServiceDefinition {
-  const { envFile, runner } = servicePaths(description);
+  const { envFile, runner, manifest } = servicePaths(description);
   const unitPath = sshServiceUnitPath(description);
   return {
     files: [
       { path: envFile, mode: "600", contents: renderEnvFile(description) },
       { path: runner, mode: "700", contents: renderRunner(description) },
+      // Readable: it is how the next client learns which port this runtime
+      // took, without having to parse a systemd unit or a plist.
+      {
+        path: manifest,
+        mode: "644",
+        contents: renderSshRuntimeManifest({
+          agentPort: description.agentPort,
+          agentVersion: description.agentVersion,
+        }),
+      },
       {
         path: unitPath,
         mode: "600",

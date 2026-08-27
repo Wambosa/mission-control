@@ -18,6 +18,8 @@ import {
   SSH_SERVICE_UNIT_NAME,
   sshServiceUnitPath,
 } from "../src/shared/ssh-service-unit";
+import { describeRetainedHost } from "../src/shared/ssh-claims";
+import { unclaimSshHost } from "./ssh-claims";
 
 // The install half of first connect. Everything Mission Control lays down goes
 // under one directory the SSH user already owns, so provisioning needs no root,
@@ -227,6 +229,12 @@ export type SshRemovalResult = {
   ok: true;
   /** What is still on the host, when anything is. */
   leftBehind?: { prefix: string; reason: string };
+  /**
+   * Set when the host was deliberately left intact because another client
+   * still claims its runtime. Distinct from `leftBehind`, which reports a
+   * teardown that was attempted and did not finish.
+   */
+  retained?: { reason: string };
 };
 
 /**
@@ -276,9 +284,21 @@ export function sshRemovalScript(target: SshHostTarget): string {
 export async function removeSshHost(
   alias: string,
   target: SshHostTarget,
-  options: { exec?: SshExec } = {},
+  options: { exec?: SshExec; clientId?: string } = {},
 ): Promise<SshRemovalResult> {
   const exec = options.exec ?? defaultSshExec;
+
+  // Give up this client's claim before deciding anything. The runtime belongs
+  // to the host, not to whoever is walking away from it — so a host another
+  // Mission Control still uses keeps everything, and only the local record
+  // goes. Without this the first client to remove a shared host deletes the
+  // prefix out from under every other one.
+  if (options.clientId) {
+    const remaining = await unclaimSshHost(alias, target.prefix, options.clientId, exec);
+    const retained = describeRetainedHost(remaining);
+    if (retained) return { ok: true, retained: { reason: retained } };
+  }
+
   const result = await exec(sshShellArgs(alias), sshRemovalScript(target));
   if (result.code === 0) return { ok: true };
   return {

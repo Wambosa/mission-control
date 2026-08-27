@@ -87,6 +87,16 @@ export type SshProvisionResult =
       prefix: string;
       platform: SshHostPlatform;
       apiKey: string;
+      /** The port the runtime actually listens on — adopted, or newly chosen. */
+      agentPort: number;
+      /**
+       * True when this host already had a runtime and Mission Control attached
+       * to it instead of registering its own. The key and port then came from
+       * the host, not from this client.
+       */
+      adopted: boolean;
+      /** Set when the runtime is up but this client could not record its claim. */
+      claimWarning?: string;
       /** Per-harness outcome; one that failed did not fail the host. */
       harnesses: Array<{
         agent: TaskAgent;

@@ -2,17 +2,28 @@
 // runtime) or to the in-container clone over RPC (Docker sandbox runtime),
 // behind one `(projectRoot, relPath)` interface. Defaults to host — when the
 // Terminal runtime isn't "docker", every call is exactly the prior behavior.
-import { sandboxWorkspacePath } from "~/shared/sandbox-workspace";
-import { readSandboxRuntimeMode } from "~/lib/sandbox-runtime";
+import { SANDBOX_WORKSPACE_ROOT, workspaceSlug } from "~/shared/sandbox-workspace";
+import { cachedSandboxRemoteRoot, readSandboxRuntimeMode } from "~/lib/sandbox-runtime";
 import type {
   FileListResult,
   FileReadResult,
   FileWriteResult,
 } from "~/shared/electron-contract";
 
-/** Container clone path for a project, derived from its host-dir basename. */
+/**
+ * Where a project lives on the active scope, derived from its basename.
+ *
+ * The root is the scope's, not a constant: `/workspace` is a Mission Control
+ * VM's container layout, and an SSH host has no such directory — its projects
+ * sit under the user's own home, which is also the only place the remote agent
+ * will act. Falls back to the container root before the first scope read, and
+ * for a VM, which is what it has always been.
+ */
 export function sandboxContainerRoot(projectRoot: string): string {
-  return sandboxWorkspacePath(projectRoot.split("/").filter(Boolean).pop() ?? "project");
+  const root = (cachedSandboxRemoteRoot() ?? SANDBOX_WORKSPACE_ROOT).replace(/\/+$/, "");
+  // A Windows path arrives with backslashes; its last segment is still the name.
+  const name = projectRoot.split(/[\\/]/).filter(Boolean).pop() ?? "project";
+  return `${root}/${workspaceSlug(name)}`;
 }
 
 function containerPath(projectRoot: string, relPath: string): string {

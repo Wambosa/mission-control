@@ -3,6 +3,7 @@ import {
   SSH_SERVICE_LABEL,
   SSH_SERVICE_UNIT_NAME,
   sshServiceDefinition,
+  sshServiceUnitPath,
   type SshServiceDescription,
   type SshServiceFile,
 } from "../src/shared/ssh-service-unit";
@@ -135,6 +136,48 @@ export async function stopSshService(
   exec: SshExec = defaultSshExec,
 ): Promise<void> {
   await exec(sshShellArgs(alias), sshServiceStopScript(target));
+}
+
+/**
+ * Start a runtime the idle stop (or a teardown-on-disconnect) put away. The
+ * unit is still on disk — stopping only unloaded it — so this re-registers and
+ * starts it without rewriting anything or touching the host's key.
+ *
+ * This is the other half of {@link sshServiceStopScript}, whose comment has
+ * always promised that "bootstrap on next connect brings it back". Nothing
+ * called it: connecting opened a tunnel to a port with nothing behind it and
+ * retried the WebSocket forever, which reads as a host that is simply broken.
+ */
+export function sshServiceStartScript(
+  target: Pick<SshServiceDescription, "platform" | "homeDir">,
+): string {
+  const unitPath = sshServiceUnitPath(target);
+  if (target.platform === "darwin") {
+    return `${launchdFragment(unitPath)}\n`;
+  }
+  return [
+    // Nothing is rewritten here, so a daemon-reload is only for a unit the
+    // manager has not seen since it was written.
+    `systemctl --user daemon-reload >/dev/null 2>&1 || true`,
+    `systemctl --user start ${SSH_SERVICE_UNIT_NAME}`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Bring a host's runtime back up. Reports failure rather than throwing: a host
+ * that will not start is a connect that fails with a reason, not a crash.
+ */
+export async function startSshService(
+  alias: string,
+  target: Pick<SshServiceDescription, "platform" | "homeDir">,
+  exec: SshExec = defaultSshExec,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await exec(sshShellArgs(alias), sshServiceStartScript(target));
+  if (result.code !== 0) {
+    return { ok: false, error: sshStepFailure("Starting the Mission Control runtime", result) };
+  }
+  return { ok: true };
 }
 
 /**

@@ -69,6 +69,8 @@ describe("sandbox-store", () => {
             platform: "linux",
             onDisconnect: "teardown",
             idleWindowMinutes: 5,
+            agentPort: null,
+            workspaceRoot: null,
           },
         },
       },
@@ -83,6 +85,8 @@ describe("sandbox-store", () => {
       platform: "linux",
       onDisconnect: "teardown",
       idleWindowMinutes: 5,
+      agentPort: null,
+      workspaceRoot: null,
     });
   });
 
@@ -101,6 +105,8 @@ describe("sandbox-store", () => {
       platform: null,
       onDisconnect: "persist",
       idleWindowMinutes: DEFAULT_SSH_IDLE_WINDOW_MINUTES,
+      agentPort: null,
+      workspaceRoot: null,
     });
   });
 

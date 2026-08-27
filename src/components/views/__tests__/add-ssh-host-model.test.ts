@@ -8,6 +8,7 @@ import {
   isSelectableScope,
   provisioningLabel,
   sshHostRowFromProbe,
+  provisionNotes,
 } from "../add-ssh-host-model";
 import type { SshProbeResult, SshProvisionPlan } from "~/shared/ssh-provision";
 
@@ -156,5 +157,68 @@ describe("the add-host dialog itself", () => {
 
   it("offers nothing that would accept a host key on the user's behalf", () => {
     expect(source).not.toMatch(/StrictHostKeyChecking|accept.*host key|trust.*anyway/i);
+  });
+});
+
+describe("provisionNotes", () => {
+  const clean = {
+    alias: "space-black",
+    adopted: false,
+    survivesLogout: true,
+    harnesses: [{ agent: "claude", status: "installed" as const }],
+  };
+
+  it("says nothing when a provision went perfectly, so the dialog can just close", () => {
+    expect(provisionNotes(clean)).toEqual([]);
+  });
+
+  it("keeps a harness that could not be installed", () => {
+    // This is the note that used to vanish as a toast while the modal closed.
+    const notes = provisionNotes({
+      ...clean,
+      harnesses: [
+        { agent: "claude", status: "installed" },
+        { agent: "cursor-cli", status: "unavailable", detail: "has no npm package" },
+      ],
+    });
+
+    expect(notes).toHaveLength(1);
+    expect(notes[0].tone).toBe("warn");
+    expect(notes[0].title).toContain("cursor-cli");
+    expect(notes[0].detail).toContain("no npm package");
+  });
+
+  it("distinguishes a harness that failed from one that was never available", () => {
+    const failed = provisionNotes({
+      ...clean,
+      harnesses: [{ agent: "codex", status: "failed", detail: "npm exited 1" }],
+    });
+
+    expect(failed[0].title).toMatch(/failed to install/);
+  });
+
+  it("leads with adoption, because it changes what removal will do", () => {
+    const notes = provisionNotes({
+      ...clean,
+      adopted: true,
+      harnesses: [{ agent: "cursor-cli", status: "unavailable" }],
+    });
+
+    expect(notes[0].tone).toBe("info");
+    expect(notes[0].title).toMatch(/already running Mission Control/);
+    expect(notes[0].detail).toMatch(/leave that runtime running/);
+  });
+
+  it("reports a runtime that will not survive logout", () => {
+    const notes = provisionNotes({ ...clean, survivesLogout: false });
+
+    expect(notes[0].title).toMatch(/lingering/);
+  });
+
+  it("reports a claim it could not record, since removal then gets riskier", () => {
+    const notes = provisionNotes({ ...clean, claimWarning: "Read-only file system" });
+
+    expect(notes[0].tone).toBe("warn");
+    expect(notes[0].detail).toContain("Read-only file system");
   });
 });

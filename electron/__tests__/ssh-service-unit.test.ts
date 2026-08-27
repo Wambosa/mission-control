@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { generateSshApiKey, installSshService, sshServiceInstallScript } from "../ssh-service-unit";
+import {
+  generateSshApiKey,
+  installSshService,
+  sshServiceInstallScript,
+  startSshService,
+} from "../ssh-service-unit";
 import type { SshExec } from "../ssh-exec";
 import type { SshServiceDescription } from "../../src/shared/ssh-service-unit";
 
@@ -10,6 +15,7 @@ function description(overrides: Partial<SshServiceDescription> = {}): SshService
     prefix: "/home/sam/.mission-control",
     agentPort: 9333,
     apiKey: "b8f1c2d3e4",
+    agentVersion: "1.2.3",
     ...overrides,
   };
 }
@@ -140,5 +146,39 @@ describe("generateSshApiKey", () => {
 
     expect(keys.size).toBe(32);
     for (const key of keys) expect(key).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("startSshService", () => {
+  it("brings a stopped runtime back on macOS without rewriting anything", async () => {
+    // The stop path only unloads the unit, on the promise that connecting
+    // again brings it back. Nothing kept that promise until now.
+    const { run, scripts } = exec();
+
+    const result = await startSshService("workshop", mac(), run);
+
+    expect(result).toEqual({ ok: true });
+    expect(scripts[0]).toContain("launchctl bootstrap");
+    expect(scripts[0]).toContain("launchctl kickstart");
+    // Restarting must not touch the env file, which holds the host's key.
+    expect(scripts[0]).not.toContain("agent.env");
+  });
+
+  it("starts a stopped unit on Linux", async () => {
+    const { run, scripts } = exec();
+
+    await startSshService("workshop", description(), run);
+
+    expect(scripts[0]).toContain("systemctl --user start mission-control-agent.service");
+    expect(scripts[0]).not.toMatch(/\bsudo\b/);
+  });
+
+  it("reports a host that will not start rather than throwing", async () => {
+    const { run } = exec({ code: 1, stderr: "Failed to connect to bus\n" });
+
+    const result = await startSshService("workshop", description(), run);
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toMatch(/Failed to connect to bus/);
   });
 });

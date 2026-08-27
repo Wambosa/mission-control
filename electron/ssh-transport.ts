@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import * as net from "node:net";
 import { normalizeRemoteAgentUrl } from "../src/shared/sandbox";
+import { sshBinary } from "./ssh-binary";
 
 // The SSH hop. Mission Control shells out to the user's own `ssh` so their
 // config, agent, and known_hosts apply exactly as they do in a terminal — the
@@ -117,6 +118,18 @@ function firstMeaningfulLine(stderr: string): string {
  * called out as SSH's refusal, not Mission Control's, and never comes with an
  * offer to bypass it.
  */
+/**
+ * Whether the host's refusal named an interactive method. OpenSSH lists what
+ * it would still accept in the parenthetical of "Permission denied
+ * (publickey,password,keyboard-interactive)" — so a `password` or
+ * `keyboard-interactive` there means the login could have continued if
+ * anything had been able to ask.
+ */
+function offersInteractiveAuth(stderr: string): boolean {
+  const methods = /permission denied\s*\(([^)]*)\)/i.exec(stderr)?.[1] ?? "";
+  return /\b(password|keyboard-interactive)\b/i.test(methods);
+}
+
 export function classifySshFailure(stderr: string, exitCode: number | null): SshFailure {
   const detail = firstMeaningfulLine(stderr);
   const haystack = stderr.toLowerCase();
@@ -136,6 +149,16 @@ export function classifySshFailure(stderr: string, exitCode: number | null): Ssh
       haystack,
     )
   ) {
+    // A host that offered a password was not refusing the user — it was
+    // refusing to be asked, because the transport runs with BatchMode=yes and
+    // has no way to prompt. Saying "check your key" there sends them to look
+    // at a key that was never the problem.
+    if (offersInteractiveAuth(stderr)) {
+      return {
+        kind: "auth",
+        message: `This host asked for a password, and Mission Control connects without prompting: ${detail || "permission denied"}. Set up key authentication for it (ssh-copy-id), or point your SSH config at a key it accepts.`,
+      };
+    }
     return {
       kind: "auth",
       message: `SSH could not authenticate to this host: ${detail || "permission denied"}. Check the key or agent your SSH config uses for it.`,
@@ -231,7 +254,7 @@ export async function openSshTunnel(
 
   const args = sshTunnelArgs(options, localPort);
   const spawnSsh =
-    deps.spawnSsh ?? ((argv: string[]) => nodeSpawn("ssh", argv, { stdio: ["ignore", "ignore", "pipe"] }) as unknown as SshProcessLike);
+    deps.spawnSsh ?? ((argv: string[]) => nodeSpawn(sshBinary(), argv, { stdio: ["ignore", "ignore", "pipe"] }) as unknown as SshProcessLike);
 
   let child: SshProcessLike;
   try {

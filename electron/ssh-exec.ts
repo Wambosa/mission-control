@@ -1,5 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { classifySshFailure, SSH_COMMON_OPTIONS } from "./ssh-transport";
+import { describeSshBinary, sshBinary } from "./ssh-binary";
 
 // One-shot commands over SSH. The probe reads, provisioning writes, and both
 // want the same thing: a POSIX shell on the far side fed a script it never has
@@ -21,7 +22,7 @@ export function sshShellArgs(alias: string): string[] {
 
 export const defaultSshExec: SshExec = (args, stdin) =>
   new Promise((resolve) => {
-    const child = nodeSpawn("ssh", args, { stdio: ["pipe", "pipe", "pipe"] });
+    const child = nodeSpawn(sshBinary(), args, { stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
@@ -41,7 +42,9 @@ export { shellQuote } from "../src/shared/ssh-provision";
  */
 export function sshStepFailure(step: string, result: SshExecResult): string {
   if (result.code === 255 || result.code === null) {
-    return classifySshFailure(result.stderr, result.code).message;
+    // Which ssh said this is often the whole diagnosis: the user's other tools
+    // may be running a different build that would have succeeded.
+    return `${classifySshFailure(result.stderr, result.code).message} (via ${describeSshBinary()})`;
   }
   const detail = result.stderr.trim().split(/\r?\n/).filter(Boolean).at(-1);
   return detail ? `${step} failed: ${detail}` : `${step} failed (exit ${result.code}).`;

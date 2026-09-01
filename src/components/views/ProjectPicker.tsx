@@ -17,7 +17,7 @@ import type { TaskStatus } from "~/shared/domain";
 import { useServerEvents } from "~/lib/use-events";
 import { useDebouncedCallback } from "~/lib/use-debounced-callback";
 import { isEditableTarget, useHotkey } from "~/lib/use-hotkey";
-import { queryKeys, useGroups, useProjects, useScopedProjects } from "~/queries";
+import { queryKeys, useGroups, useProjects } from "~/queries";
 import { getProjectActivity, isProjectActive, type ProjectWithCounts } from "~/shared/projects";
 import { useSuspendAppDragRegion } from "~/lib/use-dismissable-menu";
 
@@ -67,7 +67,7 @@ export function ProjectPicker({ projectId, disabled = false }: { projectId?: str
   const [open, setOpen] = useState(false);
   useSuspendAppDragRegion(open);
   const { data: allProjects } = useProjects();
-  const { data: projects } = useScopedProjects();
+  const { data: projects } = useProjects();
   const { data: groups = [] } = useGroups();
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);

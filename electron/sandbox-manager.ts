@@ -1602,10 +1602,8 @@ export function registerSandboxManager(
     ipcMain,
   );
   safeHandle(
-    IPC.sandboxSetActive,
-    async (_e, sandboxId: string | null) => {
-      // Nothing routes through a global "active" scope any more — every remote
-      // call names its own. All this still does is warm the machine.
+    IPC.sandboxEnsureStarted,
+    async (_e, sandboxId: string) => {
       if (sandboxId) await ensureSandboxStarted(sandboxId);
       return { ok: true as const };
     },

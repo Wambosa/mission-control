@@ -7,7 +7,6 @@ import { HotkeyTooltip, Tooltip } from "~/components/ui/Tooltip";
 import { useResizablePanel } from "~/lib/use-resizable-panel";
 import { useTerminals } from "~/lib/terminal-store";
 import { useUserTerminals } from "~/lib/user-terminal-store";
-import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 import { ScreenshotHistoryContent } from "./ScreenshotHistory";
 import { UserTerminalPane } from "./UserTerminalPane";
 
@@ -41,7 +40,6 @@ function readStoredWeights(): PaneWeights {
 export function UserTerminalPanel() {
   const {
     project,
-    homeScopeId,
     homeActive,
     panelOpen,
     setPanelOpen,
@@ -55,13 +53,9 @@ export function UserTerminalPanel() {
     renameTerminal,
     setPtyId,
   } = useUserTerminals();
-  // Which machine these terminals open on: the project's own scope, or — for a
-  // project-less dashboard terminal — the home scope. Never a global "active".
-  const terminalScopeId = homeActive
-    ? homeScopeId === LOCAL_SCOPE_ID
-      ? null
-      : homeScopeId
-    : project?.sandboxId ?? null;
+  // Which machine these terminals open on: the project's own host. A dashboard
+  // terminal has no project, so it opens on this machine.
+  const terminalScopeId = homeActive ? null : project?.sandboxId ?? null;
 
   // The panel is shared by project terminals and project-less "home" (dashboard)
   // terminals; `active` is true whenever either scope is current.

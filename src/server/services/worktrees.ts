@@ -13,7 +13,7 @@ import {
   insertWorktree,
   updateWorktreeBranch,
 } from "../repositories/worktrees.repo";
-import { findTasksByProjectIdAllScopes } from "../repositories/tasks.repo";
+import { findTasksByProjectId } from "../repositories/tasks.repo";
 import { newId } from "./_ids";
 import { events } from "../events";
 
@@ -210,7 +210,7 @@ function emptyTaskCounts(): WorktreeTaskCounts {
 /** Non-archived sessions per worktree id (null key = main), across all scopes. */
 function countTasksByWorktree(projectId: string): Map<string | null, WorktreeTaskCounts> {
   const byWorktree = new Map<string | null, WorktreeTaskCounts>();
-  for (const task of findTasksByProjectIdAllScopes(projectId)) {
+  for (const task of findTasksByProjectId(projectId)) {
     if (task.archived) continue;
     const key = task.worktreeId ?? null;
     let counts = byWorktree.get(key);

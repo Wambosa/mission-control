@@ -6,7 +6,6 @@ import {
   deleteSandbox,
   getSandboxState,
   revealSandboxApiKey,
-  setActiveScope,
   setSandboxesEnabled,
   updateSandbox,
 } from "../services/sandboxes";
@@ -24,7 +23,7 @@ import { isElectronLocalApiRequest } from "../request-runtime";
 
 // Sandboxes are a local-desktop feature; hosted (web) requests get a disabled,
 // empty state and cannot mutate.
-const DISABLED_STATE = { sandboxes: [], enabled: false, activeScopeId: "local" } as const;
+const DISABLED_STATE = { sandboxes: [], enabled: false } as const;
 
 const updateBody = z
   .object({
@@ -38,7 +37,6 @@ const updateBody = z
   })
   .partial();
 
-const activeBody = z.object({ scopeId: z.string().min(1) });
 const enabledBody = z.object({ enabled: z.boolean() });
 
 const sshHostBody = z.object({
@@ -162,14 +160,6 @@ export async function remove(rawId: string, request: Request): Promise<Response>
   const id = idParam.safeParse(rawId);
   if (!id.success) return notFound();
   return deleteSandbox(id.data) ? noContent() : notFound();
-}
-
-export async function setActive(request: Request): Promise<Response> {
-  const blocked = localOnly(request);
-  if (blocked) return blocked;
-  const parsed = await parseJsonBody(request, activeBody);
-  if (!parsed.ok) return parsed.response;
-  return json({ activeScopeId: setActiveScope(parsed.data.scopeId) });
 }
 
 export async function setEnabled(request: Request): Promise<Response> {

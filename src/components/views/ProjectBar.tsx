@@ -4,7 +4,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { toast } from "sonner";
-import { useGroups, useSandboxes, useScopedProjects, useSettings, queryKeys } from "~/queries";
+import { useGroups, useProjects, useSettings, queryKeys } from "~/queries";
 import type { ProjectWithCounts } from "~/shared/projects";
 import type { Group } from "~/db/schema";
 import { ProjectIcon } from "~/components/ui/ProjectIcon";
@@ -64,8 +64,7 @@ type RailRow = {
 export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disabled?: boolean }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { data: projects } = useScopedProjects();
-  const { data: sandboxState } = useSandboxes();
+  const { data: projects } = useProjects();
   const { data: groups = [] } = useGroups();
   const { data: settings } = useSettings();
   const minimal = settings?.minimalTheme ?? false;
@@ -193,13 +192,6 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
     .map((project) => project.id);
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  useEffect(() => {
-    setProjectDrag(null);
-    setGroupDragOrder(null);
-    groupDragOrderRef.current = null;
-    setGroupDrag(null);
-    setMenu(null);
-  }, [sandboxState?.activeScopeId, sandboxState?.enabled]);
   // Stop overriding once the server group order catches up to the optimistic
   // one (or diverges from it) — the fetched list is authoritative again.
   useEffect(() => {

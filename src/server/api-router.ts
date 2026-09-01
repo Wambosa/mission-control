@@ -243,9 +243,6 @@ async function dispatch(
   if (pathname === "/api/sandboxes/ssh-host" && method === "POST") {
     return sandboxesController.registerSsh(request);
   }
-  if (pathname === "/api/sandboxes/active" && method === "PUT") {
-    return sandboxesController.setActive(request);
-  }
   if (pathname === "/api/sandboxes/enabled" && method === "PUT") {
     return sandboxesController.setEnabled(request);
   }
@@ -263,7 +260,7 @@ async function dispatch(
   m = pathname.match(PROJECT_TASKS_PATH);
   if (m) {
     const id = decode(m[1]);
-    if (method === "GET") return tasksController.listForProject(id, request);
+    if (method === "GET") return tasksController.listForProject(id);
     if (method === "POST") return tasksController.create(id, request);
   }
   m = pathname.match(PROJECT_WORKTREES_PATH);

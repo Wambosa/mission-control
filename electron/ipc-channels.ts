@@ -69,7 +69,7 @@ export const IPC = {
   sandboxRebuild: "sandbox:rebuild",
   sandboxDown: "sandbox:down",
   sandboxDestroy: "sandbox:destroy",
-  sandboxSetActive: "sandbox:set-active",
+  sandboxEnsureStarted: "sandbox:ensure-started",
   sandboxConnect: "sandbox:connect",
   sandboxDisconnect: "sandbox:disconnect",
   sandboxStatus: "sandbox:status",

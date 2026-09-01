@@ -294,14 +294,4 @@ export function scopeToSandboxId(scope: ScopeId | null | undefined): string | nu
 
 export type SandboxScopeState = {
   enabled: boolean;
-  activeScopeId: string;
 };
-
-/** Project sandboxes do not hide or duplicate the project list. */
-export function filterProjectsByScope<T>(
-  projects: T[],
-  sandboxState: SandboxScopeState | null | undefined,
-): T[] {
-  void sandboxState;
-  return projects;
-}

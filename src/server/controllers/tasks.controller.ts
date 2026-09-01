@@ -19,7 +19,6 @@ import {
   noContent,
   notFound,
   parseJsonBody,
-  urlScopeId,
 } from "./_helpers";
 import { HTTP_CREATED } from "~/shared/http-status";
 import { getWorktree } from "../services/worktrees";
@@ -60,12 +59,11 @@ const updateStatusBody = z.object({
   prompt: z.string().optional(),
 });
 
-export async function listForProject(rawProjectId: string, request: Request): Promise<Response> {
+export async function listForProject(rawProjectId: string): Promise<Response> {
   const parsed = idParam.safeParse(rawProjectId);
   if (!parsed.success) return json({ tasks: [] });
-  const scopeId = urlScopeId(request);
   try {
-    return json({ tasks: listTasksForProject(parsed.data, scopeId) });
+    return json({ tasks: listTasksForProject(parsed.data) });
   } catch (e) {
     return rethrowUnlessDomain(e);
   }

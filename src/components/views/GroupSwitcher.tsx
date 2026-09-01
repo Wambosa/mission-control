@@ -15,7 +15,7 @@ import {
 } from "~/lib/active-group";
 import { useGroupsDialog } from "~/lib/groups-dialog-store";
 import { useHideableMenu } from "~/lib/hideable-elements";
-import { useScopedProjects } from "~/queries";
+import { useProjects } from "~/queries";
 import { useBinding } from "~/lib/keybindings/store";
 import { formatBinding } from "~/lib/keybindings/format";
 import { Z_INDEX } from "~/lib/z-index";
@@ -48,7 +48,7 @@ const UNGROUPED_DOT = "rgba(232, 230, 223, 0.3)";
  */
 export function GroupSwitcher() {
   const { activeGroup, setActiveGroup, groups } = useActiveGroup();
-  const { data: scopedProjects } = useScopedProjects();
+  const { data: scopedProjects } = useProjects();
   const groupsDialog = useGroupsDialog();
   const [open, setOpen] = useState(false);
   useSuspendAppDragRegion(open);

@@ -369,7 +369,7 @@ export const api = {
   // Sandboxes (isolated execution scopes). Desktop-only; on web this returns a
   // disabled, empty state.
   listSandboxes: () =>
-    req<{ sandboxes: SandboxPublicView[]; enabled: boolean; activeScopeId: string }>("/api/sandboxes"),
+    req<{ sandboxes: SandboxPublicView[]; enabled: boolean }>("/api/sandboxes"),
   connectSandbox: (input: {
     name: string;
     agentUrl: string;
@@ -406,11 +406,6 @@ export const api = {
   },
   revealSandboxApiKey: (id: string) =>
     req<{ apiKey: string }>(`/api/sandboxes/${id}/api-key`),
-  setActiveScope: (scopeId: string) =>
-    req<{ activeScopeId: string }>("/api/sandboxes/active", {
-      method: "PUT",
-      body: JSON.stringify({ scopeId }),
-    }),
   setSandboxesEnabled: (enabled: boolean) =>
     req<{ enabled: boolean }>("/api/sandboxes/enabled", {
       method: "PUT",

@@ -5,7 +5,6 @@ import {
   ConnectSandboxDialog,
   type ConnectSandboxInput,
 } from "~/components/views/ConnectSandboxDialog";
-import { activateSandboxScope } from "~/lib/activate-sandbox-scope";
 import { api } from "~/lib/api";
 import { getElectron } from "~/lib/electron";
 import { waitForSandboxConnected } from "~/lib/project-sandbox-create";
@@ -45,25 +44,16 @@ export function useConnectSandboxFlow() {
         const connected = await electron.sandbox.connect(sandbox.id);
         if (!connected.ok) throw new Error(connected.error);
         await waitForSandboxConnected(electron, sandbox.id, MANUAL_CONNECT_TIMEOUT_MS);
-        // activateSandboxScope toasts its own failure and returns false — it
-        // never throws, so success must not be assumed past this point.
-        const activated = await activateSandboxScope(queryClient, sandbox.id);
-        if (!activated) {
-          setError(
-            "Connected and saved, but couldn't switch to it — pick it in the scope switcher.",
-          );
-          return;
-        }
         toast.success(`Connected to ${sandbox.name}`);
         setOpen(false);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to connect to the sandbox.";
         // A row that registered but failed to connect is kept: the user can fix
-        // the agent and retry from the scope switcher, or delete it in its
-        // settings — silently rolling back would hide what happened.
+        // the agent and retry, or delete it in its settings — silently rolling
+        // back would hide what happened.
         setError(
           registeredId
-            ? `${message} The sandbox was saved — pick it in the scope switcher to retry, or delete it from its settings.`
+            ? `${message} The sandbox was saved — retry, or delete it from its settings.`
             : message,
         );
       } finally {

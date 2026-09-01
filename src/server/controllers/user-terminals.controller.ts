@@ -13,7 +13,6 @@ import {
   noContent,
   notFound,
   parseJsonBody,
-  urlScopeId,
   urlWorktreeId,
 } from "./_helpers";
 import { HTTP_CREATED } from "~/shared/http-status";
@@ -37,12 +36,11 @@ export async function listForProject(rawProjectId: string, request: Request): Pr
   const parsed = idParam.safeParse(rawProjectId);
   if (!parsed.success) return json({ terminals: [] });
   const worktreeId = urlWorktreeId(request);
-  const scopeId = urlScopeId(request);
   try {
     return json({
       terminals: worktreeId === undefined
-        ? listUserTerminals(parsed.data, scopeId)
-        : listUserTerminalsForWorktree(parsed.data, worktreeId, scopeId),
+        ? listUserTerminals(parsed.data)
+        : listUserTerminalsForWorktree(parsed.data, worktreeId),
     });
   } catch (e) {
     return rethrowUnlessDomain(e);

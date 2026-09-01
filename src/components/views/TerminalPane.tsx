@@ -162,12 +162,6 @@ export type TerminalDescriptor = {
   pendingValidation?: boolean;
 };
 
-/** The session pane's cached xterm surface; carries the sandbox flag so the
- *  "sandbox" badge can be restored on reattach without re-detecting the runtime. */
-interface SessionTerminalSurface extends PaneTerminalSurface {
-  useSandbox: boolean;
-}
-
 // Header width (px) below which the secondary controls (rename, zoom, clone)
 // collapse into the "…" menu; below the tiny threshold the title/status block
 // is hidden too and surfaces at the top of that menu instead; below micro even
@@ -194,7 +188,6 @@ function HeaderMoreMenu({
   statusLabel,
   statusColor,
   showTitle,
-  showSandboxBadge,
   onTogglePin,
   pinned,
   pinBusy,
@@ -207,7 +200,6 @@ function HeaderMoreMenu({
   statusColor: string;
   /** Tiny header: the pane title is hidden, so show it at the top of the menu. */
   showTitle: boolean;
-  showSandboxBadge: boolean;
   /** Present only when the pin control was collapsed into the menu (micro). */
   onTogglePin?: () => void;
   pinned: boolean;
@@ -327,9 +319,6 @@ function HeaderMoreMenu({
                     }}
                   >
                     <span style={{ color: statusColor }}>{statusLabel}</span>
-                    {showSandboxBadge && (
-                      <span style={{ color: "var(--accent)", opacity: 0.85 }}>sandbox</span>
-                    )}
                   </div>
                 </div>
                 <DropdownMenuSeparator />
@@ -404,7 +393,6 @@ export function TerminalPane({
   const [liveStatus, setLiveStatus] = useState("");
   const [startError, setStartError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
-  const [isSandboxTerminal, setIsSandboxTerminal] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [titleDraft, setTitleDraft] = useState(task.title);
   const [savingTitle, setSavingTitle] = useState(false);
@@ -645,11 +633,10 @@ export function TerminalPane({
     // PARKS the surface (offscreen, still subscribed) instead of disposing it, so
     // leaving and returning to this session is a DOM move rather than a teardown +
     // scrollback replay.
-    const bindMount = (surface: SessionTerminalSurface) => {
+    const bindMount = (surface: PaneTerminalSurface) => {
       // On screen again — exempt from parked-surface eviction while visible.
       cache.markMounted(surface.id);
       termSurfaceRef.current = surface.controls;
-      setIsSandboxTerminal(surface.useSandbox);
       surface.controls.setFontSize(terminalFontSize);
       // Refit only after the resize settles — a live refit clears the WebGL
       // canvas on every cell-boundary crossing, strobing the whole grid.
@@ -672,7 +659,7 @@ export function TerminalPane({
       };
     };
 
-    const existing = cache.get(surfaceId) as SessionTerminalSurface | null;
+    const existing = cache.get(surfaceId) as PaneTerminalSurface | null;
     if (existing && existing.buildKey === buildKey) {
       container.appendChild(existing.el);
       const detach = bindMount(existing);
@@ -741,11 +728,10 @@ export function TerminalPane({
       term.open(el);
       const gpu = createTerminalGpuLease(term);
 
-      const surface: SessionTerminalSurface = {
+      const surface: PaneTerminalSurface = {
         id: surfaceId,
         el,
         buildKey,
-        useSandbox,
         ptyId: null,
         destroyed: false,
         gpu,
@@ -1527,25 +1513,6 @@ export function TerminalPane({
           className="mc-pane-header-actions"
           style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}
         >
-          {isSandboxTerminal && !tinyHeader && (
-            <span
-              title="This terminal runs inside the selected sandbox"
-              style={{
-                padding: "1px 7px",
-                borderRadius: 999,
-                fontFamily: "var(--mono)",
-                fontSize: 10,
-                color: "var(--accent)",
-                background: "var(--accent-faint, var(--accent-dim))",
-                border: "1px solid var(--accent-border)",
-                whiteSpace: "nowrap",
-                opacity: 0.85,
-                marginRight: 6,
-              }}
-            >
-              sandbox
-            </span>
-          )}
           {compactHeader ? (
             showMoreMenu ? (
             <HeaderMoreMenu
@@ -1553,7 +1520,6 @@ export function TerminalPane({
               statusLabel={statusMeta.label}
               statusColor={statusMeta.color}
               showTitle={tinyHeader}
-              showSandboxBadge={isSandboxTerminal}
               onTogglePin={microHeader ? onTogglePin : undefined}
               pinned={liveTask.pinned}
               pinBusy={pinBusy}

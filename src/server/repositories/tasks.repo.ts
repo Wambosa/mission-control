@@ -8,10 +8,6 @@ export function findAllTasks(): Task[] {
   return getDb().select().from(tasks).all();
 }
 
-export function findTasksByProjectIdAllScopes(projectId: string): Task[] {
-  return getDb().select().from(tasks).where(eq(tasks.projectId, projectId)).all();
-}
-
 // Local-scope tasks whose status claims a live agent process. Used by the
 // startup sweep: at Electron boot no local PTYs exist yet, so any such task is
 // an orphan of a previous run. Sandbox-scoped tasks are excluded — their
@@ -29,14 +25,14 @@ export function findActiveLocalTasks(): Task[] {
     .all();
 }
 
-export function findTasksByProjectId(
-  projectId: string,
-  scopeId: string | null = LOCAL_SCOPE_ID,
-): Task[] {
+// Every session recorded against the project, whatever scope it ran in. A
+// session belongs to its project, not to the host the project happens to point
+// at today, so changing that host must not hide the work.
+export function findTasksByProjectId(projectId: string): Task[] {
   return getDb()
     .select()
     .from(tasks)
-    .where(and(eq(tasks.projectId, projectId), eq(tasks.scopeId, normalizeScopeId(scopeId))))
+    .where(eq(tasks.projectId, projectId))
     .orderBy(desc(tasks.createdAt))
     .all();
 }

@@ -53,9 +53,8 @@ import {
   HeaderActionsProvider,
   HeaderActionsSlot,
 } from "~/components/ui/HeaderActionsSlot";
-import { apiTokenQueryOptions, useSettings, useScopedProjects, useSandboxes } from "~/queries";
+import { apiTokenQueryOptions, useSettings, useProjects, useSandboxes } from "~/queries";
 import { SandboxResumingOverlay } from "~/components/views/SandboxResumingOverlay";
-import { ScopeDropdown } from "~/components/views/ScopeDropdown";
 import { UpdateAvailableButton } from "~/components/ui/UpdateAvailableButton";
 import { ProviderUsageIndicator } from "~/components/views/ProviderUsageIndicator";
 import {
@@ -378,16 +377,9 @@ function Shell() {
   const { data: settings } = useSettings();
   const headerButtons = settings?.headerButtons ?? DEFAULT_HEADER_BUTTON_VISIBILITY;
   const { hideElementContextMenu, hideableMenu } = useHideableMenu();
-  const { data: projects } = useScopedProjects();
+  const { data: projects } = useProjects();
   const { activeGroup, setActiveGroup, groups } = useActiveGroup();
-  // While the active sandbox's remote VM is resuming, the workspace isn't usable
-  // yet: cover the route with a spinner and disable project navigation.
   const { data: sandboxState } = useSandboxes();
-  const activeSandbox =
-    sandboxState?.enabled
-      ? sandboxState.sandboxes.find((s) => s.id === sandboxState.activeScopeId) ?? null
-      : null;
-  const activeResuming = activeSandbox?.remoteStatus === "resuming";
   // Pure actions (stable identity) + narrow flip-only subscriptions, so a
   // background session-status tick doesn't re-render the whole shell. The active
   // session itself lives in the ProjectTerminalPanel leaf below.
@@ -448,6 +440,14 @@ function Shell() {
 
   const path = useRouterState({ select: (state) => state.location.pathname });
   const projectId = projectIdFromPath(path);
+  // While the open project's remote VM is resuming, its workspace isn't usable
+  // yet: cover the route with a spinner and disable project navigation.
+  const activeSandboxId = projects?.find((p) => p.id === projectId)?.sandboxId ?? null;
+  const activeSandbox =
+    sandboxState?.enabled && activeSandboxId
+      ? sandboxState.sandboxes.find((s) => s.id === activeSandboxId) ?? null
+      : null;
+  const activeResuming = activeSandbox?.remoteStatus === "resuming";
   // Focused Session Mode strips the whole shell: the /focus route renders the
   // only visible chrome, and the Electron window is a small floating card.
   const focusActive = isFocusPath(path);
@@ -833,18 +833,7 @@ function Shell() {
         <TopBar
           crumbs={crumbs}
           onHome={goHome}
-          centerActions={
-            <>
-              {/* Project cockpit, one grouped band: context (which project /
-               * which scope) then the project actions (run, branch/changes/
-               * ship, worktree, grid) portalled in by the project route. The
-               * sandbox switcher sits with the project as context; the single
-               * context→actions divider is the project route's leading action
-               * so it only appears when there are actions to separate. */}
-              <ScopeDropdown />
-              <HeaderActionsSlot />
-            </>
-          }
+          centerActions={<HeaderActionsSlot />}
           leadingInset={topBarLeadingInset}
           contentTopInset={topBarContentTopInset}
           // Keep the header draggable in every theme. In minimal mode #root

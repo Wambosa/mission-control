@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SSH_IDLE_WINDOW_MINUTES,
-  filterProjectsByScope,
   isSandboxKind,
-  LOCAL_SCOPE_ID,
   normalizeRemoteAgentUrl,
   parseSandboxImageProvenance,
   parseSshHostConfig,
@@ -192,30 +190,5 @@ describe("parseSandboxImageProvenance", () => {
       imageManifestVersion: null,
       imageAgentVersion: null,
     });
-  });
-});
-
-describe("filterProjectsByScope", () => {
-  const projects = [
-    { id: "local-a", sandboxId: null },
-    { id: "local-b", sandboxId: null },
-    { id: "sb-1-a", sandboxId: "sb-1" },
-    { id: "sb-2-a", sandboxId: "sb-2" },
-  ];
-
-  it("returns all projects when sandboxes are disabled", () => {
-    expect(filterProjectsByScope(projects, { enabled: false, activeScopeId: "sb-1" })).toEqual(
-      projects,
-    );
-    expect(filterProjectsByScope(projects, undefined)).toEqual(projects);
-  });
-
-  it("keeps the full project list when sandboxes are enabled", () => {
-    expect(
-      filterProjectsByScope(projects, { enabled: true, activeScopeId: LOCAL_SCOPE_ID }),
-    ).toEqual(projects);
-    expect(filterProjectsByScope(projects, { enabled: true, activeScopeId: "sb-1" })).toEqual(
-      projects,
-    );
   });
 });

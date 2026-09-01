@@ -35,7 +35,7 @@ import { SessionGrid } from "~/components/views/SessionGrid";
 import { archiveOpenSession, invalidateSessionQueries } from "~/lib/archive-session";
 import { enterFocusSession } from "~/lib/focus-session";
 import { consumeProjectOnboardIntent, type ProjectOnboardIntent } from "~/lib/project-onboard-intent";
-import { sandboxUsableForProject } from "~/lib/project-scoped-sandboxes";
+import { projectHostLabel } from "~/lib/project-host-label";
 import { useHideableMenu } from "~/lib/hideable-elements";
 import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
 import { NewAgentButton } from "~/components/views/NewAgentButton";
@@ -124,11 +124,6 @@ import {
   useCliAvailability,
 } from "~/lib/cli-availability";
 import {
-  activateSandboxScope,
-  projectRuntimeScopeId,
-  scopeIdToActivate,
-} from "~/lib/activate-sandbox-scope";
-import {
   SESSION_NOTIFICATION_OPEN_EVENT,
   clearPendingSessionOpen,
   readPendingSessionOpen,
@@ -137,7 +132,7 @@ import {
 import type { Group, Task, TaskStatus } from "~/db/schema";
 import type { ProjectPathStatus } from "~/shared/projects";
 import { worktreeScopeKey } from "~/shared/worktrees";
-import { LOCAL_SCOPE_ID, normalizeScopeId } from "~/shared/sandbox";
+import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 import { scopeKeyForProject } from "~/lib/scoped-project";
 import {
   ARCHIVE_ACTIVE_SESSION_EVENT,
@@ -216,17 +211,14 @@ function ProjectPage() {
     }),
     [project?.sandboxId, project?.remoteDirectory],
   );
+  // The project states its host; nothing else selects one. A project with no
+  // host runs on this machine.
+  const activeRuntimeScopeId = project?.sandboxId ?? LOCAL_SCOPE_ID;
   const activeRuntimeSandbox =
-    sandboxState?.activeScopeId && sandboxState.activeScopeId !== LOCAL_SCOPE_ID
-      ? sandboxState.sandboxes.find((sandbox) => sandbox.id === sandboxState.activeScopeId) ?? null
+    sandboxState?.enabled && project?.sandboxId
+      ? sandboxState.sandboxes.find((sandbox) => sandbox.id === project.sandboxId) ?? null
       : null;
-  const activeRuntimeScopeId =
-    sandboxState?.enabled &&
-    activeRuntimeSandbox &&
-    project &&
-    sandboxUsableForProject(activeRuntimeSandbox, project.id)
-      ? sandboxState.activeScopeId
-      : LOCAL_SCOPE_ID;
+  const hostLabel = projectHostLabel(project?.sandboxId, sandboxState?.sandboxes);
   const deploySandboxId = activeRuntimeSandbox?.id ?? null;
   const { deployJob, deployLogText } = useRemoteVmDeployForSandbox(deploySandboxId);
   const sandboxProvisioning =
@@ -729,14 +721,11 @@ function ProjectPage() {
           clearPendingSessionOpen(request);
           return;
         }
-        let resolvedScopeId = normalizeScopeId(request.scopeId);
+        // The session list is scope-blind, so a session recorded on a host the
+        // project no longer points at still opens here.
         let task = tasks.find((entry) => entry.id === request.taskId && !entry.archived) ?? null;
-
-        if (task) {
-          resolvedScopeId = normalizeScopeId(task.scopeId);
-        } else if (tasksQuery.isLoading || sandboxProvisioning) {
-          return;
-        } else {
+        if (!task) {
+          if (tasksQuery.isLoading || sandboxProvisioning) return;
           try {
             const { task: remoteTask } = await api.getTask(request.taskId);
             if (!remoteTask || remoteTask.projectId !== id || remoteTask.archived) {
@@ -744,32 +733,10 @@ function ProjectPage() {
               return;
             }
             task = remoteTask;
-            resolvedScopeId = normalizeScopeId(remoteTask.scopeId);
           } catch {
             clearPendingSessionOpen(request);
             return;
           }
-        }
-
-        const targetRuntimeScopeId = projectRuntimeScopeId(sandboxState, id, resolvedScopeId);
-        const activateTo = scopeIdToActivate(sandboxState, id, resolvedScopeId);
-        const globalActiveScopeId = normalizeScopeId(sandboxState?.activeScopeId ?? LOCAL_SCOPE_ID);
-
-        if (globalActiveScopeId !== activateTo) {
-          const switched = await activateSandboxScope(queryClient, activateTo);
-          if (!switched) clearPendingSessionOpen(request);
-          return;
-        }
-
-        if (activeRuntimeScopeId !== targetRuntimeScopeId) return;
-
-        if (!task) {
-          task = tasks.find((entry) => entry.id === request.taskId && !entry.archived) ?? null;
-        }
-        if (!task) {
-          if (tasksQuery.isLoading || sandboxProvisioning) return;
-          clearPendingSessionOpen(request);
-          return;
         }
 
         const active = terminals.activeFor(selectedScopeKey);
@@ -787,13 +754,10 @@ function ProjectPage() {
       id,
       terminalProject,
       selectedScopeKey,
-      activeRuntimeScopeId,
-      sandboxState,
       tasks,
       tasksQuery.isLoading,
       sandboxProvisioning,
       terminals,
-      queryClient,
     ],
   );
 
@@ -2201,6 +2165,31 @@ function ProjectPage() {
               </button>
             );
           })()}
+          {/* R16: the host is stated once, here, instead of on every session.
+            * The value is read-only — it is changed in project configuration,
+            * which is what activating this opens. */}
+          <button
+            type="button"
+            className="mc-project-host-chip"
+            onClick={() => setShowEdit(true)}
+            title={`${hostLabel} — open project configuration`}
+            aria-label={`Runs on ${hostLabel}. Open project configuration.`}
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                background: project.sandboxId ? "var(--accent)" : "var(--text-faint, var(--text-dim))",
+                boxShadow: project.sandboxId ? "0 0 6px color-mix(in srgb, var(--accent) 40%, transparent)" : "none",
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {hostLabel}
+            </span>
+          </button>
           {hideableMenu}
           {showSessionScopeToggle && (
             <SessionScopeToggle

@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import { api, setApiToken } from "~/lib/api";
 import { syncDefaultRuntimeDefaults } from "~/lib/default-model-store";
@@ -9,7 +8,7 @@ import {
   readCachedSandboxes,
   readCachedSettings,
 } from "~/lib/shell-query-cache";
-import { filterProjectsByScope, LOCAL_SCOPE_ID } from "~/shared/sandbox";
+import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 import { MAIN_WORKTREE_ID } from "~/shared/worktrees";
 
 export const queryKeys = {
@@ -292,16 +291,6 @@ export const promptSearchQueryOptions = (query: string, enabled: boolean) =>
 
 export const useProjects = () => useQuery(projectsQueryOptions());
 
-/** Projects visible in the active sandbox scope (Local or one sandbox). */
-export const useScopedProjects = () => {
-  const query = useProjects();
-  const { data: sandboxState } = useSandboxes();
-  const data = useMemo(() => {
-    if (query.data === undefined) return undefined;
-    return filterProjectsByScope(query.data, sandboxState);
-  }, [query.data, sandboxState]);
-  return { ...query, data };
-};
 export const useProject = (id: string) => useQuery(projectQueryOptions(id));
 export const useGroups = () => useQuery(groupsQueryOptions());
 export const useTasks = (projectId: string, scopeId?: string | null) =>

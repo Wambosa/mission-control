@@ -2936,6 +2936,42 @@ body[data-card-glow] .cursor-glow {
   background: transparent;
 }
 
+/* Project-header host chip (projects.$id.tsx): states the one machine every
+   session in this project runs on, and opens the project's configuration —
+   where that machine is chosen. Read-only describes the value, not the
+   control, so it acknowledges hover, press, and keyboard focus. */
+.mc-project-host-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 200px;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.mc-project-host-chip:hover {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--accent);
+}
+.mc-project-host-chip:active {
+  background: var(--surface-3, var(--surface-2));
+  transform: translateY(0.5px);
+}
+.mc-project-host-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Pinned-project rail tiles (ProjectBar.tsx): a faint tonal wash on hover so
    the tiles acknowledge the pointer before a click/drag. */
 .mc-pinned-tile {

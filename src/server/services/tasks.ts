@@ -1,7 +1,6 @@
 import { DEFAULT_BRANCH, DEFAULT_TASK_STATUS, isTaskAgent, isTaskStatus } from "~/shared/domain";
 import type { TaskAgent, TaskStatus } from "~/shared/domain";
 import type { Task } from "~/db/schema";
-import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 import { events } from "../events";
 import { deleteDiagramsForTask } from "./diagram-store";
 import { clearPendingQuestion } from "./pending-questions";
@@ -24,11 +23,8 @@ import { newId } from "./_ids";
 import { isClientDomainId } from "../../shared/client-id";
 import { normalizeProjectScopeId } from "./sandbox-scope";
 
-export function listTasksForProject(
-  projectId: string,
-  scopeId: string | null = LOCAL_SCOPE_ID,
-): Task[] {
-  return findTasksByProjectId(projectId, normalizeProjectScopeId(projectId, scopeId));
+export function listTasksForProject(projectId: string): Task[] {
+  return findTasksByProjectId(projectId);
 }
 
 export function getTask(id: string): Task | null {

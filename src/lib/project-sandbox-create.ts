@@ -1,7 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { mcToastLoading } from "~/lib/mc-toast";
-import { api } from "~/lib/api";
 import type { ElectronBridge } from "~/lib/electron";
 import {
   buildOptimisticRemoteVmSandbox,
@@ -14,7 +13,6 @@ import { queryKeys } from "~/queries";
 import { newClientId } from "~/shared/client-id";
 import { sandboxWorkspacePath, workspaceSlug } from "~/shared/sandbox-workspace";
 import { DEFAULT_BRANCH } from "~/shared/domain";
-import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 import type { Project } from "~/db/schema";
 import type { ProjectSandboxCreateInput } from "~/components/views/ProjectSandboxDialog";
 import { setupCommandNeedsPackageJson } from "~/lib/setup-command";
@@ -169,7 +167,6 @@ export async function createProjectSandbox({
   const toastId = mcToastLoading(`Creating ${input.name}…`, {
     description: `Deploying an AWS sandbox, cloning ${baseBranch}, and preparing the project.`,
   });
-  let activatedSandboxId: string | null = null;
   let started = false;
   let deploySucceeded = false;
   let previousSandboxes: SandboxesQueryData | undefined;
@@ -196,11 +193,10 @@ export async function createProjectSandbox({
       hasApiKey: true,
       projectId: project.id,
     });
-    upsertSandboxInCache(queryClient, optimisticSandbox, { activate: true });
+    upsertSandboxInCache(queryClient, optimisticSandbox);
     queryClient.setQueryData<SandboxesQueryData>(queryKeys.sandboxes, (current) =>
-      current ? { ...current, enabled: true, activeScopeId: sandboxId } : current,
+      current ? { ...current, enabled: true } : current,
     );
-    activatedSandboxId = sandboxId;
 
     mcToastLoading(`Deploying ${input.name}…`, {
       id: toastId,
@@ -232,18 +228,13 @@ export async function createProjectSandbox({
 
     const deployJob = await waitForRemoteVmDeployJob(electron, jobId);
     const sandbox = deployJob.result?.sandboxId ?? sandboxId;
-    if (sandbox !== activatedSandboxId) activatedSandboxId = sandbox;
     deploySucceeded = true;
 
     mcToastLoading(`Linking ${input.name}…`, {
       id: toastId,
       description: "Connecting the sandbox to this project.",
     });
-    await api.setActiveScope(sandbox);
-    await electron.sandbox.setActive(sandbox);
-    queryClient.setQueryData<SandboxesQueryData>(queryKeys.sandboxes, (current) =>
-      current ? { ...current, activeScopeId: sandbox } : current,
-    );
+    await electron.sandbox.ensureStarted(sandbox);
 
     mcToastLoading(`Connecting to ${input.name}…`, {
       id: toastId,
@@ -290,8 +281,6 @@ export async function createProjectSandbox({
     toast.dismiss(toastId);
     if (started && !deploySucceeded) {
       restoreSandboxesCache(queryClient, previousSandboxes);
-      await api.setActiveScope(LOCAL_SCOPE_ID).catch(() => undefined);
-      await electron.sandbox.setActive(null).catch(() => undefined);
     }
     const message = error instanceof Error ? error.message : "Could not create sandbox.";
     if (!started) onError(message);

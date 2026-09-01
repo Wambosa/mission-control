@@ -3,7 +3,6 @@ import { MAX_TCP_PORT } from "~/shared/tcp-port";
 import { safeJsonParse } from "~/shared/safe-json";
 import {
   DEFAULT_SSH_IDLE_WINDOW_MINUTES,
-  LOCAL_SCOPE_ID,
   normalizeRemoteAgentUrl,
   parseSandboxImageProvenance,
   parseSshHostConfig,
@@ -12,7 +11,7 @@ import {
   type SandboxRemoteConfig,
 } from "~/shared/sandbox";
 import type { SshHostPlatform } from "~/shared/ssh-provision";
-import { ACTIVE_SCOPE_KEY, SANDBOXES_ENABLED_KEY } from "~/db/migrate-multi-sandbox";
+import { SANDBOXES_ENABLED_KEY } from "~/db/migrate-multi-sandbox";
 import { randomUUID } from "node:crypto";
 import {
   deleteSandboxRow,
@@ -27,7 +26,7 @@ import { deleteUserTerminalsByScope } from "../repositories/user-terminals.repo"
 import { deleteHomeTerminalsByScope } from "../repositories/home-terminals.repo";
 import { events } from "../events";
 import { deleteAllProjectImagesFor } from "./project-images";
-import { getSetting, setBooleanSetting, setSetting } from "./settings";
+import { setBooleanSetting } from "./settings";
 
 // CRUD + scope-selection for sandboxes (isolated execution environments). The
 // container lifecycle is owned by the Electron main; Phase 1 manages only the
@@ -36,7 +35,6 @@ import { getSetting, setBooleanSetting, setSetting } from "./settings";
 export type SandboxState = {
   sandboxes: SandboxPublicView[];
   enabled: boolean;
-  activeScopeId: string;
 };
 
 const CONFIG_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -110,12 +108,7 @@ function toPublicSandbox(row: Sandbox): SandboxPublicView {
  *  selected scope (self-heals a dangling scope whose sandbox was deleted). */
 export function getSandboxState(): SandboxState {
   const list = findAllSandboxes();
-  let activeScopeId = getSetting(ACTIVE_SCOPE_KEY) ?? LOCAL_SCOPE_ID;
-  if (activeScopeId !== LOCAL_SCOPE_ID && !list.some((s) => s.id === activeScopeId)) {
-    activeScopeId = LOCAL_SCOPE_ID;
-    setSetting(ACTIVE_SCOPE_KEY, activeScopeId);
-  }
-  return { sandboxes: list.map(toPublicSandbox), enabled: true, activeScopeId };
+  return { sandboxes: list.map(toPublicSandbox), enabled: true };
 }
 
 export type ConnectRemoteSandboxInput = {
@@ -336,18 +329,7 @@ export function deleteSandbox(id: string): boolean {
   deleteUserTerminalsByScope(id);
   deleteHomeTerminalsByScope(id);
 
-  const removed = deleteSandboxRow(id) > 0;
-  if (removed && getSetting(ACTIVE_SCOPE_KEY) === id) {
-    setSetting(ACTIVE_SCOPE_KEY, LOCAL_SCOPE_ID);
-  }
-  return removed;
-}
-
-export function setActiveScope(scopeId: string): string {
-  const resolved =
-    scopeId === LOCAL_SCOPE_ID || findSandboxById(scopeId) ? scopeId : LOCAL_SCOPE_ID;
-  setSetting(ACTIVE_SCOPE_KEY, resolved);
-  return resolved;
+  return deleteSandboxRow(id) > 0;
 }
 
 export function setSandboxesEnabled(_enabled: boolean): void {

@@ -192,8 +192,8 @@ const electronAPI = {
     destroy: (sandboxId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC.sandboxDestroy, sandboxId),
     /** Set the scope the renderer is showing; routes remote PTY/fs/git. null = Local. */
-    setActive: (sandboxId: string | null): Promise<{ ok: true }> =>
-      ipcRenderer.invoke(IPC.sandboxSetActive, sandboxId),
+    ensureStarted: (sandboxId: string): Promise<{ ok: true }> =>
+      ipcRenderer.invoke(IPC.sandboxEnsureStarted, sandboxId),
     connect: (sandboxId?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC.sandboxConnect, sandboxId),
     disconnect: (sandboxId?: string): Promise<{ ok: true }> =>

@@ -467,7 +467,8 @@ export type ElectronBridge = {
     /** Destroy a sandbox's container + volumes. Call before deleting the DB row. */
     destroy: (sandboxId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
     /** Set the scope the renderer shows; routes remote PTY/fs/git. null = Local (host). */
-    setActive: (sandboxId: string | null) => Promise<{ ok: true }>;
+    /** Warm a sandbox's runtime. Nothing routes through a global scope. */
+    ensureStarted: (sandboxId: string) => Promise<{ ok: true }>;
     connect: (sandboxId?: string) => Promise<{ ok: true } | { ok: false; error: string }>;
     disconnect: (sandboxId?: string) => Promise<{ ok: true }>;
     status: () => Promise<{

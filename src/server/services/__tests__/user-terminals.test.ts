@@ -74,7 +74,7 @@ describe("user-terminals service", () => {
     expect(listUserTerminals(p2.id)).toHaveLength(1);
   });
 
-  it("scopes terminals per sandbox runtime", () => {
+  it("lists a project's terminals whatever scope they were opened in", () => {
     const p = makeProject();
     const now = Date.now();
     getDb()
@@ -102,8 +102,9 @@ describe("user-terminals service", () => {
     createUserTerminal({ projectId: p.id, scopeId: "local" });
     createUserTerminal({ projectId: p.id, scopeId: "sb-1" });
 
-    expect(listUserTerminals(p.id, "local").map((t) => t.scopeId)).toEqual(["local"]);
-    expect(listUserTerminals(p.id, "sb-1").map((t) => t.scopeId)).toEqual(["sb-1"]);
+    // The scope each terminal was opened on is still recorded; it just no
+    // longer decides which of the project's terminals are visible.
+    expect(listUserTerminals(p.id).map((t) => t.scopeId).sort()).toEqual(["local", "sb-1"]);
   });
 
   it("rejects terminals for an unknown sandbox scope", () => {

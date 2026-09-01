@@ -12,41 +12,28 @@ import {
 import { isClientDomainId } from "~/shared/client-id";
 import { projectExists } from "../repositories/projects.repo";
 import { newId } from "./_ids";
-import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 import { normalizeProjectScopeId } from "./sandbox-scope";
 import { nextTerminalName } from "./_terminal-names";
 
 /** Pick the lowest unused "Terminal N" name across the whole project. */
-export function nextDefaultTerminalName(
-  projectId: string,
-  scopeId: string | null = LOCAL_SCOPE_ID,
-): string {
-  const normalizedScopeId = normalizeProjectScopeId(projectId, scopeId);
-  const names = findVisibleUserTerminalsByProject(projectId, normalizedScopeId).map(
-    (t) => t.name,
-  );
+export function nextDefaultTerminalName(projectId: string): string {
+  const names = findVisibleUserTerminalsByProject(projectId).map((t) => t.name);
   return nextTerminalName(names);
 }
 
-export function listUserTerminals(
-  projectId: string,
-  scopeId: string | null = LOCAL_SCOPE_ID,
-): UserTerminal[] {
-  const normalizedScopeId = normalizeProjectScopeId(projectId, scopeId);
+export function listUserTerminals(projectId: string): UserTerminal[] {
   // Ephemeral terminals (those with a startCommand) run a one-off command and
   // are not meant to persist across reloads.
-  deleteEphemeralUserTerminalsByProject(projectId, normalizedScopeId);
-  return findVisibleUserTerminalsByProject(projectId, normalizedScopeId);
+  deleteEphemeralUserTerminalsByProject(projectId);
+  return findVisibleUserTerminalsByProject(projectId);
 }
 
 export function listUserTerminalsForWorktree(
   projectId: string,
   worktreeId: string | null,
-  scopeId: string | null = LOCAL_SCOPE_ID,
 ): UserTerminal[] {
-  const normalizedScopeId = normalizeProjectScopeId(projectId, scopeId);
-  deleteEphemeralUserTerminalsByProjectAndWorktree(projectId, worktreeId, normalizedScopeId);
-  return findVisibleUserTerminalsByProjectAndWorktree(projectId, worktreeId, normalizedScopeId);
+  deleteEphemeralUserTerminalsByProjectAndWorktree(projectId, worktreeId);
+  return findVisibleUserTerminalsByProjectAndWorktree(projectId, worktreeId);
 }
 
 export function createUserTerminal(input: {
@@ -63,8 +50,8 @@ export function createUserTerminal(input: {
 
   const existing =
     input.worktreeId === undefined
-      ? listUserTerminals(input.projectId, scopeId)
-      : listUserTerminalsForWorktree(input.projectId, input.worktreeId, scopeId);
+      ? listUserTerminals(input.projectId)
+      : listUserTerminalsForWorktree(input.projectId, input.worktreeId);
   const now = Date.now();
   const requestedId = input.id?.trim();
   if (requestedId && !isClientDomainId(requestedId)) throw new Error("invalid terminal id");
@@ -74,7 +61,7 @@ export function createUserTerminal(input: {
     projectId: input.projectId,
     worktreeId: input.worktreeId ?? null,
     scopeId,
-    name: input.name?.trim() || nextDefaultTerminalName(input.projectId, scopeId),
+    name: input.name?.trim() || nextDefaultTerminalName(input.projectId),
     cwd: input.cwd ?? null,
     startCommand: input.startCommand?.trim() || null,
     position: existing.length,

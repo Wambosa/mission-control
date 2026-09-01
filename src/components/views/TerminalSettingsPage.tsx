@@ -35,9 +35,7 @@ import { emptyVoiceCommandAliases } from "~/shared/voice-command-aliases";
 import { normalizeSessionHeaderButtonVisibility } from "~/shared/session-header-buttons";
 import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
 import { DEFAULT_SURFACE_TINT } from "~/shared/surface-tint";
-import { DEFAULT_SHIP_PROMPT } from "~/shared/ship-defaults";
 import { DEFAULT_SYNC_PROMPT } from "~/shared/sync-defaults";
-import { DEFAULT_PULL_REQUEST_PROMPT } from "~/shared/pull-request-defaults";
 
 type AppearancePatch = Partial<
   Pick<
@@ -190,7 +188,6 @@ export function TerminalSettingsPage() {
     activeProjectGroup: settings?.activeProjectGroup ?? null,
     collapsedProjectGroups: settings?.collapsedProjectGroups ?? null,
     selectedWorktreeByProject: settings?.selectedWorktreeByProject ?? null,
-    commitCli: settings?.commitCli ?? null,
     terminalZoomLevel: level,
     terminalFontFamily: fontFamily,
     terminalFontWeight: fontWeight,
@@ -206,15 +203,9 @@ export function TerminalSettingsPage() {
     defaultModel: settings?.defaultModel ?? null,
     annotationAgent: settings?.annotationAgent ?? "claude-code",
     annotationModel: settings?.annotationModel ?? null,
-    shipAgent: settings?.shipAgent ?? "claude-code",
-    shipModel: settings?.shipModel ?? null,
-    shipPrompt: settings?.shipPrompt ?? DEFAULT_SHIP_PROMPT,
     syncAgent: settings?.syncAgent ?? "claude-code",
     syncModel: settings?.syncModel ?? null,
     syncPrompt: settings?.syncPrompt ?? DEFAULT_SYNC_PROMPT,
-    pullRequestAgent: settings?.pullRequestAgent ?? "claude-code",
-    pullRequestModel: settings?.pullRequestModel ?? null,
-    pullRequestPrompt: settings?.pullRequestPrompt ?? DEFAULT_PULL_REQUEST_PROMPT,
     voiceCommandAliases: settings?.voiceCommandAliases ?? emptyVoiceCommandAliases(),
     voiceControlEnabled: settings?.voiceControlEnabled ?? true,
     questionOverlayEnabled: settings?.questionOverlayEnabled ?? true,

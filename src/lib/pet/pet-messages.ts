@@ -17,10 +17,6 @@ export type PetTrigger =
   | "session-finished-long"
   | "session-milestone"
   | "needs-input"
-  | "ship-committing"
-  | "ship-pushing"
-  | "ship-success"
-  | "ship-failure"
   // consecutive-failure escalation tiers (3 / 5 / 10 / 20 straight losses)
   | "error-streak"
   | "error-streak-5"
@@ -28,9 +24,7 @@ export type PetTrigger =
   | "error-streak-20"
   // first win after a rough patch, flavored by what kept failing
   | "comeback"
-  | "comeback-ship"
   | "comeback-interrupted"
-  | "pr-created"
   | "multi-agent"
   | "memory-learned"
   | "graph-indexed"
@@ -98,11 +92,6 @@ export type PetTrigger =
   | "christmas"
   | "new-years-eve"
   | "spooky-season"
-  // context combos — a base trigger landing at a telling hour or weekday
-  | "night-commit"
-  | "night-failure"
-  | "friday-push"
-  | "weekend-commit"
   // the user addressed the pet by name in a prompt
   | "name-mentioned"
   // prompt keyword flavor (what you're asking the agents to do)
@@ -204,18 +193,12 @@ const TRIGGER_META: Record<PetTrigger, TriggerMeta> = {
   // Fires only at exact milestone counts, so the store gates it, not the clock.
   "session-milestone": { priority: "info", cooldownMs: 0 },
   "needs-input": { priority: "critical", cooldownMs: 60_000 },
-  "ship-committing": { priority: "info", cooldownMs: 30_000 },
-  "ship-pushing": { priority: "info", cooldownMs: 30_000 },
-  "ship-success": { priority: "info", cooldownMs: 30_000 },
-  "ship-failure": { priority: "critical", cooldownMs: 30_000 },
   "error-streak": { priority: "critical", cooldownMs: 120_000 },
   "error-streak-5": { priority: "critical", cooldownMs: 120_000 },
   "error-streak-10": { priority: "critical", cooldownMs: 120_000 },
   "error-streak-20": { priority: "critical", cooldownMs: 120_000 },
   comeback: { priority: "info", cooldownMs: 60_000 },
-  "comeback-ship": { priority: "info", cooldownMs: 60_000 },
   "comeback-interrupted": { priority: "info", cooldownMs: 60_000 },
-  "pr-created": { priority: "info", cooldownMs: 300_000 },
   "multi-agent": { priority: "flavor", cooldownMs: 600_000 },
   "memory-learned": { priority: "flavor", cooldownMs: 300_000 },
   "graph-indexed": { priority: "flavor", cooldownMs: 300_000 },
@@ -285,12 +268,6 @@ const TRIGGER_META: Record<PetTrigger, TriggerMeta> = {
   christmas: { priority: "flavor", cooldownMs: ONCE_PER_BOOT },
   "new-years-eve": { priority: "flavor", cooldownMs: ONCE_PER_BOOT },
   "spooky-season": { priority: "flavor", cooldownMs: ONCE_PER_BOOT },
-  // Combos keep the base trigger's loudness; long cooldowns stop the joke
-  // wearing out over one late-night or weekend stretch.
-  "night-commit": { priority: "info", cooldownMs: 3_600_000 },
-  "night-failure": { priority: "critical", cooldownMs: 3_600_000 },
-  "friday-push": { priority: "info", cooldownMs: ONCE_PER_BOOT },
-  "weekend-commit": { priority: "info", cooldownMs: ONCE_PER_BOOT },
   // Typing the pet's name is deliberate — it always answers, like petting.
   "name-mentioned": { priority: "info", cooldownMs: 0 },
   "prompt-sent": { priority: "flavor", cooldownMs: PROMPT_SENT_COOLDOWN },
@@ -548,18 +525,3 @@ export function calendarTriggers(now: Date): PetTrigger[] {
   return out;
 }
 
-/**
- * Context × event combos — the same trigger lands differently at 2am or on a
- * Friday. Returns the sharper trigger when the clock agrees, else null; the
- * caller falls back to the base pack once the combo's cooldown has spent it.
- */
-export function comboTrigger(base: PetTrigger, now: Date): PetTrigger | null {
-  const weekday = now.getDay();
-  const hour = now.getHours();
-  const night = hour >= 22 || hour < 6;
-  if (night && base === "ship-committing") return "night-commit";
-  if (night && base === "ship-failure") return "night-failure";
-  if (base === "ship-pushing" && weekday === 5) return "friday-push";
-  if (base === "ship-committing" && (weekday === 0 || weekday === 6)) return "weekend-commit";
-  return null;
-}

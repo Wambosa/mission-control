@@ -30,7 +30,6 @@ import * as providerUsageController from "./controllers/provider-usage.controlle
 import * as agentLaunchersController from "./controllers/agent-launchers.controller";
 import * as eventsController from "./controllers/events.controller";
 import * as gitController from "./controllers/git.controller";
-import * as commitCliController from "./controllers/commit-cli.controller";
 import * as projectFileController from "./controllers/project-file.controller";
 import * as healthController from "./controllers/health.controller";
 import * as diagramsController from "./controllers/diagrams.controller";
@@ -431,9 +430,6 @@ async function dispatch(
     if (method === "GET") return settingsController.read();
     if (method === "POST") return settingsController.update(request);
   }
-  if (pathname === "/api/commit-cli/detect" && method === "GET") {
-    return commitCliController.detect();
-  }
   if (pathname === "/api/ai-runtime/models" && method === "GET") {
     return aiRuntimeModelsController.list(url);
   }
@@ -444,12 +440,6 @@ async function dispatch(
   }
   if (pathname === "/api/skills/install/diagram" && method === "POST") {
     return skillsController.installDiagram(request);
-  }
-  if (pathname === "/api/skills/install/ship/installed" && method === "GET") {
-    return skillsController.shipInstalled(url);
-  }
-  if (pathname === "/api/skills/install/ship" && method === "POST") {
-    return skillsController.installShip(request);
   }
 
   // Keybindings

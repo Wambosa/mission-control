@@ -5,7 +5,7 @@
 // Each key is hideable in place (right-click → Hide, see `useHideableMenu`) and
 // toggleable in Settings → Interface — both drive this same map.
 //
-// The structural chrome (settings, project picker, scope dropdown, ship/changes
+// The structural chrome (settings, project picker, scope dropdown, changes
 // controls) is intentionally NOT listed here: those have no hotkey-only path,
 // so hiding them would strand the action.
 

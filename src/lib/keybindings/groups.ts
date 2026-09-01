@@ -50,7 +50,6 @@ export const KEYBINDING_GROUPS: KeybindingGroup[] = [
       "file.finder",
       "file.save",
       "git.diff",
-      "project.ship",
       "prompt.search",
       "scratch.toggle",
     ],

@@ -2,8 +2,8 @@ import type { CSSProperties } from "react";
 import { Icon } from "./Icon";
 
 /**
- * A spinning `refresh` glyph — the inline loading indicator used across ship,
- * PR, sandbox, and markdown-refine flows. Relies on the global `spin` keyframe.
+ * A spinning `refresh` glyph — the inline loading indicator used across
+ * sandbox and markdown-refine flows. Relies on the global `spin` keyframe.
  * `color`/`aria-hidden`/`style` are omitted from the DOM when not passed, so
  * each call renders exactly what its former hand-rolled span did.
  */

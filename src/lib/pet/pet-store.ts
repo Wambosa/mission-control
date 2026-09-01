@@ -30,7 +30,6 @@ import {
   bubbleDurationMs,
   classifyPromptSnippet,
   mentionsPetName,
-  comboTrigger,
   createRateLimiter,
   parsePetCommand,
   pickLine,
@@ -42,7 +41,7 @@ import {
 /**
  * Mission Pet state machine. A module-level external store (same idiom as
  * agent-question-store) that folds every real activity signal — SSE events,
- * aggregate task counts, ship operations, user input — into one mood plus an
+ * aggregate task counts, user input — into one mood plus an
  * optional speech bubble. The pet has no artificial care stats: if it looks
  * busy, your agents are busy.
  */
@@ -54,7 +53,6 @@ export type PetMood =
   | "working"
   | "alert"
   | "celebrating"
-  | "shipping"
   | "startled"
   | "singing";
 
@@ -163,7 +161,6 @@ export type PetSnapshot = {
 export type PetInputs = {
   runningCount: number;
   needsInputCount: number;
-  shippingActive: boolean;
   startleUntil: number;
   celebrateUntil: number;
   /** A serenade — commanded ("Pixel, sing") or struck up as an idle antic —
@@ -214,15 +211,13 @@ const FLOURISH_MS = 1_400;
  */
 const TOOL_REACT_THROTTLE_MS = 8_000;
 
-/** Consecutive failures (ships, interruptions) before the pet calls a streak. */
+/** Consecutive failures (interruptions, blocked agents) before the pet calls a streak. */
 const ERROR_STREAK_THRESHOLD = 3;
 /** A win after this many straight failures reads as a comeback. */
 const COMEBACK_MIN_STREAK = 2;
 
 const XP_SESSION_FINISHED = 5;
 const XP_SESSION_FINISHED_LONG = 8;
-const XP_SHIP_SUCCESS = 10;
-const XP_PR_CREATED = 15;
 const XP_MEMORY_LEARNED = 3;
 const XP_PETTING = 1;
 
@@ -233,8 +228,6 @@ const XP_PETTING = 1;
 export const PET_XP_AWARDS = {
   sessionFinished: XP_SESSION_FINISHED,
   sessionFinishedLong: XP_SESSION_FINISHED_LONG,
-  shipSuccess: XP_SHIP_SUCCESS,
-  prCreated: XP_PR_CREATED,
   memoryLearned: XP_MEMORY_LEARNED,
   petting: XP_PETTING,
 } as const;
@@ -271,7 +264,6 @@ export function resolvePetMood(
   // work chatter so it reliably plays out, but still yields to a genuine
   // alert, startle, or nap above.
   if (now < inputs.singUntil) return { mood: "singing", intensity };
-  if (inputs.shippingActive) return { mood: "shipping", intensity };
   if (now < inputs.celebrateUntil) return { mood: "celebrating", intensity };
   if (inputs.runningCount > 0) return { mood: "working", intensity };
   if (now - inputs.lastKeyAt < WATCHING_WINDOW_MS) return { mood: "watching", intensity };
@@ -287,7 +279,6 @@ export function resolvePetMood(
 const INSTANT_MOODS: ReadonlySet<PetMood> = new Set([
   "alert",
   "startled",
-  "shipping",
   "celebrating",
   "singing",
 ]);
@@ -322,7 +313,6 @@ function homeRestFacing(): 1 | -1 {
 const inputs: PetInputs = {
   runningCount: 0,
   needsInputCount: 0,
-  shippingActive: false,
   startleUntil: 0,
   celebrateUntil: 0,
   singUntil: 0,
@@ -376,11 +366,11 @@ let aggregateNeedsInput = 0;
 let aggregateInterrupted = 0;
 // prompt:submitted timestamps, so session:finished can tell a long run.
 const promptStartedAt = new Map<string, number>();
-// Consecutive failures (ship errors, interruptions) with no success between —
+// Consecutive failures (interruptions, blocked agents) with no success between —
 // feeds the error-streak / comeback lines. Resets on any win.
 let failureStreak = 0;
 // What kept failing, so the eventual comeback line can name the struggle.
-let lastFailureKind: "ship" | "interrupted" | null = null;
+let lastFailureKind: "interrupted" | null = null;
 // Sessions finished since app boot; milestones (5, 10, 20…) get their own line.
 let sessionsFinishedCount = 0;
 
@@ -396,7 +386,7 @@ function isSessionMilestone(count: number): boolean {
  */
 function noteFailure(perFailureTrigger: PetTrigger): PetTrigger {
   failureStreak += 1;
-  lastFailureKind = perFailureTrigger === "ship-failure" ? "ship" : "interrupted";
+  lastFailureKind = "interrupted";
   bumpStats(
     persistent && failureStreak > persistent.stats.worstStreak
       ? { failures: 1, worstStreak: failureStreak - persistent.stats.worstStreak }
@@ -422,7 +412,6 @@ function noteSuccess(): PetTrigger | null {
   failureStreak = 0;
   lastFailureKind = null;
   if (!comeback) return null;
-  if (kind === "ship") return "comeback-ship";
   if (kind === "interrupted") return "comeback-interrupted";
   return "comeback";
 }
@@ -756,14 +745,6 @@ function say(trigger: PetTrigger, opts?: { key?: string }): boolean {
   }, bubbleDurationMs(text));
   invalidate();
   return true;
-}
-
-/** Say `base`, upgraded to its context combo (2am commit, friday push…) when
- * the clock agrees and the combo's own cooldown hasn't spent it yet. */
-function sayWithCombo(base: PetTrigger): void {
-  const combo = comboTrigger(base, new Date());
-  if (combo && say(combo)) return;
-  say(base);
 }
 
 // Which line pack answers each classified tool result. "neutral" and the
@@ -1287,47 +1268,6 @@ export function petSetAggregates(counts: {
   invalidate();
 }
 
-export function petSetShipping(active: boolean, phase: "committing" | "pushing" | null): void {
-  const started = active && !inputs.shippingActive;
-  const phaseChangedToPush = active && phase === "pushing";
-  inputs.shippingActive = active;
-  recompute();
-  if (started && phase === "committing") sayWithCombo("ship-committing");
-  else if (phaseChangedToPush) sayWithCombo("ship-pushing");
-}
-
-/** Outcome of a ship-family mutation (from the MutationCache). */
-export function petShipResult(kind: "push-success" | "failure" | "pr-created"): void {
-  if (!enabled) return;
-  switch (kind) {
-    case "push-success": {
-      const comeback = noteSuccess();
-      petPulse("celebrate");
-      bumpStats({ ships: 1 }, { ships: 1 });
-      // Speak before granting XP so a level-up ding can't steal the story.
-      say(comeback ?? "ship-success");
-      grantXp(XP_SHIP_SUCCESS);
-      return;
-    }
-    case "failure": {
-      petPulse("startle");
-      const trigger = noteFailure("ship-failure");
-      // Streak escalations outrank the clock flavor; a plain failure may
-      // still land as its late-night variant.
-      if (trigger === "ship-failure") sayWithCombo(trigger);
-      else say(trigger);
-      return;
-    }
-    case "pr-created":
-      noteSuccess();
-      petPulse("celebrate");
-      bumpStats({ prs: 1 }, { prs: 1 });
-      grantXp(XP_PR_CREATED);
-      say("pr-created");
-      return;
-  }
-}
-
 export function petPulse(kind: "celebrate" | "startle"): void {
   if (!enabled) return;
   const now = Date.now();
@@ -1539,8 +1479,6 @@ if (import.meta.env.DEV && typeof window !== "undefined") {
     say: (trigger: PetTrigger) => say(trigger),
     pulse: petPulse,
     setAggregates: petSetAggregates,
-    setShipping: petSetShipping,
-    shipResult: petShipResult,
     ingest: petIngestServerEvent,
     stroke: petStroke,
     grantXp,

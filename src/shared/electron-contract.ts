@@ -48,7 +48,6 @@ export type FileWriteResult =
   | { ok: false; error: FileWriteError | string; currentMtimeMs?: number };
 
 export type InstallDiagramSkillResult = import("~/shared/diagram-skill-install").DiagramSkillInstallResult;
-export type InstallShipSkillsResult = import("~/shared/ship-skill-install").ShipSkillInstallResult;
 
 export type LaunchProcessKillResult = {
   ptyCount: number;

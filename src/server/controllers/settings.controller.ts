@@ -12,11 +12,6 @@ import {
   type AccentColorId,
 } from "~/lib/accent-colors";
 import {
-  COMMIT_CLI_VALUES,
-  isCommitCli,
-  type CommitCli,
-} from "~/shared/commit-cli";
-import {
   AI_MODEL_ID_HELP,
   AI_RUNTIME_HARNESS_VALUES,
   isAiRuntimeHarness,
@@ -96,7 +91,6 @@ import {
   type HeaderButtonVisibility,
 } from "~/shared/header-buttons";
 import { readRecallSettings, writeRecallSettings } from "../services/recall-settings";
-import { DEFAULT_SHIP_PROMPT, normalizeShipPrompt } from "~/shared/ship-defaults";
 import {
   DEFAULT_PET_HOME_SIDE,
   isPetHomeSide,
@@ -107,26 +101,15 @@ import {
 } from "~/shared/pet";
 import { HTTP_BAD_REQUEST } from "~/shared/http-status";
 import { DEFAULT_SYNC_PROMPT, normalizeSyncPrompt } from "~/shared/sync-defaults";
-import {
-  DEFAULT_PULL_REQUEST_PROMPT,
-  normalizePullRequestPrompt,
-} from "~/shared/pull-request-defaults";
 import { json, jsonError, parseJsonBody } from "./_helpers";
 
-const COMMIT_CLI_SETTING_KEY = "commit_cli";
 const DEFAULT_AGENT_SETTING_KEY = "default_agent";
 const DEFAULT_MODEL_SETTING_KEY = "default_model";
 const ANNOTATION_AGENT_SETTING_KEY = "annotation_agent";
 const ANNOTATION_MODEL_SETTING_KEY = "annotation_model";
-const SHIP_AGENT_SETTING_KEY = "ship_agent";
-const SHIP_MODEL_SETTING_KEY = "ship_model";
-const SHIP_PROMPT_SETTING_KEY = "ship_prompt";
 const SYNC_AGENT_SETTING_KEY = "sync_agent";
 const SYNC_MODEL_SETTING_KEY = "sync_model";
 const SYNC_PROMPT_SETTING_KEY = "sync_prompt";
-const PULL_REQUEST_AGENT_SETTING_KEY = "pull_request_agent";
-const PULL_REQUEST_MODEL_SETTING_KEY = "pull_request_model";
-const PULL_REQUEST_PROMPT_SETTING_KEY = "pull_request_prompt";
 const GIT_DIFF_CHANGED_FILES_VIEW_KEY = "git_diff_changed_files_view";
 const GIT_DIFF_CHANGED_FILES_WIDTH_KEY = "git_diff_changed_files_width";
 const SELECTED_WORKTREE_BY_PROJECT_KEY = "selected_worktree_by_project";
@@ -235,7 +218,6 @@ const updateSettingsBody = z
     activeProjectGroup: z.string().trim().min(1).max(ACTIVE_PROJECT_GROUP_MAX_LENGTH).nullable(),
     collapsedProjectGroups: z.array(z.string().trim().min(1).max(ACTIVE_PROJECT_GROUP_MAX_LENGTH)).max(500).nullable(),
     selectedWorktreeByProject: z.record(z.string(), z.string()).nullable(),
-    commitCli: z.union([z.enum(COMMIT_CLI_VALUES), z.null()]),
     terminalZoomLevel: z.number().int().min(TERMINAL_ZOOM_MIN).max(TERMINAL_ZOOM_MAX),
     terminalFontFamily: z
       .string()
@@ -286,17 +268,9 @@ const updateSettingsBody = z
     defaultModel: aiModelBody,
     annotationAgent: z.enum(AI_RUNTIME_HARNESS_VALUES),
     annotationModel: aiModelBody,
-    shipAgent: z.enum(AI_RUNTIME_HARNESS_VALUES),
-    shipModel: aiModelBody,
-    shipPrompt: z.string().transform((value) => normalizeShipPrompt(value)),
     syncAgent: z.enum(AI_RUNTIME_HARNESS_VALUES),
     syncModel: aiModelBody,
     syncPrompt: z.string().transform((value) => normalizeSyncPrompt(value)),
-    pullRequestAgent: z.enum(AI_RUNTIME_HARNESS_VALUES),
-    pullRequestModel: aiModelBody,
-    pullRequestPrompt: z
-      .string()
-      .transform((value) => normalizePullRequestPrompt(value)),
     voiceCommandAliases: voiceCommandAliasesBody,
     claudeUsageLimitsEnabled: z.boolean(),
     claudeUsageLimitsShowSession: z.boolean(),
@@ -355,11 +329,6 @@ function getBackgroundImageSetting(): string | null {
   return isBackgroundImage(value) ? value : null;
 }
 
-function getCommitCliSetting(): CommitCli | null {
-  const value = getSetting(COMMIT_CLI_SETTING_KEY);
-  return isCommitCli(value) ? value : null;
-}
-
 function getDefaultAgentSetting(): AiRuntimeHarness {
   const value = getSetting(DEFAULT_AGENT_SETTING_KEY);
   return isAiRuntimeHarness(value) ? value : "claude-code";
@@ -380,21 +349,6 @@ function getAnnotationModelSetting(): AiModelId | null {
   return normalizeAiModelId(value);
 }
 
-function getShipAgentSetting(): AiRuntimeHarness {
-  const value = getSetting(SHIP_AGENT_SETTING_KEY);
-  return isAiRuntimeHarness(value) ? value : "claude-code";
-}
-
-function getShipModelSetting(): AiModelId | null {
-  const value = getSetting(SHIP_MODEL_SETTING_KEY);
-  return normalizeAiModelId(value);
-}
-
-function getShipPromptSetting(): string {
-  const value = getSetting(SHIP_PROMPT_SETTING_KEY);
-  return value === null ? DEFAULT_SHIP_PROMPT : normalizeShipPrompt(value);
-}
-
 function getSyncAgentSetting(): AiRuntimeHarness {
   const value = getSetting(SYNC_AGENT_SETTING_KEY);
   return isAiRuntimeHarness(value) ? value : "claude-code";
@@ -408,23 +362,6 @@ function getSyncModelSetting(): AiModelId | null {
 function getSyncPromptSetting(): string {
   const value = getSetting(SYNC_PROMPT_SETTING_KEY);
   return value === null ? DEFAULT_SYNC_PROMPT : normalizeSyncPrompt(value);
-}
-
-function getPullRequestAgentSetting(): AiRuntimeHarness {
-  const value = getSetting(PULL_REQUEST_AGENT_SETTING_KEY);
-  return isAiRuntimeHarness(value) ? value : "claude-code";
-}
-
-function getPullRequestModelSetting(): AiModelId | null {
-  const value = getSetting(PULL_REQUEST_MODEL_SETTING_KEY);
-  return normalizeAiModelId(value);
-}
-
-function getPullRequestPromptSetting(): string {
-  const value = getSetting(PULL_REQUEST_PROMPT_SETTING_KEY);
-  return value === null
-    ? DEFAULT_PULL_REQUEST_PROMPT
-    : normalizePullRequestPrompt(value);
 }
 
 function getGitDiffChangedFilesViewSetting() {
@@ -586,7 +523,6 @@ function settingsPayload() {
     activeProjectGroup: getActiveProjectGroupSetting(),
     collapsedProjectGroups: getCollapsedProjectGroupsSetting(),
     selectedWorktreeByProject: getSelectedWorktreeByProjectSetting(),
-    commitCli: getCommitCliSetting(),
     terminalZoomLevel: getTerminalZoomLevelSetting(),
     terminalFontFamily: getTerminalFontFamilySetting(),
     terminalFontWeight: getTerminalFontWeightSetting(),
@@ -601,15 +537,9 @@ function settingsPayload() {
     defaultModel: getDefaultModelSetting(),
     annotationAgent: getAnnotationAgentSetting(),
     annotationModel: getAnnotationModelSetting(),
-    shipAgent: getShipAgentSetting(),
-    shipModel: getShipModelSetting(),
-    shipPrompt: getShipPromptSetting(),
     syncAgent: getSyncAgentSetting(),
     syncModel: getSyncModelSetting(),
     syncPrompt: getSyncPromptSetting(),
-    pullRequestAgent: getPullRequestAgentSetting(),
-    pullRequestModel: getPullRequestModelSetting(),
-    pullRequestPrompt: getPullRequestPromptSetting(),
     voiceCommandAliases: getVoiceCommandAliasesSetting(),
     // Off by default: usage reaches out to provider APIs using local logins.
     claudeUsageLimitsEnabled: getBooleanSetting(CLAUDE_USAGE_LIMITS_ENABLED_KEY, false),
@@ -794,13 +724,6 @@ export async function update(request: Request): Promise<Response> {
       );
     }
   }
-  if (body.commitCli !== undefined) {
-    if (body.commitCli === null) {
-      deleteSetting(COMMIT_CLI_SETTING_KEY);
-    } else {
-      setSetting(COMMIT_CLI_SETTING_KEY, body.commitCli);
-    }
-  }
   if (body.terminalZoomLevel !== undefined) {
     setSetting(TERMINAL_ZOOM_LEVEL_KEY, String(body.terminalZoomLevel));
   }
@@ -859,19 +782,6 @@ export async function update(request: Request): Promise<Response> {
       setSetting(ANNOTATION_MODEL_SETTING_KEY, body.annotationModel);
     }
   }
-  if (body.shipAgent !== undefined) {
-    setSetting(SHIP_AGENT_SETTING_KEY, body.shipAgent);
-  }
-  if (body.shipModel !== undefined) {
-    if (body.shipModel === null) {
-      deleteSetting(SHIP_MODEL_SETTING_KEY);
-    } else {
-      setSetting(SHIP_MODEL_SETTING_KEY, body.shipModel);
-    }
-  }
-  if (body.shipPrompt !== undefined) {
-    setSetting(SHIP_PROMPT_SETTING_KEY, body.shipPrompt);
-  }
   if (body.syncAgent !== undefined) {
     setSetting(SYNC_AGENT_SETTING_KEY, body.syncAgent);
   }
@@ -884,19 +794,6 @@ export async function update(request: Request): Promise<Response> {
   }
   if (body.syncPrompt !== undefined) {
     setSetting(SYNC_PROMPT_SETTING_KEY, body.syncPrompt);
-  }
-  if (body.pullRequestAgent !== undefined) {
-    setSetting(PULL_REQUEST_AGENT_SETTING_KEY, body.pullRequestAgent);
-  }
-  if (body.pullRequestModel !== undefined) {
-    if (body.pullRequestModel === null) {
-      deleteSetting(PULL_REQUEST_MODEL_SETTING_KEY);
-    } else {
-      setSetting(PULL_REQUEST_MODEL_SETTING_KEY, body.pullRequestModel);
-    }
-  }
-  if (body.pullRequestPrompt !== undefined) {
-    setSetting(PULL_REQUEST_PROMPT_SETTING_KEY, body.pullRequestPrompt);
   }
   if (body.voiceCommandAliases !== undefined) {
     setSetting(VOICE_COMMAND_ALIASES_KEY, JSON.stringify(body.voiceCommandAliases));
@@ -976,14 +873,4 @@ export async function update(request: Request): Promise<Response> {
     learnedToastEnabled: body.recallLearnedToastEnabled,
   });
   return json(settingsPayload());
-}
-
-/** Used by the commit service to read the persisted CLI choice without an HTTP round-trip. */
-export function readCommitCliSetting(): CommitCli | null {
-  return getCommitCliSetting();
-}
-
-/** Persist a CLI choice from the server side (used when auto-detection seeds a value). */
-export function writeCommitCliSetting(cli: CommitCli): void {
-  setSetting(COMMIT_CLI_SETTING_KEY, cli);
 }

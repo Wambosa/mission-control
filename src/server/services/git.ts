@@ -1,12 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnCapture } from "./_spawn";
-import {
-  CommitMessageGenerationError,
-  resolveCommitCli,
-  runCommitCli,
-} from "./commit-cli";
-import { COMMIT_CLI_LABEL, type CommitCli } from "~/shared/commit-cli";
 import { DEFAULT_BRANCH } from "~/shared/domain";
 import { buildGithubCompareUrl } from "~/shared/github-pr";
 import { detectGithubUrl } from "./projects";
@@ -33,8 +27,6 @@ const GIT_TIMEOUT_MS = 15_000;
 const PUSH_TIMEOUT_MS = 30_000;
 const GH_TIMEOUT_MS = 30_000;
 const PR_BASE_BRANCH = DEFAULT_BRANCH;
-/** Cap staged-diff payload sent to the AI commit message generator. */
-const COMMIT_MESSAGE_DIFF_BUDGET = 200_000;
 
 // Git result types + diff caps now live in src/shared/git-status.ts so the
 // remote sandbox agent shares the exact wire contract. Imported for this
@@ -60,28 +52,6 @@ export class BranchInWorktreeError extends GitError {
   ) {
     super(message);
     this.name = "BranchInWorktreeError";
-  }
-}
-
-/** A commit failed because the AI step couldn't produce a usable message.
- * Carries the CLI identity so the UI's error modal can show "Claude Code
- * failed — try Codex in Settings" without re-deriving the choice. */
-export class CommitGenerationFailedError extends Error {
-  constructor(
-    message: string,
-    public readonly cli: CommitCli,
-    public readonly stderr?: string,
-  ) {
-    super(message);
-    this.name = "CommitGenerationFailedError";
-  }
-}
-
-/** Shown to the user when no supported CLI is on PATH at all. */
-export class NoCommitCliInstalledError extends Error {
-  constructor() {
-    super("no supported commit CLI is installed");
-    this.name = "NoCommitCliInstalledError";
   }
 }
 
@@ -155,11 +125,11 @@ function assertPullRequestHasCommits(opts: {
   if (aheadOfBase > 0) return;
   if (dirty) {
     throw new GitError(
-      `Branch "${branch}" has no commits ahead of ${baseBranch} yet. Accept your changes in Review Changes, then use Ship to commit and push before opening a pull request.`,
+      `Branch "${branch}" has no commits ahead of ${baseBranch} yet. Commit and push your work before opening a pull request.`,
     );
   }
   throw new GitError(
-    `Branch "${branch}" has no commits ahead of ${baseBranch}. Commit your work with Ship before opening a pull request.`,
+    `Branch "${branch}" has no commits ahead of ${baseBranch}. Commit and push your work before opening a pull request.`,
   );
 }
 
@@ -400,14 +370,14 @@ export async function commit(
   opts: {
     autoStage?: boolean;
     worktreeId?: string | null;
-    /** When supplied, skip CLI generation and use this verbatim as the commit message. */
-    message?: string;
-  } = {},
+    /** Verbatim commit message — the caller always supplies one. */
+    message: string;
+  },
 ): Promise<CommitResult> {
   const { autoStage = true } = opts;
   const cwd = projectCwd(projectId, opts.worktreeId);
   // Detect anything that could become a commit (staged or unstaged tracked
-  // changes, or untracked files). If nothing, bail before invoking the LLM.
+  // changes, or untracked files).
   const status = await gitOk(cwd, ["status", "--porcelain=v1", "-z"]);
   if (!status.trim()) return { kind: "nothing-to-commit" };
   if (autoStage) {
@@ -417,11 +387,8 @@ export async function commit(
   if (!cached.trim()) {
     return { kind: "nothing-to-commit" };
   }
-  const manual = opts.message?.trim();
-  const message = manual && manual.length > 0
-    ? manual
-    : (await generateCommitMessage(projectId, opts.worktreeId)).trim();
-  if (!message) throw new GitError("generated commit message was empty");
+  const message = opts.message.trim();
+  if (!message) throw new GitError("commit message was empty");
   await gitOk(cwd, ["commit", "-m", message], 30_000);
   const sha = (await gitOk(cwd, ["rev-parse", "HEAD"])).trim();
   return { kind: "committed", sha, message };
@@ -690,7 +657,7 @@ export async function createPullRequest(
 
   if (!(await remoteBranchExists(cwd, branch))) {
     throw new GitError(
-      `Branch "${branch}" is not on origin yet. Use Ship to commit and push your changes, then try creating the pull request again.`,
+      `Branch "${branch}" is not on origin yet. Commit and push your changes, then try creating the pull request again.`,
     );
   }
 
@@ -722,66 +689,6 @@ function combineStreams(r: RunGitResult): string {
   return [r.stdout, r.stderr].map((s) => s.trim()).filter(Boolean).join("\n");
 }
 
-const COMMIT_MESSAGE_PROMPT = `You are generating a git commit message. Read the staged diff that follows the marker and respond with ONLY the commit message — no preamble, no quotes, no code fences.
-
-Format: a single short subject line (50 chars or fewer, imperative mood, no trailing period). If the change is non-trivial, add a blank line and 1–4 short bullet points starting with "- " describing what changed and why. Do not invent details that are not in the diff.
-
---- STAGED DIFF ---
-`;
-
-async function generateCommitMessage(projectId: string, worktreeId?: string | null): Promise<string> {
-  const cwd = projectCwd(projectId, worktreeId);
-  const diff = await gitOk(cwd, ["diff", "--cached"], 30_000);
-  if (!diff.trim()) throw new GitError("nothing staged");
-  const trimmed =
-    diff.length > COMMIT_MESSAGE_DIFF_BUDGET
-      ? diff.slice(0, COMMIT_MESSAGE_DIFF_BUDGET) + "\n[diff truncated]\n"
-      : diff;
-
-  const { cli } = await resolveCommitCli();
-  if (!cli) {
-    // Zero supported CLIs reachable — surface a typed error so the UI
-    // routes the user to Settings (or the manual-message bypass).
-    throw new NoCommitCliInstalledError();
-  }
-  console.info(`[commit-cli] generating commit message via ${cli}`);
-  let raw: string;
-  try {
-    raw = await runCommitCli(cli, COMMIT_MESSAGE_PROMPT + trimmed, { cwd });
-  } catch (e) {
-    if (e instanceof CommitMessageGenerationError) {
-      throw new CommitGenerationFailedError(
-        `${COMMIT_CLI_LABEL[e.cli]} failed to generate a commit message`,
-        e.cli,
-        e.stderr,
-      );
-    }
-    throw e;
-  }
-  const sanitized = sanitizeCommitMessage(raw);
-  if (!sanitized) {
-    throw new CommitGenerationFailedError(
-      `${COMMIT_CLI_LABEL[cli]} returned an empty commit message`,
-      cli,
-    );
-  }
-  return sanitized;
-}
-
-function sanitizeCommitMessage(raw: string): string {
-  let t = raw.trim();
-  // Strip leading/trailing code fences if the model wraps the answer.
-  t = t.replace(/^```[a-zA-Z0-9]*\s*\n/, "").replace(/\n```$/m, "");
-  // Strip wrapping quotes around the whole message.
-  if (
-    (t.startsWith('"') && t.endsWith('"')) ||
-    (t.startsWith("'") && t.endsWith("'"))
-  ) {
-    t = t.slice(1, -1).trim();
-  }
-  return t;
-}
-
 export type GitBranch = {
   /** Short branch name used for checkout (e.g. `main`, `feat/foo`). */
   name: string;
@@ -803,10 +710,7 @@ export type GitCheckoutResult = {
 export type GitErrorPayload = {
   message: string;
   stderr?: string;
-  /** Identifies an AI-generation failure so the UI can render the recovery dialog. */
-  kind?: "commit-generation-failed" | "no-commit-cli" | "branch-in-worktree";
-  /** Which CLI was tried when kind === "commit-generation-failed". */
-  cli?: CommitCli;
+  kind?: "branch-in-worktree";
   /** Owning worktree when kind === "branch-in-worktree" — the client repoints to it. */
   worktreeId?: string;
   worktreeName?: string;
@@ -963,17 +867,6 @@ async function assertBranchNotInOtherWorktree(
 
 /** Surface stderr to API consumers without leaking the GitError class. */
 export function gitErrorPayload(e: unknown): GitErrorPayload {
-  if (e instanceof CommitGenerationFailedError) {
-    return {
-      message: e.message,
-      stderr: e.stderr,
-      kind: "commit-generation-failed",
-      cli: e.cli,
-    };
-  }
-  if (e instanceof NoCommitCliInstalledError) {
-    return { message: e.message, kind: "no-commit-cli" };
-  }
   if (e instanceof BranchInWorktreeError) {
     return {
       message: e.message,

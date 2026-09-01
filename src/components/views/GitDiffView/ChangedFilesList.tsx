@@ -12,7 +12,6 @@ import { ContextMenuPopover } from "~/components/ui/ContextMenuPopover";
 import { DropdownMenuItem, DropdownMenuSeparator } from "~/components/ui/DropdownMenuItem";
 import { Icon } from "~/components/ui/Icon";
 import { ConfirmDialog } from "~/components/ui/ConfirmDialog";
-import { CommitPushButton } from "~/components/views/CommitPushButton";
 import { useResizablePanel } from "~/lib/use-resizable-panel";
 import { api, type AppSettings } from "~/lib/api";
 import {
@@ -67,8 +66,6 @@ export function ChangedFilesList({
   onUnstageAll: _onUnstageAll,
   onDeleteFile,
   busyPaths,
-  enabled = true,
-  onShip,
 }: {
   staged: GitChangedFile[];
   unstaged: GitChangedFile[];
@@ -80,8 +77,6 @@ export function ChangedFilesList({
   onUnstageAll: () => void;
   onDeleteFile: (path: string) => void;
   busyPaths: Set<string>;
-  enabled?: boolean;
-  onShip: () => void;
 }) {
   const queryClient = useQueryClient();
   const { data: settings } = useSettings();
@@ -210,15 +205,6 @@ export function ChangedFilesList({
           label="Accepted Changes"
           count={staged.length}
           tone="staged"
-          extra={
-            <CommitPushButton
-              label="Ship"
-              title="Open an AI session to push and sync with remote"
-              variant="primary"
-              enabled={enabled}
-              onShip={onShip}
-            />
-          }
         >
           {staged.length === 0 ? (
             <Empty text="No accepted files" />

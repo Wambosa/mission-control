@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useQueryClient, type Mutation } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "~/lib/api";
 import { queryKeys, useProjects, useSettings } from "~/queries";
 import type { AppSettings } from "~/lib/api";
@@ -19,9 +19,7 @@ import {
   petSetAggregates,
   petSetEnabled,
   petSetHomeSide,
-  petSetShipping,
   petSetWindowHidden,
-  petShipResult,
   petSoundsOn,
   petUserActivity,
   subscribePetPersistence,
@@ -40,18 +38,6 @@ const UNCOMMITTED_NUDGE_FROM_HOUR = 17;
 const RECAP_FROM_HOUR = 15;
 /** A hatch-day only counts once the pet is roughly a year old. */
 const HATCH_DAY_MIN_AGE_DAYS = 330;
-
-// Ship detection rides on the stable mutationKey suffixes defined in
-// src/queries/git.ts (useGitCommit / useGitPush). Renaming those keys silently
-// kills the pet's shipping reactions. ("create-pr" is kept for compat: the
-// Create PR button now opens an AI session instead of a direct mutation.)
-type ShipKind = "commit" | "push" | "create-pr";
-
-function shipKindOf(mutation: Mutation<unknown, unknown, unknown, unknown>): ShipKind | null {
-  const key = mutation.options.mutationKey;
-  const last = Array.isArray(key) ? key[key.length - 1] : null;
-  return last === "commit" || last === "push" || last === "create-pr" ? last : null;
-}
 
 /**
  * Headless Mission Pet driver, mounted once in the Shell (including focus
@@ -93,42 +79,7 @@ export function usePetController(): void {
     petSetAggregates({ running, needsInput, interrupted });
   }, [petEnabled, projects]);
 
-  // 4. Ship operations via the MutationCache (commit / push / create-pr).
-  const pendingShips = useRef(new Map<number, ShipKind>());
-  useEffect(() => {
-    if (!petEnabled) return;
-    const cache = queryClient.getMutationCache();
-    const unsubscribe = cache.subscribe((event) => {
-      const mutation = event.mutation;
-      if (!mutation) return;
-      const kind = shipKindOf(mutation);
-      if (!kind) return;
-      const status = mutation.state.status;
-      const pending = pendingShips.current;
-      if (status === "pending" && !pending.has(mutation.mutationId)) {
-        pending.set(mutation.mutationId, kind);
-        if (kind !== "create-pr") {
-          petSetShipping(true, kind === "push" ? "pushing" : "committing");
-        }
-      } else if (status === "success" || status === "error") {
-        if (!pending.delete(mutation.mutationId)) return;
-        const stillShipping = [...pending.values()].some((k) => k !== "create-pr");
-        if (!stillShipping) petSetShipping(false, null);
-        if (status === "error") petShipResult("failure");
-        else if (kind === "push") petShipResult("push-success");
-        else if (kind === "create-pr") petShipResult("pr-created");
-      }
-    });
-    return () => {
-      unsubscribe();
-      pendingShips.current.clear();
-      petSetShipping(false, null);
-    };
-    // NOTE: src/lib/ship-operations.ts exists for AI-driven ship flows but has
-    // no live producers today; if it gains call sites, subscribe to it here.
-  }, [petEnabled, queryClient]);
-
-  // 5. User activity (typing / pointer) + window visibility for idle & sleep.
+  // 4. User activity (typing / pointer) + window visibility for idle & sleep.
   useEffect(() => {
     if (!petEnabled || typeof window === "undefined") return;
     let lastPointerAt = 0;
@@ -158,7 +109,7 @@ export function usePetController(): void {
     };
   }, [petEnabled]);
 
-  // 6. Persist identity changes (XP, name, fresh personality roll), debounced.
+  // 5. Persist identity changes (XP, name, fresh personality roll), debounced.
   useEffect(() => {
     if (!petEnabled) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -184,7 +135,7 @@ export function usePetController(): void {
     };
   }, [petEnabled, queryClient]);
 
-  // 7. Greeting shortly after boot, one calendar line (friday / halloween /
+  // 6. Greeting shortly after boot, one calendar line (friday / halloween /
   //    early-morning…) a beat later, and a slow ambient tick for idle/night
   //    flavor plus uptime milestones. The rate limiter caps every once-per-boot
   //    trigger, so a settings toggle or remount can't replay them.
@@ -250,7 +201,7 @@ export function usePetController(): void {
     };
   }, [petEnabled, queryClient]);
 
-  // 8. Level-up chime (opt-in via pet sounds toggle).
+  // 7. Level-up chime (opt-in via pet sounds toggle).
   useEffect(() => {
     if (!petEnabled) return;
     return onPetLevelUp(() => playNotificationDing(petSoundsOn()));

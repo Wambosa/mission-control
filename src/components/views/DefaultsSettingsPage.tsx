@@ -2,18 +2,10 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Btn } from "~/components/ui/Btn";
-import { Icon } from "~/components/ui/Icon";
 import { Field, SettingsSection } from "~/components/views/SettingsParts";
 import { ApiError, api, type AppSettings } from "~/lib/api";
 import { syncDefaultRuntimeDefaults } from "~/lib/default-model-store";
 import { queryKeys, useSettings } from "~/queries";
-import {
-  COMMIT_CLI_DESCRIPTION,
-  COMMIT_CLI_LABEL,
-  COMMIT_CLI_VALUES,
-  type CommitCli,
-  type CommitCliDetection,
-} from "~/shared/commit-cli";
 import { AGENT_REGISTRY } from "~/shared/agents";
 import {
   AI_RUNTIME_HARNESS_VALUES,
@@ -25,22 +17,15 @@ import {
   type AiRuntimeHarness,
   type AiRuntimeModelsResponse,
 } from "~/shared/ai-runtime-defaults";
-import { DEFAULT_SHIP_PROMPT } from "~/shared/ship-defaults";
 import { DEFAULT_SYNC_PROMPT } from "~/shared/sync-defaults";
-import { DEFAULT_PULL_REQUEST_PROMPT } from "~/shared/pull-request-defaults";
 
-type DefaultsFeatureId = "commit" | "voice" | "markdown" | "ship" | "sync" | "pull-request";
+type DefaultsFeatureId = "voice" | "markdown" | "sync";
 
 const DEFAULTS_FEATURES: Array<{
   id: DefaultsFeatureId;
   label: string;
   description: string;
 }> = [
-  {
-    id: "commit",
-    label: "Commit Messages",
-    description: "CLI used when drafting a commit message from a staged diff.",
-  },
   {
     id: "voice",
     label: "Voice Agents",
@@ -52,109 +37,32 @@ const DEFAULTS_FEATURES: Array<{
     description: "Harness and model for annotation rewrites.",
   },
   {
-    id: "ship",
-    label: "Ship",
-    description: "Harness, model, and prompt for the Ship button.",
-  },
-  {
     id: "sync",
     label: "Sync",
     description: "Harness, model, and prompt for the branch Sync button.",
-  },
-  {
-    id: "pull-request",
-    label: "Create PR",
-    description: "Harness, model, and prompt for the Ship → Create PR action.",
   },
 ];
 
 export function DefaultsSettingsPage() {
   const queryClient = useQueryClient();
   const { data: settings } = useSettings();
-  const currentCli = settings?.commitCli ?? null;
   const currentAgent = settings?.defaultAgent ?? "claude-code";
   const currentModel = settings?.defaultModel ?? null;
   const currentAnnotationAgent = settings?.annotationAgent ?? "claude-code";
   const currentAnnotationModel = settings?.annotationModel ?? null;
-  const currentShipAgent = settings?.shipAgent ?? "claude-code";
-  const currentShipModel = settings?.shipModel ?? null;
-  const currentShipPrompt = settings?.shipPrompt ?? DEFAULT_SHIP_PROMPT;
   const currentSyncAgent = settings?.syncAgent ?? "claude-code";
   const currentSyncModel = settings?.syncModel ?? null;
   const currentSyncPrompt = settings?.syncPrompt ?? DEFAULT_SYNC_PROMPT;
-  const currentPullRequestAgent = settings?.pullRequestAgent ?? "claude-code";
-  const currentPullRequestModel = settings?.pullRequestModel ?? null;
-  const currentPullRequestPrompt =
-    settings?.pullRequestPrompt ?? DEFAULT_PULL_REQUEST_PROMPT;
 
-  const [detection, setDetection] = useState<CommitCliDetection | null>(null);
-  const [detectError, setDetectError] = useState<string | null>(null);
-  const [detecting, setDetecting] = useState(false);
-  const [cliUpdating, setCliUpdating] = useState(false);
-  const [activeFeature, setActiveFeature] = useState<DefaultsFeatureId>("commit");
+  const [activeFeature, setActiveFeature] = useState<DefaultsFeatureId>("voice");
   const [runtimeUpdating, setRuntimeUpdating] = useState(false);
   const runtimeUpdateInFlightRef = useRef(false);
-  const [shipPromptDraft, setShipPromptDraft] = useState(currentShipPrompt);
-  const [shipPromptSaving, setShipPromptSaving] = useState(false);
   const [syncPromptDraft, setSyncPromptDraft] = useState(currentSyncPrompt);
   const [syncPromptSaving, setSyncPromptSaving] = useState(false);
-  const [pullRequestPromptDraft, setPullRequestPromptDraft] = useState(
-    currentPullRequestPrompt,
-  );
-  const [pullRequestPromptSaving, setPullRequestPromptSaving] = useState(false);
-
-  useEffect(() => {
-    setShipPromptDraft(currentShipPrompt);
-  }, [currentShipPrompt]);
 
   useEffect(() => {
     setSyncPromptDraft(currentSyncPrompt);
   }, [currentSyncPrompt]);
-
-  useEffect(() => {
-    setPullRequestPromptDraft(currentPullRequestPrompt);
-  }, [currentPullRequestPrompt]);
-
-  const runDetect = async () => {
-    setDetecting(true);
-    setDetectError(null);
-    try {
-      const { detected } = await api.detectCommitCli();
-      setDetection(detected);
-    } catch (e) {
-      setDetectError(e instanceof Error ? e.message : "detection failed");
-    } finally {
-      setDetecting(false);
-    }
-  };
-
-  // Re-detect every time the panel mounts so newly-installed CLIs appear
-  // without forcing the user to restart the app.
-  useEffect(() => {
-    void runDetect();
-  }, []);
-
-  const selectCli = async (cli: CommitCli | null) => {
-    if (cliUpdating) return;
-    setCliUpdating(true);
-    await queryClient.cancelQueries({ queryKey: queryKeys.settings });
-    const previous = queryClient.getQueryData<AppSettings>(queryKeys.settings);
-    if (previous) {
-      queryClient.setQueryData<AppSettings>(queryKeys.settings, {
-        ...previous,
-        commitCli: cli,
-      });
-    }
-    try {
-      const next = await api.updateSettings({ commitCli: cli });
-      queryClient.setQueryData(queryKeys.settings, next);
-    } catch (e) {
-      if (previous) queryClient.setQueryData(queryKeys.settings, previous);
-      toast.error(e instanceof Error ? e.message : "Could not update commit CLI");
-    } finally {
-      setCliUpdating(false);
-    }
-  };
 
   const updateRuntimeDefaults = async (
     patch: Partial<
@@ -164,15 +72,9 @@ export function DefaultsSettingsPage() {
         | "defaultModel"
         | "annotationAgent"
         | "annotationModel"
-        | "shipAgent"
-        | "shipModel"
-        | "shipPrompt"
         | "syncAgent"
         | "syncModel"
         | "syncPrompt"
-        | "pullRequestAgent"
-        | "pullRequestModel"
-        | "pullRequestPrompt"
       >
     >,
   ) => {
@@ -233,99 +135,6 @@ export function DefaultsSettingsPage() {
               padding: 16,
             }}
           >
-            {activeFeature === "commit" && (
-              <FeaturePanel
-                featureId="commit"
-                title="Commit Messages"
-                description={
-                  <>
-                    Mission Control can spawn this CLI in print mode to draft a
-                    commit message from a staged diff. The first time it runs, we
-                    auto-detect which of these tools are on your PATH and pick
-                    the first available one.
-                  </>
-                }
-              >
-                <Field label="Commit message CLI">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {COMMIT_CLI_VALUES.map((cli) => (
-                        <CliOption
-                          key={cli}
-                          cli={cli}
-                          selected={currentCli === cli}
-                          installed={detection?.[cli] ?? null}
-                          disabled={cliUpdating}
-                          onSelect={() => void selectCli(cli)}
-                        />
-                      ))}
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 12,
-                        marginTop: 4,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <Btn
-                        variant="ghost"
-                        size="sm"
-                        icon="refresh"
-                        onClick={() => void runDetect()}
-                        disabled={detecting}
-                      >
-                        {detecting ? "Detecting…" : "Re-detect"}
-                      </Btn>
-                      {currentCli && (
-                        <Btn
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => void selectCli(null)}
-                          disabled={cliUpdating}
-                        >
-                          Clear (auto-detect next time)
-                        </Btn>
-                      )}
-                      {detectError && (
-                        <span
-                          role="alert"
-                          style={{
-                            fontFamily: "var(--mono)",
-                            fontSize: 11,
-                            color: "var(--status-failed)",
-                          }}
-                        >
-                          {detectError}
-                        </span>
-                      )}
-                    </div>
-                    {detection && noneInstalled(detection) && (
-                      <div
-                        role="status"
-                        style={{
-                          marginTop: 4,
-                          padding: "10px 12px",
-                          borderRadius: 7,
-                          background:
-                            "color-mix(in srgb, var(--status-failed) 12%, transparent)",
-                          border:
-                            "1px solid color-mix(in srgb, var(--status-failed) 40%, transparent)",
-                          color: "var(--text)",
-                          fontSize: 12.5,
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        None of the supported CLIs were found on your PATH.
-                        Install one of them before drafting commit messages
-                        from a staged diff.
-                      </div>
-                    )}
-                  </div>
-                </Field>
-              </FeaturePanel>
-            )}
             {activeFeature === "voice" && (
                 <FeaturePanel
                   featureId="voice"
@@ -382,97 +191,6 @@ export function DefaultsSettingsPage() {
                     void updateRuntimeDefaults({ annotationModel: model })
                   }
                 />
-              </FeaturePanel>
-            )}
-            {activeFeature === "ship" && (
-              <FeaturePanel
-                featureId="ship"
-                title="Ship"
-                description={
-                  <>
-                    When you press <strong>Ship</strong>, Mission Control opens
-                    an AI session with this harness and injects the prompt below
-                    so the agent can push and sync with remote.
-                  </>
-                }
-              >
-                <RuntimeDefaultControl
-                  agent={currentShipAgent}
-                  model={currentShipModel}
-                  disabled={runtimeUpdating}
-                  onAgentSelect={(agent) =>
-                    void updateRuntimeDefaults({
-                      shipAgent: agent,
-                      shipModel: modelForSelectedHarness(agent, currentShipModel),
-                    })
-                  }
-                  onModelSelect={(model) =>
-                    void updateRuntimeDefaults({ shipModel: model })
-                  }
-                />
-                <Field label="Ship prompt">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <textarea
-                      value={shipPromptDraft}
-                      onChange={(e) => setShipPromptDraft(e.target.value)}
-                      rows={4}
-                      disabled={shipPromptSaving || runtimeUpdating}
-                      style={{
-                        width: "100%",
-                        resize: "vertical",
-                        minHeight: 88,
-                        padding: "10px 12px",
-                        borderRadius: 7,
-                        border: "1px solid var(--border)",
-                        background: "var(--surface-0)",
-                        color: "var(--text)",
-                        fontFamily: "var(--mono)",
-                        fontSize: 12,
-                        lineHeight: 1.45,
-                      }}
-                    />
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <Btn
-                        variant="primary"
-                        size="sm"
-                        disabled={
-                          shipPromptSaving ||
-                          runtimeUpdating ||
-                          shipPromptDraft.trim() === currentShipPrompt
-                        }
-                        onClick={() => {
-                          const next = shipPromptDraft.trim() || DEFAULT_SHIP_PROMPT;
-                          setShipPromptSaving(true);
-                          void updateRuntimeDefaults({ shipPrompt: next }).finally(() => {
-                            setShipPromptSaving(false);
-                          });
-                        }}
-                      >
-                        {shipPromptSaving ? "Saving…" : "Save prompt"}
-                      </Btn>
-                      <Btn
-                        variant="ghost"
-                        size="sm"
-                        disabled={
-                          shipPromptSaving ||
-                          runtimeUpdating ||
-                          shipPromptDraft === DEFAULT_SHIP_PROMPT
-                        }
-                        onClick={() => {
-                          setShipPromptDraft(DEFAULT_SHIP_PROMPT);
-                          setShipPromptSaving(true);
-                          void updateRuntimeDefaults({
-                            shipPrompt: DEFAULT_SHIP_PROMPT,
-                          }).finally(() => {
-                            setShipPromptSaving(false);
-                          });
-                        }}
-                      >
-                        Reset to default
-                      </Btn>
-                    </div>
-                  </div>
-                </Field>
               </FeaturePanel>
             )}
             {activeFeature === "sync" && (
@@ -568,105 +286,6 @@ export function DefaultsSettingsPage() {
                 </Field>
               </FeaturePanel>
             )}
-            {activeFeature === "pull-request" && (
-              <FeaturePanel
-                featureId="pull-request"
-                title="Create PR"
-                description={
-                  <>
-                    When you press <strong>Create PR</strong> from the Ship
-                    button&rsquo;s dropdown, Mission Control opens an AI session
-                    with this harness and injects the prompt below so the agent
-                    can commit and push local work, sync with upstream, then
-                    open a pull request in your browser.
-                  </>
-                }
-              >
-                <RuntimeDefaultControl
-                  agent={currentPullRequestAgent}
-                  model={currentPullRequestModel}
-                  disabled={runtimeUpdating}
-                  onAgentSelect={(agent) =>
-                    void updateRuntimeDefaults({
-                      pullRequestAgent: agent,
-                      pullRequestModel: modelForSelectedHarness(
-                        agent,
-                        currentPullRequestModel,
-                      ),
-                    })
-                  }
-                  onModelSelect={(model) =>
-                    void updateRuntimeDefaults({ pullRequestModel: model })
-                  }
-                />
-                <Field label="Create PR prompt">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <textarea
-                      value={pullRequestPromptDraft}
-                      onChange={(e) => setPullRequestPromptDraft(e.target.value)}
-                      rows={4}
-                      disabled={pullRequestPromptSaving || runtimeUpdating}
-                      style={{
-                        width: "100%",
-                        resize: "vertical",
-                        minHeight: 88,
-                        padding: "10px 12px",
-                        borderRadius: 7,
-                        border: "1px solid var(--border)",
-                        background: "var(--surface-0)",
-                        color: "var(--text)",
-                        fontFamily: "var(--mono)",
-                        fontSize: 12,
-                        lineHeight: 1.45,
-                      }}
-                    />
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <Btn
-                        variant="primary"
-                        size="sm"
-                        disabled={
-                          pullRequestPromptSaving ||
-                          runtimeUpdating ||
-                          pullRequestPromptDraft.trim() === currentPullRequestPrompt
-                        }
-                        onClick={() => {
-                          const next =
-                            pullRequestPromptDraft.trim() || DEFAULT_PULL_REQUEST_PROMPT;
-                          setPullRequestPromptSaving(true);
-                          void updateRuntimeDefaults({ pullRequestPrompt: next }).finally(
-                            () => {
-                              setPullRequestPromptSaving(false);
-                            },
-                          );
-                        }}
-                      >
-                        {pullRequestPromptSaving ? "Saving…" : "Save prompt"}
-                      </Btn>
-                      <Btn
-                        variant="ghost"
-                        size="sm"
-                        disabled={
-                          pullRequestPromptSaving ||
-                          runtimeUpdating ||
-                          pullRequestPromptDraft === DEFAULT_PULL_REQUEST_PROMPT
-                        }
-                        onClick={() => {
-                          setPullRequestPromptDraft(DEFAULT_PULL_REQUEST_PROMPT);
-                          setPullRequestPromptSaving(true);
-                          void updateRuntimeDefaults({
-                            pullRequestPrompt: DEFAULT_PULL_REQUEST_PROMPT,
-                          }).finally(() => {
-                            setPullRequestPromptSaving(false);
-                          });
-                        }}
-                      >
-                        Reset to default
-                      </Btn>
-                    </div>
-                  </div>
-                </Field>
-              </FeaturePanel>
-            )}
           </div>
         </div>
       </SettingsSection>
@@ -686,7 +305,7 @@ function isStaleSettingsSchemaError(
   patch: Partial<
     Pick<
       AppSettings,
-      "defaultAgent" | "annotationAgent" | "shipAgent" | "syncAgent" | "pullRequestAgent"
+      "defaultAgent" | "annotationAgent" | "syncAgent"
     >
   >,
 ): boolean {
@@ -695,10 +314,7 @@ function isStaleSettingsSchemaError(
   return (
     ("defaultAgent" in patch && message.includes('Unrecognized key: "defaultAgent"')) ||
     ("annotationAgent" in patch && message.includes('Unrecognized key: "annotationAgent"')) ||
-    ("shipAgent" in patch && message.includes('Unrecognized key: "shipAgent"')) ||
-    ("syncAgent" in patch && message.includes('Unrecognized key: "syncAgent"')) ||
-    ("pullRequestAgent" in patch &&
-      message.includes('Unrecognized key: "pullRequestAgent"'))
+    ("syncAgent" in patch && message.includes('Unrecognized key: "syncAgent"'))
   );
 }
 
@@ -1081,135 +697,4 @@ function HarnessOption({
 
 function harnessOptionId(agent: AiRuntimeHarness): string {
   return `defaults-harness-option-${agent}`;
-}
-
-function noneInstalled(detection: CommitCliDetection): boolean {
-  return COMMIT_CLI_VALUES.every((cli) => !detection[cli]);
-}
-
-function CliOption({
-  cli,
-  selected,
-  installed,
-  disabled,
-  onSelect,
-}: {
-  cli: CommitCli;
-  selected: boolean;
-  installed: boolean | null;
-  disabled: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      disabled={disabled}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-        padding: "12px 14px",
-        background: selected ? "var(--accent-dim)" : "var(--surface-0)",
-        border: `1px solid ${selected ? "var(--accent-border)" : "var(--border)"}`,
-        borderRadius: 7,
-        cursor: disabled ? "not-allowed" : "pointer",
-        textAlign: "left",
-        color: "var(--text)",
-        transition: "background 0.15s, border-color 0.15s",
-        opacity: disabled ? 0.65 : 1,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-        <span
-          aria-hidden
-          style={{
-            width: 14,
-            height: 14,
-            borderRadius: 999,
-            border: `2px solid ${selected ? "var(--accent)" : "var(--border)"}`,
-            background: selected ? "var(--accent)" : "transparent",
-            flexShrink: 0,
-          }}
-        />
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>
-            {COMMIT_CLI_LABEL[cli]}
-          </div>
-          <div
-            style={{
-              fontFamily: "var(--mono)",
-              fontSize: 11,
-              color: "var(--text-dim)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {COMMIT_CLI_DESCRIPTION[cli]}
-          </div>
-        </div>
-      </div>
-      <InstallBadge installed={installed} />
-    </button>
-  );
-}
-
-function InstallBadge({ installed }: { installed: boolean | null }) {
-  if (installed === null) {
-    return (
-      <span
-        style={{
-          fontFamily: "var(--mono)",
-          fontSize: 10.5,
-          color: "var(--text-faint)",
-          padding: "2px 8px",
-          borderRadius: 999,
-          border: "1px solid var(--border)",
-          flexShrink: 0,
-        }}
-      >
-        checking…
-      </span>
-    );
-  }
-  if (installed) {
-    return (
-      <span
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 4,
-          fontFamily: "var(--mono)",
-          fontSize: 10.5,
-          color: "var(--accent-ink)",
-          padding: "2px 8px",
-          borderRadius: 999,
-          border: "1px solid color-mix(in srgb, var(--accent) 50%, transparent)",
-          background: "color-mix(in srgb, var(--accent) 14%, transparent)",
-          flexShrink: 0,
-        }}
-      >
-        <Icon name="check" size={10} />
-        installed
-      </span>
-    );
-  }
-  return (
-    <span
-      style={{
-        fontFamily: "var(--mono)",
-        fontSize: 10.5,
-        color: "var(--text-dim)",
-        padding: "2px 8px",
-        borderRadius: 999,
-        border: "1px dashed var(--border)",
-        flexShrink: 0,
-      }}
-    >
-      not found
-    </span>
-  );
 }

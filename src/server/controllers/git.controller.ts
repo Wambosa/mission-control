@@ -24,9 +24,8 @@ const stageBody = z.object({
 const commitBody = z.object({
   autoStage: z.boolean().optional(),
   worktreeId: z.string().nullable().optional(),
-  /** Verbatim commit message; when provided, the CLI generation step is
-   * skipped entirely. Used by the ship-failed dialog's manual recovery. */
-  message: z.string().trim().min(1).max(4_000).optional(),
+  /** Verbatim commit message. */
+  message: z.string().trim().min(1).max(4_000),
 });
 const checkoutBody = z.object({
   branch: z.string().trim().min(1).max(255),
@@ -45,7 +44,6 @@ function asGitErrorResponse(e: unknown): Response {
       error: payload.message,
       stderr: payload.stderr,
       kind: payload.kind,
-      cli: payload.cli,
       worktreeId: payload.worktreeId,
       worktreeName: payload.worktreeName,
     }),

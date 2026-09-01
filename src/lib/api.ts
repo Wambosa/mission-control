@@ -25,7 +25,6 @@ import type { AgentAccountStatus, AgentLatestVersion } from "~/shared/agent-laun
 import type { PendingQuestion } from "~/shared/agent-questions";
 import type { PromptSearchResponse } from "~/shared/prompts";
 import type { WorktreeInfo } from "~/shared/worktrees";
-import type { CommitCli, CommitCliDetection } from "~/shared/commit-cli";
 import type {
   AiModelId,
   AiRuntimeHarness,
@@ -136,11 +135,6 @@ export type AppSettings = {
   /** Collapsed dashboard section keys — group ids plus "pinned"/"ungrouped". */
   collapsedProjectGroups: string[] | null;
   selectedWorktreeByProject: SelectedWorktreeByProject | null;
-  /**
-   * Which CLI generates Ship's commit message. `null` means "not set yet" —
-   * the server auto-detects and seeds it on the first ship attempt.
-   */
-  commitCli: CommitCli | null;
   /** Default terminal text zoom (-2 … +2). Per-pane overrides live in localStorage. */
   terminalZoomLevel: TerminalZoomLevel;
   /** Terminal font face; `null` = the active theme's bundled face. */
@@ -181,28 +175,13 @@ export type AppSettings = {
   annotationAgent: AiRuntimeHarness;
   annotationModel: AiModelId | null;
   /**
-   * Harness/model/prompt for the Ship button, which opens an AI session to push
-   * and sync with remote (pull/rebase/conflict fix when needed).
-   */
-  shipAgent: AiRuntimeHarness;
-  shipModel: AiModelId | null;
-  shipPrompt: string;
-  /**
    * Harness/model/prompt for the branch Sync split-button, which opens an AI
    * session to pull upstream changes into the current branch (stash/commit,
-   * conflict resolution, stash-pop). Mirrors the Ship trio.
+   * conflict resolution, stash-pop).
    */
   syncAgent: AiRuntimeHarness;
   syncModel: AiModelId | null;
   syncPrompt: string;
-  /**
-   * Harness/model/prompt for the Ship split-button's Create PR action, which
-   * opens an AI session to commit/push, sync with upstream, then open a pull
-   * request in the browser. Mirrors the Ship trio.
-   */
-  pullRequestAgent: AiRuntimeHarness;
-  pullRequestModel: AiModelId | null;
-  pullRequestPrompt: string;
   /** User-defined phrases that map to built-in voice commands. */
   voiceCommandAliases: VoiceCommandAliases;
   /**
@@ -755,7 +734,6 @@ export const api = {
         | "activeProjectGroup"
         | "collapsedProjectGroups"
         | "selectedWorktreeByProject"
-        | "commitCli"
         | "terminalZoomLevel"
         | "terminalFontFamily"
         | "terminalFontWeight"
@@ -770,15 +748,9 @@ export const api = {
         | "defaultModel"
         | "annotationAgent"
         | "annotationModel"
-        | "shipAgent"
-        | "shipModel"
-        | "shipPrompt"
         | "syncAgent"
         | "syncModel"
         | "syncPrompt"
-        | "pullRequestAgent"
-        | "pullRequestModel"
-        | "pullRequestPrompt"
         | "voiceCommandAliases"
         | "claudeUsageLimitsEnabled"
         | "claudeUsageLimitsShowSession"
@@ -816,8 +788,6 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  detectCommitCli: () =>
-    req<{ detected: CommitCliDetection }>("/api/commit-cli/detect"),
   listAiRuntimeModels: (agent: AiRuntimeHarness) =>
     req<AiRuntimeModelsResponse>(
       `/api/ai-runtime/models?agent=${encodeURIComponent(agent)}`,
@@ -859,13 +829,9 @@ export const api = {
     opts: {
       autoStage?: boolean;
       worktreeId?: string | null;
-      /**
-       * When supplied, the server skips CLI generation entirely and commits
-       * with this literal message. Used by the ship-failed dialog's manual
-       * recovery path.
-       */
-      message?: string;
-    } = {},
+      /** Verbatim commit message. */
+      message: string;
+    },
   ) =>
     req<CommitResult>(`/api/projects/${projectId}/git/commit`, {
       method: "POST",

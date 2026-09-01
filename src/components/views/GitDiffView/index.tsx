@@ -25,7 +25,6 @@ export function GitDiffView({
   enabled = true,
   onBack,
   showHeader = true,
-  onShip,
 }: {
   projectId: string;
   worktreeId?: string | null;
@@ -38,7 +37,6 @@ export function GitDiffView({
    * is purely presentational; all git state/compute below is unchanged.
    */
   showHeader?: boolean;
-  onShip: () => void;
 }) {
   // For a sandbox project the repo lives in the container; status/diff read over
   // remoteGit (the host HTTP path is used otherwise). Derived from the host dir.
@@ -233,8 +231,6 @@ export function GitDiffView({
             onUnstageAll={onUnstageAll}
             onDeleteFile={(p) => deleteM.mutate(p)}
             busyPaths={busyPaths}
-            enabled={enabled}
-            onShip={onShip}
           />
           <div
             style={{

@@ -96,9 +96,7 @@ import {
   peekPendingSessionModel,
   setPendingSessionModel,
 } from "~/lib/session-model-overrides";
-import { DEFAULT_SHIP_PROMPT } from "~/shared/ship-defaults";
 import { DEFAULT_SYNC_PROMPT } from "~/shared/sync-defaults";
-import { DEFAULT_PULL_REQUEST_PROMPT } from "~/shared/pull-request-defaults";
 import type { AiModelId } from "~/shared/ai-runtime-defaults";
 import {
   VOICE_NEW_AGENT_EVENT,
@@ -146,14 +144,11 @@ import { useWorktreesEnabled } from "~/lib/use-worktrees-enabled";
 import { useActiveGroup } from "~/lib/active-group";
 import { useGitStatus, useUpstreamFetchPoll } from "~/queries/git";
 import { GitDiffModal } from "~/components/views/GitDiffView/GitDiffModal";
-import { CommitPushButton } from "~/components/views/CommitPushButton";
 import { RecallModal } from "~/components/views/RecallModal";
 import { BranchTypeahead } from "~/components/views/BranchTypeahead";
 import { HeaderActions } from "~/components/ui/HeaderActionsSlot";
 import { InstallDiagramSkillMenuItem } from "~/components/views/InstallDiagramSkillMenuItem";
 import { InstallDiagramSkillModal } from "~/components/views/InstallDiagramSkillModal";
-import { InstallShipSkillMenuItem } from "~/components/views/InstallShipSkillMenuItem";
-import { InstallShipSkillModal } from "~/components/views/InstallShipSkillModal";
 import { SandboxProvisioningState } from "~/components/views/SandboxProvisioningState";
 import {
   isSandboxProvisioning,
@@ -646,7 +641,6 @@ function ProjectPage() {
   const [showCustomScriptsConfig, setShowCustomScriptsConfig] = useState(false);
   const [showWorktreeSetupConfig, setShowWorktreeSetupConfig] = useState(false);
   const [showInstallDiagramSkill, setShowInstallDiagramSkill] = useState(false);
-  const [showInstallShipSkill, setShowInstallShipSkill] = useState(false);
   const [showLaunchEmpty, setShowLaunchEmpty] = useState(false);
   const [confirmDeleteWorktree, setConfirmDeleteWorktree] = useState(false);
   const [worktreeDeleteConfirmName, setWorktreeDeleteConfirmName] = useState("");
@@ -936,24 +930,6 @@ function ProjectPage() {
       }
     },
     [createTerminal, setPanelOpen]
-  );
-
-  const runShipSkillInstallCommand = useCallback(
-    async (command: string) => {
-      try {
-        await createTerminal({
-          name: "Install ship skills",
-          startCommand: command,
-          cwd: selectedWorktreePath || project?.path || null,
-        });
-        setPanelOpen(true);
-        toast.success("Started ship skill install in a terminal.");
-      } catch {
-        toast.error("Failed to start ship skill install terminal.");
-        throw new Error("Failed to start install terminal");
-      }
-    },
-    [createTerminal, project?.path, selectedWorktreePath, setPanelOpen]
   );
 
   const runScript = useCallback(
@@ -1838,80 +1814,10 @@ function ProjectPage() {
     ],
   );
 
-  // Ship: open an AI session that pushes/syncs with remote using Settings → Defaults → Ship.
-  const startShipSession = useCallback(() => {
-    if (!project || !projectPathReady) return;
-    if (activeRuntimeScopeId !== LOCAL_SCOPE_ID) {
-      toast.error("Ship isn't supported in sandbox sessions yet.");
-      return;
-    }
-    const payload = defaultSessionPayload(project);
-    const anchor = anchorSessionId();
-    if (anchor) terminals.requestCloneInsertAfter(anchor);
-    void createSession(
-      {
-        ...payload,
-        agent: settings?.shipAgent ?? "claude-code",
-        bareSession: false,
-      },
-      {
-        initialInput: settings?.shipPrompt ?? DEFAULT_SHIP_PROMPT,
-        focusOnCreate: true,
-        model: settings?.shipModel ?? null,
-      },
-    );
-  }, [
-    project,
-    projectPathReady,
-    activeRuntimeScopeId,
-    createSession,
-    settings?.shipAgent,
-    settings?.shipModel,
-    settings?.shipPrompt,
-    anchorSessionId,
-    terminals,
-  ]);
-
-  // Create PR: like Ship, but the injected prompt (Settings → Defaults →
-  // Create PR) has the agent commit/push local work, sync with upstream, then
-  // open a pull request in the browser.
-  const startCreatePullRequestSession = useCallback(() => {
-    if (!project || !projectPathReady) return;
-    if (activeRuntimeScopeId !== LOCAL_SCOPE_ID) {
-      toast.error("Create PR isn't supported in sandbox sessions yet.");
-      return;
-    }
-    const payload = defaultSessionPayload(project);
-    const anchor = anchorSessionId();
-    if (anchor) terminals.requestCloneInsertAfter(anchor);
-    void createSession(
-      {
-        ...payload,
-        agent: settings?.pullRequestAgent ?? "claude-code",
-        bareSession: false,
-      },
-      {
-        initialInput: settings?.pullRequestPrompt ?? DEFAULT_PULL_REQUEST_PROMPT,
-        focusOnCreate: true,
-        model: settings?.pullRequestModel ?? null,
-      },
-    );
-  }, [
-    project,
-    projectPathReady,
-    activeRuntimeScopeId,
-    createSession,
-    settings?.pullRequestAgent,
-    settings?.pullRequestModel,
-    settings?.pullRequestPrompt,
-    anchorSessionId,
-    terminals,
-  ]);
-
   // Sync: open an AI session that pulls upstream changes into the current
   // branch (stash/commit → pull → resolve conflicts → stash pop), driven by the
-  // prompt in Settings → Defaults → Sync. Mirrors startShipSession, plus a
-  // re-entry guard: unlike Ship, two concurrent sync sessions would each run
+  // prompt in Settings → Defaults → Sync, plus a re-entry guard: two
+  // concurrent sync sessions would each run
   // `git stash`/`git stash pop` in the same worktree and can clobber each
   // other's stash, so we block an accidental double-spawn while one is in flight.
   const syncSpawnLockRef = useRef(false);
@@ -2051,7 +1957,6 @@ function ProjectPage() {
     showLaunchConfig ||
     showWorktreeSetupConfig ||
     showInstallDiagramSkill ||
-    showInstallShipSkill ||
     showLaunchEmpty ||
     confirmDeleteArchived ||
     !!projectPathIssue ||
@@ -2198,18 +2103,6 @@ function ProjectPage() {
     () => {
       if (anyBlockingDialogOpen || !projectPathReady) return;
       onToggleDiffView();
-    },
-    { capture: true },
-  );
-
-  // Ship: open the commit/push/sync AI session. Capture phase mirrors git.diff so
-  // a focused session terminal can't swallow the chord first; startShipSession
-  // itself guards project/path-ready and the local-scope requirement.
-  useHotkey(
-    "project.ship",
-    () => {
-      if (anyBlockingDialogOpen || !projectPathReady) return;
-      startShipSession();
     },
     { capture: true },
   );
@@ -2845,11 +2738,10 @@ function ProjectPage() {
       />
       {worktreesEnabled && (
         // "New worktree" now lives inside the branch dropdown (below), so the
-        // standalone create-worktree button is gone — one fewer control, and no
-        // second accent competing with Ship.
+        // standalone create-worktree button is gone — one fewer control.
         <>
-          {/* Separate Run (launch the app) from the git group (branch / changes
-           * / ship) — two different concerns. */}
+          {/* Separate Run (launch the app) from the git group (branch /
+           * changes) — two different concerns. */}
           <span
             aria-hidden
             style={{
@@ -2873,10 +2765,7 @@ function ProjectPage() {
           branchSwitchDisabled={projectPathBlocked}
           changedCount={gitStatus?.changedCount}
           onToggleDiffView={onToggleDiffView}
-          shipDisabled={projectPathBlocked}
-          shipEnabled={projectPathUsable}
-          onShip={startShipSession}
-          onCreatePullRequest={startCreatePullRequestSession}
+          changesDisabled={projectPathBlocked}
           behindCount={gitStatus?.behindCount ?? null}
           syncEnabled={projectPathUsable && activeRuntimeScopeId === LOCAL_SCOPE_ID}
           onSync={startSyncSession}
@@ -3167,12 +3056,6 @@ function ProjectPage() {
                     setShowInstallDiagramSkill(true);
                   }}
                 />
-                <InstallShipSkillMenuItem
-                  onSelect={() => {
-                    setOverflowOpen(false);
-                    setShowInstallShipSkill(true);
-                  }}
-                />
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   icon="play"
@@ -3361,32 +3244,11 @@ function ProjectPage() {
               </span>
             )}
             {!worktreesEnabled && (
-              <div
-                role="group"
-                aria-label="Review changes and ship"
-                className="mc-ship-group"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 0,
-                  maxWidth: 480,
-                  minWidth: 0,
-                }}
-              >
-                <ProjectGitStatusButton
-                  changedCount={gitStatus?.changedCount}
-                  onClick={onToggleDiffView}
-                  disabled={projectPathBlocked}
-                />
-                <CommitPushButton
-                  size="md"
-                  variant={gitStatus?.changedCount === 0 ? "gray-frame" : "primary"}
-                  splitTrailing
-                  enabled={projectPathUsable}
-                  onShip={startShipSession}
-                  onCreatePullRequest={startCreatePullRequestSession}
-                />
-              </div>
+              <ProjectGitStatusButton
+                changedCount={gitStatus?.changedCount}
+                onClick={onToggleDiffView}
+                disabled={projectPathBlocked}
+              />
             )}
             {!showArchived && (
               <NewAgentButton
@@ -3630,7 +3492,6 @@ function ProjectPage() {
         projectPath={selectedWorktreePath || project.path}
         enabled={projectPathReady}
         onClose={closeDiffView}
-        onShip={startShipSession}
       />
 
       <CodexHooksNoticeDialog
@@ -3849,13 +3710,6 @@ function ProjectPage() {
         open={showInstallDiagramSkill}
         onClose={() => setShowInstallDiagramSkill(false)}
         projectPath={selectedWorktreePath || project.path}
-      />
-
-      <InstallShipSkillModal
-        open={showInstallShipSkill}
-        onClose={() => setShowInstallShipSkill(false)}
-        projectPath={selectedWorktreePath || project.path}
-        onRunInstall={runShipSkillInstallCommand}
       />
 
       <RemoveProjectConfirmDialog
@@ -4425,10 +4279,7 @@ function WorktreeToggleGroup({
   branchSwitchDisabled = false,
   changedCount,
   onToggleDiffView,
-  shipDisabled = false,
-  shipEnabled = true,
-  onShip,
-  onCreatePullRequest,
+  changesDisabled = false,
   behindCount = null,
   syncEnabled = true,
   onSync,
@@ -4450,11 +4301,7 @@ function WorktreeToggleGroup({
   branchSwitchDisabled?: boolean;
   changedCount?: number;
   onToggleDiffView: () => void;
-  shipDisabled?: boolean;
-  shipEnabled?: boolean;
-  onShip: () => void;
-  /** Opens the Create PR AI session from the Ship split-button's dropdown. */
-  onCreatePullRequest?: () => void;
+  changesDisabled?: boolean;
   /** Commits the current branch is behind its upstream; > 0 reveals Sync. */
   behindCount?: number | null;
   syncEnabled?: boolean;
@@ -4485,28 +4332,10 @@ function WorktreeToggleGroup({
   // The action lives inside the branch dropdown now (with a ↓N badge on the
   // trigger) — no standalone Sync split-button.
   const syncBehindCount = selectedIsMain ? behindCount ?? 0 : 0;
-  // Un-fused: Changes (quiet, review diff) and Ship (bold primary) read as two
-  // distinct controls with hierarchy, not one welded segment.
-  const shipControls = (
-    <>
-      <ProjectGitStatusButton
-        changedCount={changedCount}
-        onClick={onToggleDiffView}
-        disabled={shipDisabled}
-      />
-      <CommitPushButton
-        size="md"
-        variant={changedCount === 0 ? "gray-frame" : "primary"}
-        enabled={shipEnabled}
-        onShip={onShip}
-        onCreatePullRequest={onCreatePullRequest}
-      />
-    </>
-  );
   return (
     <div
       role="group"
-      aria-label="Worktree, branch, and ship controls"
+      aria-label="Worktree and branch controls"
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -4578,7 +4407,11 @@ function WorktreeToggleGroup({
           />
         </div>
       )}
-      {shipControls}
+      <ProjectGitStatusButton
+        changedCount={changedCount}
+        onClick={onToggleDiffView}
+        disabled={changesDisabled}
+      />
     </div>
   );
 }

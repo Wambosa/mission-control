@@ -42,7 +42,6 @@ const MOOD_EMOTE: Record<PetMood, string> = {
   working: "…",
   alert: "!",
   celebrating: "♪",
-  shipping: "…",
   startled: "!",
   singing: "♫",
 };
@@ -85,7 +84,6 @@ const MOOD_DESCRIPTION: Record<PetMood, string> = {
   working: "working alongside your agents",
   alert: "an agent needs your input — click to jump there",
   celebrating: "celebrating a finished session",
-  shipping: "shipping your changes",
   startled: "startled",
   singing: "singing you a song",
 };

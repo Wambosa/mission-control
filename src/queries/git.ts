@@ -175,14 +175,11 @@ export function useUnstageFiles(projectId: string, worktreeId?: string | null) {
   });
 }
 
-// The "commit" / "push" / "create-pr" mutationKey suffixes below are watched
-// by the Mission Pet (src/lib/pet/use-pet-controller.ts) via the MutationCache
-// for its shipping reactions — keep them in sync if renamed.
 export function useGitCommit(projectId: string, worktreeId?: string | null) {
   const invalidate = useInvalidateGit(projectId, worktreeId);
   return useMutation({
     mutationKey: [...gitKeys.all(projectId, worktreeId), "commit"] as const,
-    mutationFn: (opts?: { autoStage?: boolean; message?: string }) =>
+    mutationFn: (opts: { autoStage?: boolean; message: string }) =>
       api.gitCommit(projectId, { ...opts, worktreeId: worktreeId ?? null }),
     onSettled: invalidate,
   });

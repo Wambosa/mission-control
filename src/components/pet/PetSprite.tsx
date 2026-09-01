@@ -97,7 +97,6 @@ function Mouth({ mood, y }: { mood: PetMood; y: number }) {
         />
       );
     case "working":
-    case "shipping":
       return <path className="mc-pet-mouth" d={`M 45 ${y} Q 50 ${y + 2} 55 ${y}`} />;
     default:
       // The little ω resting face.
@@ -130,13 +129,6 @@ function MoodProps({ mood, intensity }: { mood: PetMood; intensity: 1 | 2 | 3 })
           <text x="83" y="14" className="mc-pet-zzz-glyph mc-pet-zzz-glyph-2">
             z
           </text>
-        </g>
-      ) : null}
-      {mood === "shipping" ? (
-        <g className="mc-pet-crate">
-          <rect x="72" y="72" width="16" height="14" rx="2" />
-          <line x1="72" y1="79" x2="88" y2="79" />
-          <line x1="80" y1="72" x2="80" y2="86" />
         </g>
       ) : null}
       {mood === "celebrating" ? (

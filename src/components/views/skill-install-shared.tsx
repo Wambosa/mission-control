@@ -1,4 +1,4 @@
-// Shared building blocks for the diagram/ship skill-install modals, which are
+// Shared building blocks for the diagram skill-install modal, which is
 // structurally parallel (pick CLI harnesses → install → notice/error).
 
 /** A labeled checkbox card selecting one CLI harness to install the skill into. */

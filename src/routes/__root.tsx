@@ -368,7 +368,7 @@ function Shell() {
     return () => setSettingsOverlayOpen(false);
   }, [settingsOpen]);
 
-  // Leaf components (e.g. ShipFailedDialog) dispatch OPEN_SETTINGS_EVENT to
+  // Leaf components dispatch OPEN_SETTINGS_EVENT to
   // request the Settings panel without prop-drilling through every parent.
   useEffect(() => {
     const handler = (e: Event) => {

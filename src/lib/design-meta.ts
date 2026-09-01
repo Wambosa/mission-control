@@ -54,7 +54,7 @@ export const TERMINAL_ZOOM_IN_EVENT = "mc:terminal-zoom-in";
 export const TERMINAL_ZOOM_OUT_EVENT = "mc:terminal-zoom-out";
 export const TERMINAL_ZOOM_RESET_EVENT = "mc:terminal-zoom-reset";
 
-/** Dispatched by leaf components (e.g. ShipFailedDialog) to ask the Shell
+/** Dispatched by leaf components to ask the Shell
  * to open the Settings panel at a specific page. Listened to by __root.tsx. */
 export const OPEN_SETTINGS_EVENT = "mc:open-settings";
 export type OpenSettingsEventDetail = { panel?: string };

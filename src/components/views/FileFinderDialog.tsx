@@ -31,12 +31,15 @@ type FileFinderViewMode = FileFinderView;
 export function FileFinderDialog({
   open,
   projectRoot,
+  remoteDirectory = null,
   resetKey = 0,
   onClose,
   onPick,
 }: {
   open: boolean;
   projectRoot: string;
+  /** This project's directory on its SSH host; null for a Local project. */
+  remoteDirectory?: string | null;
   resetKey?: number;
   onClose: () => void;
   onPick: (relPath: string) => void;
@@ -55,10 +58,10 @@ export function FileFinderDialog({
 
   // Lazy: only fetch the file list when the dialog is opened.
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["files:list", projectRoot],
+    queryKey: ["files:list", projectRoot, remoteDirectory],
     queryFn: async () => {
       // Routes to the in-container clone (remoteFs) when Terminal runtime = Docker.
-      const r = await listProjectFiles(projectRoot);
+      const r = await listProjectFiles(projectRoot, remoteDirectory);
       if (!r.ok) throw new Error(r.error);
       return r.files;
     },

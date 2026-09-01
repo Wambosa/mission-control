@@ -392,6 +392,7 @@ function ensureSchema(sqlite: Database.Database) {
       image_path TEXT,
       group_id TEXT REFERENCES groups(id) ON DELETE SET NULL,
       sandbox_id TEXT REFERENCES sandboxes(id) ON DELETE CASCADE,
+      remote_directory TEXT,
       pinned INTEGER NOT NULL DEFAULT 0,
       pinned_order INTEGER,
       branch TEXT NOT NULL DEFAULT '${DEFAULT_BRANCH}',
@@ -669,6 +670,9 @@ function ensureSchema(sqlite: Database.Database) {
   // (a schema-divergent build may already define `sandbox_id`), so the index is
   // created only after the column is guaranteed present. See docs/multi-sandbox-plan.md.
   ensureColumn(sqlite, "projects", "sandbox_id", "TEXT REFERENCES sandboxes(id) ON DELETE CASCADE");
+  // A project's directory on its SSH host. Guarded like sandbox_id so the
+  // fresh-install (inline DDL above) and upgrade (0028) paths converge.
+  ensureColumn(sqlite, "projects", "remote_directory", "TEXT");
   ensureProjectSandboxIndex(sqlite);
 
   // Manual group ordering. Legacy rows keep NULL until the user reorders (they

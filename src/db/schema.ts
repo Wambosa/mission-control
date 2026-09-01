@@ -83,6 +83,10 @@ export const projects = sqliteTable(
     // everything" delete semantics. `path` is host-absolute for Local projects and
     // an in-container workspace path for sandboxed projects.
     sandboxId: text("sandbox_id").references(() => sandboxes.id, { onDelete: "cascade" }),
+    // Where this project lives on its SSH host — configuration, not a guess
+    // from the local folder name. Null for a Local project (and for a project
+    // whose host has not been configured yet).
+    remoteDirectory: text("remote_directory"),
     pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
     pinnedOrder: integer("pinned_order"),
     branch: text("branch").notNull().default(DEFAULT_BRANCH),

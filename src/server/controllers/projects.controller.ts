@@ -45,6 +45,8 @@ const updateProjectBody = z
     iconColor: z.string(),
     imagePath: z.string().nullable(),
     groupId: z.string().nullable(),
+    sandboxId: z.string().nullable(),
+    remoteDirectory: z.string().max(500).nullable(),
     pinned: z.boolean(),
     branch: z.string(),
     rememberAgentSettings: z.boolean(),

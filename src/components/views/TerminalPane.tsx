@@ -132,7 +132,7 @@ import { terminalSurfaceIdForProject, useTerminalActions } from "~/lib/terminal-
 import type { Project, Task } from "~/db/schema";
 import { normalizePtySize } from "~/shared/pty-size";
 import { workspaceSlug } from "~/shared/sandbox-workspace";
-import { sandboxContainerRoot } from "~/lib/project-fs";
+import { projectRemoteRoot } from "~/lib/project-fs";
 import { AGENT_REGISTRY } from "~/shared/agents";
 import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 import { toast } from "sonner";
@@ -702,11 +702,11 @@ export function TerminalPane({
       // Split on either separator: a Windows project path never split at all,
       // so its whole drive path became the "name".
       const sandboxPathName = project.path.split(/[\\/]/).filter(Boolean).pop() ?? project.name;
-      // Uses the active scope's own root. `/workspace` exists only inside a
-      // Mission Control VM, so a session on an SSH host was started in a
-      // directory that machine has never had. Derived from the same name the
-      // clone slug below uses, so the two always agree.
-      const sandboxCwd = sandboxContainerRoot(project.path);
+      // A project on an SSH host says where it lives there. Only a managed VM,
+      // which creates the project inside its own workspace, still derives the
+      // path from the local folder name (the same name the clone slug below
+      // uses, so the two always agree).
+      const sandboxCwd = projectRemoteRoot(project.path, project.remoteDirectory);
 
       // A grid mounts every pane in one commit; building all their xterm
       // surfaces in one task blocks the route transition's first paint. Take

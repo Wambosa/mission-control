@@ -17,7 +17,7 @@ import {
   useCliAvailability,
 } from "~/lib/cli-availability";
 import { getElectron } from "~/lib/electron";
-import { useSettings } from "~/queries";
+import { useSandboxes, useSettings } from "~/queries";
 import { AGENT_REGISTRY } from "~/shared/agents";
 import {
   DEFAULT_AGENT_LAUNCHER_CONFIG,
@@ -154,6 +154,9 @@ export function ProjectDialog({
     groupId: string | null;
     imagePath?: string | null;
     pendingImage?: { sourcePath: string; extension: string } | null;
+    // Edit-only: the machine this project runs on, and where it lives there.
+    sandboxId?: string | null;
+    remoteDirectory?: string | null;
     // Create-only onboarding fields (undefined when editing an existing project).
     savedAgent?: TaskAgent | null;
     rememberAgentSettings?: boolean;
@@ -175,6 +178,19 @@ export function ProjectDialog({
   // Committed path+name snapshot so Esc in the browser reverts the preview.
   const folderSnapshotRef = useRef<{ path: string; name: string } | null>(null);
   const [groupId, setGroupId] = useState<string>("");
+  // The machine this project runs on ("" = Local) and its directory there.
+  // Edited together: a host without a directory is exactly the guess this
+  // replaces, so the two never live on separate surfaces.
+  const [sandboxId, setSandboxId] = useState<string>("");
+  const [remoteDirectory, setRemoteDirectory] = useState("");
+  const { data: sandboxState } = useSandboxes();
+  // Only a machine the user owns takes a directory. A managed remote VM clones
+  // the project into its own workspace, so its path stays derived.
+  const sshHosts = useMemo(
+    () => (sandboxState?.sandboxes ?? []).filter((sandbox) => sandbox.kind === "ssh-host"),
+    [sandboxState?.sandboxes],
+  );
+  const selectedHost = sshHosts.find((host) => host.id === sandboxId) ?? null;
   const [groupQuery, setGroupQuery] = useState("");
   const [groupTypeaheadOpen, setGroupTypeaheadOpen] = useState(false);
   const [groupActiveIndex, setGroupActiveIndex] = useState(-1);
@@ -267,6 +283,8 @@ export function ProjectDialog({
       setCreatingGroup(false);
       setIcon(seededIcon);
       setIconColor(seededIconColor);
+      setSandboxId(project?.sandboxId ?? "");
+      setRemoteDirectory(project?.remoteDirectory ?? "");
       setGridView(project?.defaultGridView ?? false);
       setImagePath(project?.imagePath ?? null);
       setPendingImage(null);
@@ -448,8 +466,18 @@ export function ProjectDialog({
   // project. Drives the primary button's label and the create payload alike.
   const willStartSession = !project && agent !== null;
 
+  // The host and its directory are one setting: a host with no directory is
+  // the guess this replaces. Only emptiness is checked — the directory may not
+  // exist on the host yet, and a project should be configurable before it does.
+  const remoteDirectoryMissing =
+    !!project && selectedHost !== null && !remoteDirectory.trim();
+
   const submit = async () => {
     if (submitting) return;
+    if (remoteDirectoryMissing) {
+      setError(`${selectedHost?.name ?? "This host"} needs a directory to run this project in.`);
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
@@ -467,7 +495,10 @@ export function ProjectDialog({
         groupId: effectiveGroupId,
         ...(project ? { imagePath } : { pendingImage }),
         ...(project
-          ? {}
+          ? {
+              sandboxId: sandboxId || null,
+              remoteDirectory: selectedHost ? remoteDirectory.trim() : null,
+            }
           : {
               savedAgent: agent,
               rememberAgentSettings: agent !== null,
@@ -799,6 +830,60 @@ export function ProjectDialog({
       )}
     </div>
   );
+
+  // Where this project runs, and where it lives there. One field would be a
+  // guess; two on separate screens would drift. So: adjacent, saved together.
+  const hostField = project ? (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+      <div style={{ flex: "0 0 200px", minWidth: 0 }}>
+        <FieldLabel>Runs on</FieldLabel>
+        <select
+          value={sandboxId}
+          aria-label="Machine this project runs on"
+          onChange={(e) => {
+            const next = e.target.value;
+            setSandboxId(next);
+            if (!next) setRemoteDirectory("");
+          }}
+          style={{
+            width: "100%",
+            height: 38,
+            marginTop: 6,
+            padding: "0 10px",
+            borderRadius: 7,
+            border: "1px solid var(--border)",
+            background: "var(--surface-0)",
+            color: "var(--text)",
+            fontSize: 13,
+          }}
+        >
+          <option value="">Local</option>
+          {sshHosts.map((host) => (
+            <option key={host.id} value={host.id}>
+              {host.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <TextField
+          mono
+          required={selectedHost !== null}
+          disabled={selectedHost === null}
+          ariaInvalid={remoteDirectoryMissing}
+          label={selectedHost ? `Directory on ${selectedHost.name}` : "Directory on the host"}
+          value={remoteDirectory}
+          onChange={(value) => setRemoteDirectory(value.slice(0, 500))}
+          placeholder="/Users/me/dev/my-project"
+          hint={
+            selectedHost
+              ? "Where sessions start on that machine. It does not have to exist yet."
+              : "A Local project runs from the working directory above."
+          }
+        />
+      </div>
+    </div>
+  ) : null;
 
   const dirField = (
     <div>
@@ -1331,6 +1416,7 @@ export function ProjectDialog({
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {identityRow}
           {dirField}
+          {hostField}
           {groupField}
           <div ref={errorRef}>
             <FormErrorBox error={error} />

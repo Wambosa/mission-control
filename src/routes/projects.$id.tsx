@@ -2505,6 +2505,7 @@ function ProjectPage() {
         projectId={project.id}
         worktreeId={null}
         projectPath={projectPath || project.path}
+        remoteDirectory={project.remoteDirectory}
         enabled={projectPathReady}
         onClose={closeDiffView}
       />
@@ -2678,6 +2679,7 @@ function ProjectPage() {
       <FileFinderDialog
         open={fileFinderOpen}
         projectRoot={projectPath || project.path}
+        remoteDirectory={project.remoteDirectory}
         resetKey={fileFinderResetKey}
         onClose={() => setFileFinderOpen(false)}
         onPick={(rel) => setOpenFileRel(rel)}
@@ -2687,6 +2689,7 @@ function ProjectPage() {
         <Suspense fallback={null}>
           <FileEditorDialog
             projectRoot={projectPath || project.path}
+            remoteDirectory={project.remoteDirectory}
             relPath={openFileRel}
             onClose={() => setOpenFileRel(null)}
             onBack={() => {

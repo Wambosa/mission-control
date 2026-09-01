@@ -21,6 +21,7 @@ import {
   updateProjectRow,
 } from "../repositories/projects.repo";
 import { findWorktreeById } from "../repositories/worktrees.repo";
+import { findSandboxById } from "../repositories/sandboxes.repo";
 import { findTasksByProjectId } from "../repositories/tasks.repo";
 import { deleteAllProjectImagesFor } from "./project-images";
 import { reconcileProjectWorktrees } from "./worktrees";
@@ -325,6 +326,7 @@ export function createProject(input: {
     groupId: input.groupId ?? null,
     // Inherits the scope the project was created in (Local when null/undefined).
     sandboxId: input.sandboxId ?? null,
+    remoteDirectory: null,
     pinned: !!input.pinned,
     pinnedOrder: input.pinned ? nextPinnedOrder(findAllProjects()) : null,
     branch,
@@ -341,6 +343,12 @@ export function createProject(input: {
   return row;
 }
 
+/** True when the scope is a machine the user owns (not a managed remote VM,
+ *  which clones the project into its own workspace and derives the path). */
+function isSshHostSandbox(sandboxId: string): boolean {
+  return findSandboxById(sandboxId)?.kind === "ssh-host";
+}
+
 export function updateProject(
   id: string,
   patch: Partial<
@@ -352,6 +360,8 @@ export function updateProject(
       | "iconColor"
       | "imagePath"
       | "groupId"
+      | "sandboxId"
+      | "remoteDirectory"
       | "pinned"
       | "pinnedOrder"
       | "branch"
@@ -367,6 +377,20 @@ export function updateProject(
   const rest = patch;
   const nextPath =
     rest.path !== undefined ? validateWorkingDirectory(rest.path) : undefined;
+  const nextRemoteDirectory =
+    rest.remoteDirectory !== undefined
+      ? rest.remoteDirectory?.trim() || null
+      : existing.remoteDirectory;
+  const nextSandboxId =
+    rest.sandboxId !== undefined ? rest.sandboxId : existing.sandboxId;
+  // A project on an SSH host must say where it lives there — the directory was
+  // guessed from the local folder name before, and the guess put sessions in a
+  // tree the host may never have had. Emptiness is all that is checked: the
+  // directory may not exist yet, and a host round-trip to find out would block
+  // a perfectly reasonable save.
+  if (nextSandboxId && !nextRemoteDirectory && isSshHostSandbox(nextSandboxId)) {
+    throw new ValidationError("A project on an SSH host needs a remote directory.");
+  }
   const updated = {
     ...existing,
     ...rest,
@@ -386,6 +410,7 @@ export function updateProject(
           branch: rest.branch ?? detectBranch(nextPath),
         }
       : {}),
+    ...(rest.remoteDirectory !== undefined ? { remoteDirectory: nextRemoteDirectory } : {}),
     updatedAt: Date.now(),
   };
   updateProjectRow(id, updated);

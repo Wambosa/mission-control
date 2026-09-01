@@ -73,6 +73,7 @@ function makeProject(id: string, sandboxId: string | null) {
     imagePath: null,
     groupId: null,
     sandboxId,
+    remoteDirectory: null,
     pinned: false,
     pinnedOrder: null,
     branch: "main",

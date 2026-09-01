@@ -11,13 +11,12 @@ import type {
 } from "~/shared/electron-contract";
 
 /**
- * Where a project lives on the active scope, derived from its basename.
+ * Where a Mission Control VM keeps a project: its workspace root plus a slug of
+ * the local folder's name. The VM creates the project itself (see
+ * project-sandbox-create), so the layout is ours to derive.
  *
- * The root is the scope's, not a constant: `/workspace` is a Mission Control
- * VM's container layout, and an SSH host has no such directory — its projects
- * sit under the user's own home, which is also the only place the remote agent
- * will act. Falls back to the container root before the first scope read, and
- * for a VM, which is what it has always been.
+ * This is NOT how an SSH host works. There the project is somewhere the user
+ * put it, which they now state per project — see `projectRemoteRoot`.
  */
 export function sandboxContainerRoot(projectRoot: string): string {
   const root = (cachedSandboxRemoteRoot() ?? SANDBOX_WORKSPACE_ROOT).replace(/\/+$/, "");
@@ -26,8 +25,25 @@ export function sandboxContainerRoot(projectRoot: string): string {
   return `${root}/${workspaceSlug(name)}`;
 }
 
-function containerPath(projectRoot: string, relPath: string): string {
-  return `${sandboxContainerRoot(projectRoot)}/${relPath}`;
+/**
+ * Where this project lives on whatever machine its sessions run on. A project
+ * bound to an SSH host says so outright; anything else falls back to the
+ * managed-VM derivation above.
+ */
+export function projectRemoteRoot(
+  projectRoot: string,
+  remoteDirectory?: string | null,
+): string {
+  const configured = remoteDirectory?.trim().replace(/\/+$/, "");
+  return configured || sandboxContainerRoot(projectRoot);
+}
+
+function containerPath(
+  projectRoot: string,
+  relPath: string,
+  remoteDirectory?: string | null,
+): string {
+  return `${projectRemoteRoot(projectRoot, remoteDirectory)}/${relPath}`;
 }
 
 /** True when the Terminal runtime is the Docker sandbox (so fs/git go over RPC). */
@@ -39,22 +55,26 @@ const useSandboxFs = isSandboxRuntimeActive;
 
 const NOT_ELECTRON = { ok: false as const, error: "Not running in Electron" };
 
-export async function listProjectFiles(projectRoot: string): Promise<FileListResult> {
+export async function listProjectFiles(
+  projectRoot: string,
+  remoteDirectory?: string | null,
+): Promise<FileListResult> {
   const api = window.electronAPI;
   if (!api) return NOT_ELECTRON;
   return (await useSandboxFs())
-    ? api.remoteFs.list(sandboxContainerRoot(projectRoot))
+    ? api.remoteFs.list(projectRemoteRoot(projectRoot, remoteDirectory))
     : api.files.list(projectRoot);
 }
 
 export async function readProjectFile(
   projectRoot: string,
   relPath: string,
+  remoteDirectory?: string | null,
 ): Promise<FileReadResult> {
   const api = window.electronAPI;
   if (!api) return NOT_ELECTRON;
   return (await useSandboxFs())
-    ? api.remoteFs.read(containerPath(projectRoot, relPath))
+    ? api.remoteFs.read(containerPath(projectRoot, relPath, remoteDirectory))
     : api.files.read(projectRoot, relPath);
 }
 
@@ -63,11 +83,16 @@ export async function writeProjectFile(
   relPath: string,
   content: string,
   expectedMtimeMs: number | null,
+  remoteDirectory?: string | null,
 ): Promise<FileWriteResult> {
   const api = window.electronAPI;
   if (!api) return NOT_ELECTRON;
   return (await useSandboxFs())
-    ? api.remoteFs.write(containerPath(projectRoot, relPath), content, expectedMtimeMs)
+    ? api.remoteFs.write(
+        containerPath(projectRoot, relPath, remoteDirectory),
+        content,
+        expectedMtimeMs,
+      )
     : api.files.write(projectRoot, relPath, content, expectedMtimeMs);
 }
 
@@ -82,11 +107,16 @@ export async function writeProjectFileSensitive(
   relPath: string,
   content: string,
   expectedMtimeMs: number | null,
+  remoteDirectory?: string | null,
 ): Promise<FileWriteResult> {
   const api = window.electronAPI;
   if (!api) return NOT_ELECTRON;
   return (await useSandboxFs())
-    ? api.remoteFs.write(containerPath(projectRoot, relPath), content, expectedMtimeMs)
+    ? api.remoteFs.write(
+        containerPath(projectRoot, relPath, remoteDirectory),
+        content,
+        expectedMtimeMs,
+      )
     : api.files.writeSensitive(projectRoot, relPath, content, expectedMtimeMs);
 }
 
@@ -114,11 +144,12 @@ export type ProjectFileWatch = {
 export async function watchProjectFile(
   projectRoot: string,
   relPath: string,
+  remoteDirectory?: string | null,
 ): Promise<{ ok: true; watch: ProjectFileWatch } | { ok: false; error: string }> {
   const api = window.electronAPI;
   if (!api) return NOT_ELECTRON;
   if (await useSandboxFs()) {
-    const r = await api.remoteFs.watch(containerPath(projectRoot, relPath));
+    const r = await api.remoteFs.watch(containerPath(projectRoot, relPath, remoteDirectory));
     if (!r.ok) return r;
     return {
       ok: true,

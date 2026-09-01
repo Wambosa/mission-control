@@ -17,6 +17,7 @@ export function GitDiffModal({
   projectId,
   worktreeId,
   projectPath,
+  remoteDirectory = null,
   enabled = true,
   onClose,
 }: {
@@ -24,6 +25,8 @@ export function GitDiffModal({
   projectId: string;
   worktreeId?: string | null;
   projectPath: string;
+  /** This project's directory on its SSH host; null for a Local project. */
+  remoteDirectory?: string | null;
   enabled?: boolean;
   onClose: () => void;
 }) {
@@ -73,6 +76,7 @@ export function GitDiffModal({
         projectId={projectId}
         worktreeId={worktreeId}
         projectPath={projectPath}
+        remoteDirectory={remoteDirectory}
         enabled={enabled}
         onBack={onClose}
         showHeader={false}

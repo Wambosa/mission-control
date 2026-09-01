@@ -23,6 +23,7 @@ function makeProject(
     imagePath: null,
     groupId: null,
     sandboxId: null,
+    remoteDirectory: null,
     pinned: false,
     pinnedOrder: null,
     branch: "main",

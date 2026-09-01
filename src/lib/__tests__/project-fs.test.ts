@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
+  projectRemoteRoot,
   sandboxContainerRoot,
   listProjectFiles,
   readProjectFile,
@@ -32,6 +33,28 @@ describe("sandboxContainerRoot", () => {
     expect(sandboxContainerRoot("/Users/me/code/Acme App")).toBe("/workspace/acme-app");
     expect(sandboxContainerRoot("/")).toBe("/workspace/project");
     expect(sandboxContainerRoot("/srv/my_repo/")).toBe("/workspace/my-repo");
+  });
+});
+
+describe("projectRemoteRoot", () => {
+  it("uses the project's configured directory verbatim", () => {
+    expect(projectRemoteRoot("/Users/me/code/Acme App", "/home/deploy/acme")).toBe(
+      "/home/deploy/acme",
+    );
+  });
+
+  it("does not lowercase, hyphenate, or otherwise touch the configured path", () => {
+    expect(projectRemoteRoot("/Users/me/code/Acme App", "/srv/Acme_App")).toBe("/srv/Acme_App");
+  });
+
+  it("trims surrounding whitespace and a trailing slash", () => {
+    expect(projectRemoteRoot("/Users/me/x", "  /home/deploy/acme/  ")).toBe("/home/deploy/acme");
+  });
+
+  it("falls back to the managed-VM derivation when no directory is configured", () => {
+    expect(projectRemoteRoot("/Users/me/code/Acme App", null)).toBe("/workspace/acme-app");
+    expect(projectRemoteRoot("/Users/me/code/Acme App", "   ")).toBe("/workspace/acme-app");
+    expect(projectRemoteRoot("/Users/me/code/Acme App")).toBe("/workspace/acme-app");
   });
 });
 

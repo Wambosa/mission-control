@@ -29,7 +29,7 @@ import {
   type GridPrefsEventDetail,
   type GridSortEventDetail,
 } from "~/lib/grid-layout-prefs";
-import { matchBinding } from "~/lib/keybindings/match";
+import { matchOptionalBinding } from "~/lib/keybindings/match";
 import { useKeybindings } from "~/lib/keybindings/store";
 import { DEFAULT_SESSION_ICON, isSessionIcon } from "~/lib/session-icons";
 import { isSettingsOverlayOpen } from "~/lib/settings-navigation";
@@ -1957,8 +1957,9 @@ export function SessionGrid({
   // right after entering nav, no per-state-change re-subscription churn.
   const onNavKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   onNavKeyRef.current = (e: KeyboardEvent) => {
-    // The trigger is the dedicated, rebindable session.gridNavigate shortcut.
-    const trigger = matchBinding(e, bindings["session.gridNavigate"]);
+    // The trigger is the dedicated, rebindable session.gridNavigate shortcut,
+    // which is unbound unless the operator binds it.
+    const trigger = matchOptionalBinding(e, bindings["session.gridNavigate"]);
     if (navTaskId !== null) {
       switch (e.key) {
         case "ArrowRight":

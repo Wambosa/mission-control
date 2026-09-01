@@ -1195,7 +1195,7 @@ async function createWindow() {
       return;
     }
     const closeBinding = getBinding(app.getPath("userData"), "session.closeWindow");
-    if (!matchElectronInput(input, closeBinding)) return;
+    if (!closeBinding || !matchElectronInput(input, closeBinding)) return;
     event.preventDefault();
     win?.webContents.send(IPC.appCloseIntent);
   });

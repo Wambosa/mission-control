@@ -61,10 +61,12 @@ export function useKeybindings(): Ctx {
   return ctx;
 }
 
-export function useBinding(action: HotkeyAction): Binding {
+/** The chord bound to an action, or undefined when it has none. */
+export function useBinding(action: HotkeyAction): Binding | undefined {
   return useKeybindings().bindings[action] ?? DEFAULT_BINDINGS[action];
 }
 
 export function useFormattedBinding(action: HotkeyAction): string {
-  return formatBinding(useBinding(action));
+  const binding = useBinding(action);
+  return binding ? formatBinding(binding) : "";
 }

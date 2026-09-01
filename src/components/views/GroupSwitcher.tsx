@@ -142,7 +142,11 @@ export function GroupSwitcher() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Active group: ${label}. Switch group`}
-        title={`Active group: ${label} — cycle with ${formatBinding(nextGroupBinding)}`}
+        title={
+          nextGroupBinding
+            ? `Active group: ${label} — cycle with ${formatBinding(nextGroupBinding)}`
+            : `Active group: ${label} — switch group`
+        }
         onClick={() => setOpen((v) => !v)}
         onContextMenu={hideElementContextMenu("group-switcher")}
         style={{ paddingInline: 8 }}

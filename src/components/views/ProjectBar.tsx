@@ -222,8 +222,10 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
     )
   );
   const pinnedSlotBase = useBinding("project.pinnedSlot");
+  // Unbound by default: the tile keeps its number badge, and the title simply
+  // stops promising a chord that would not fire.
   const pinnedSlotBinding = (slot: number) =>
-    formatBinding({ ...pinnedSlotBase, key: String(slot) });
+    pinnedSlotBase ? formatBinding({ ...pinnedSlotBase, key: String(slot) }) : "";
 
   // Persist a project drop: the new pinned order (the full rail in All mode,
   // or one group's pinned subset in group-workspace mode), plus the group
@@ -1050,7 +1052,7 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
             ? `${finishedCount} ${finishedCount === 1 ? "session" : "sessions"} finished`
             : null;
         const tooltip = [
-          hotkey ? `${project.name} (${chordHint})` : project.name,
+          hotkey && chordHint.trim() ? `${project.name} (${chordHint})` : project.name,
           project.pinned ? "Drag or press Shift+Arrow Up/Down to reorder pinned projects" : null,
           needsInputLabel,
           runningLabel,

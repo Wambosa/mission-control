@@ -35,6 +35,15 @@ export function matchBinding(e: KeyboardEvent, b: Binding): boolean {
   return keyMatches(e, b);
 }
 
+/**
+ * Whether an event fires an action whose binding may not exist. Most actions
+ * are unbound out of the box, so every dispatcher goes through here rather
+ * than assuming the map has an entry: an unbound action matches nothing.
+ */
+export function matchOptionalBinding(e: KeyboardEvent, b: Binding | undefined): boolean {
+  return !!b && matchBinding(e, b);
+}
+
 /** Number of pinned-project slots that get a number badge + Cmd+N shortcut. */
 export const PINNED_SLOT_COUNT = 9;
 

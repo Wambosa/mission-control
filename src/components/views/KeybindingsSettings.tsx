@@ -9,6 +9,12 @@ import { KEYBINDING_GROUPS } from "~/lib/keybindings/groups";
 import { formatPinnedSlotBindingParts } from "~/lib/keybindings/format";
 import { ACTION_META, HOTKEY_ACTIONS, type Binding, type HotkeyAction } from "~/lib/keybindings/types";
 
+/** Two bindings are the same when both are unbound, or both match. */
+function sameBinding(a: Binding | undefined, b: Binding | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return bindingsEqual(a, b);
+}
+
 export function KeybindingsSettings() {
   const { bindings, setBinding, resetBinding, resetAll } = useKeybindings();
   const [recordingFor, setRecordingFor] = useState<HotkeyAction | null>(null);
@@ -16,11 +22,15 @@ export function KeybindingsSettings() {
   const [recordError, setRecordError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Conflict map across all current bindings.
+  // Conflict map across all current bindings. Unbound actions cannot conflict
+  // with anything — most actions are unbound by default, and pooling them
+  // under one empty combo would flag the whole page.
   const conflicts = useMemo(() => {
     const byCombo = new Map<string, HotkeyAction[]>();
     for (const action of HOTKEY_ACTIONS) {
-      const k = bindingComboKey(bindings[action]);
+      const binding = bindings[action];
+      if (!binding) continue;
+      const k = bindingComboKey(binding);
       const arr = byCombo.get(k) ?? [];
       arr.push(action);
       byCombo.set(k, arr);
@@ -38,7 +48,8 @@ export function KeybindingsSettings() {
     const k = bindingComboKey(pendingBinding);
     for (const action of HOTKEY_ACTIONS) {
       if (action === recordingFor) continue;
-      if (bindingComboKey(bindings[action]) === k) return action;
+      const binding = bindings[action];
+      if (binding && bindingComboKey(binding) === k) return action;
     }
     return null;
   }, [recordingFor, pendingBinding, bindings]);
@@ -95,7 +106,7 @@ export function KeybindingsSettings() {
                 key={action}
                 action={action}
                 binding={bindings[action]}
-                isDefault={bindingsEqual(bindings[action], DEFAULT_BINDINGS[action])}
+                isDefault={sameBinding(bindings[action], DEFAULT_BINDINGS[action])}
                 recording={recordingFor === action}
                 pendingBinding={recordingFor === action ? pendingBinding : null}
                 pendingConflict={recordingFor === action ? pendingConflict : null}
@@ -205,7 +216,8 @@ function BindingRow({
   onReset,
 }: {
   action: HotkeyAction;
-  binding: Binding;
+  /** Undefined when the action is unbound, which most are by default. */
+  binding: Binding | undefined;
   isDefault: boolean;
   recording: boolean;
   pendingBinding: Binding | null;
@@ -331,7 +343,13 @@ function BindingRow({
           </div>
         ) : (
           <>
-            {action === "project.pinnedSlot" ? (
+            {!binding ? (
+              <span
+                style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)" }}
+              >
+                Unbound
+              </span>
+            ) : action === "project.pinnedSlot" ? (
               <KbdCombo parts={formatPinnedSlotBindingParts(binding)} variant="ghost" size="lg" />
             ) : (
               <KbdCombo binding={binding} variant="ghost" size="lg" />

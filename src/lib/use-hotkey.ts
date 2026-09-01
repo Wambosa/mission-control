@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { matchBinding } from "~/lib/keybindings/match";
+import { matchOptionalBinding } from "~/lib/keybindings/match";
 import { useKeybindings } from "~/lib/keybindings/store";
 import { HOTKEY_ACTIONS, type HotkeyAction } from "~/lib/keybindings/types";
 import { isSettingsOverlayOpen } from "~/lib/settings-navigation";
@@ -64,8 +64,10 @@ export function useHotkey(
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
+      // An action can be unbound — that is the default for all but two of them
+      // — and an unbound action matches nothing rather than throwing.
       const matched = isAction(target)
-        ? matchBinding(e, bindingsRef.current[target])
+        ? matchOptionalBinding(e, bindingsRef.current[target])
         : matchLiteral(e, target);
       if (!matched) return;
       if (!allowWhenSettingsOpen && isSettingsOverlayOpen()) return;

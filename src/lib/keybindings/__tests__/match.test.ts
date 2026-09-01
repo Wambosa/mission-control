@@ -1,7 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { matchBinding, eventToBinding, bindingComboKey, bindingsEqual, isValidBinding, matchPinnedSlotBinding, matchAnyPinnedSlot } from "../match";
+import {
+  matchBinding,
+  matchOptionalBinding,
+  eventToBinding,
+  bindingComboKey,
+  bindingsEqual,
+  isValidBinding,
+  matchPinnedSlotBinding,
+  matchAnyPinnedSlot,
+} from "../match";
 import { DEFAULT_BINDINGS } from "../defaults";
-import { HOTKEY_ACTIONS } from "../types";
+import { HOTKEY_ACTIONS, type Binding, type HotkeyAction } from "../types";
 
 function ev(init: { key: string; metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean }): KeyboardEvent {
   return {
@@ -13,17 +22,69 @@ function ev(init: { key: string; metaKey?: boolean; ctrlKey?: boolean; shiftKey?
   } as unknown as KeyboardEvent;
 }
 
+describe("the default keymap", () => {
+  // Nothing fires out of the box but the two a form is expected to honor.
+  // Every other action stays bindable; it just starts unbound.
+  it("binds only dialog submit and file save", () => {
+    expect(Object.keys(DEFAULT_BINDINGS).sort()).toEqual(["dialog.submit", "file.save"]);
+  });
+
+  it("leaves every other action unbound rather than dropping it from the registry", () => {
+    for (const action of HOTKEY_ACTIONS) {
+      if (action === "dialog.submit" || action === "file.save") continue;
+      expect(DEFAULT_BINDINGS[action]).toBeUndefined();
+    }
+    expect(HOTKEY_ACTIONS.length).toBeGreaterThan(2);
+  });
+
+  it("keeps no binding for a capability that no longer exists", () => {
+    expect(HOTKEY_ACTIONS as readonly string[]).not.toContain("voice.pushToTalk");
+  });
+});
+
+describe("matchOptionalBinding", () => {
+  // AE8: with default settings, a chord that used to do something does nothing.
+  it("fires nothing for an unbound action", () => {
+    for (const action of ["session.clone", "terminal.toggle", "git.diff"] as const) {
+      expect(matchOptionalBinding(ev({ metaKey: true, key: "d" }), DEFAULT_BINDINGS[action])).toBe(
+        false,
+      );
+    }
+  });
+
+  it("does not throw on a keydown against an empty binding map", () => {
+    const empty = {} as Partial<Record<HotkeyAction, Binding>>;
+    expect(() => matchOptionalBinding(ev({ metaKey: true, key: "k" }), empty["terminal.clear"])).not.toThrow();
+    expect(matchOptionalBinding(ev({ metaKey: true, key: "k" }), empty["terminal.clear"])).toBe(false);
+  });
+
+  it("still fires an action the operator bound themselves", () => {
+    const custom: Binding = { mod: true, shift: true, alt: false, key: "j" };
+    expect(matchOptionalBinding(ev({ metaKey: true, shiftKey: true, key: "j" }), custom)).toBe(true);
+  });
+
+  it("fires the two bindings that ship bound", () => {
+    expect(
+      matchOptionalBinding(ev({ metaKey: true, key: "Enter" }), DEFAULT_BINDINGS["dialog.submit"]),
+    ).toBe(true);
+    expect(matchOptionalBinding(ev({ metaKey: true, key: "s" }), DEFAULT_BINDINGS["file.save"])).toBe(
+      true,
+    );
+  });
+});
+
 describe("matchBinding", () => {
-  it("matches every default binding against an event built from it", () => {
+  it("matches every bound default against an event built from it", () => {
     for (const action of HOTKEY_ACTIONS) {
       const b = DEFAULT_BINDINGS[action];
+      if (!b) continue;
       const e = ev({ metaKey: b.mod, shiftKey: b.shift, altKey: b.alt, key: b.key });
       expect(matchBinding(e, b)).toBe(true);
     }
   });
 
   it("rejects when modifiers differ", () => {
-    const b = DEFAULT_BINDINGS["agent.new"];
+    const b = DEFAULT_BINDINGS["file.save"]!;
     expect(matchBinding(ev({ key: b.key }), b)).toBe(false);
   });
 

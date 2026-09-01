@@ -25,7 +25,6 @@ export const HOTKEY_ACTIONS = [
   "file.finder",
   "file.save",
   "git.diff",
-  "voice.pushToTalk",
   "prompt.search",
   "screenshot.capture",
   "group.next",
@@ -41,7 +40,12 @@ export type Binding = {
   key: string;
 };
 
-export type BindingMap = Record<HotkeyAction, Binding>;
+/**
+ * Bindings by action. Partial because an action can simply be unbound — which
+ * is the default for all but two of them. A total map could not represent
+ * that, and every read guards accordingly.
+ */
+export type BindingMap = Partial<Record<HotkeyAction, Binding>>;
 
 export const ACTION_META: Record<HotkeyAction, { label: string; description: string }> = {
   "agent.new": { label: "New agent / project", description: "Create a new agent on a project page, or a new project on the home page." },
@@ -97,11 +101,6 @@ export const ACTION_META: Record<HotkeyAction, { label: string; description: str
   "file.finder": { label: "Open file finder", description: "Open the fuzzy file finder for the current project." },
   "file.save": { label: "Save file", description: "Save the file currently open in the editor." },
   "git.diff": { label: "Toggle Review Changes", description: "Open or close the change review view for the current project." },
-  "voice.pushToTalk": {
-    label: "Push to talk",
-    description:
-      "Hold to speak a voice command — switch project or start an agent. Release to run it.",
-  },
   "prompt.search": {
     label: "Search prompt history",
     description:

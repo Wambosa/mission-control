@@ -49,7 +49,6 @@ export const KEYBINDING_GROUPS: KeybindingGroup[] = [
       "file.save",
       "git.diff",
       "prompt.search",
-      "scratch.toggle",
     ],
   },
   {

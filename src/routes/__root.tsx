@@ -46,7 +46,6 @@ import { GroupsDialogProvider } from "~/lib/groups-dialog-store";
 import { ACTIVE_GROUP_ALL, ACTIVE_GROUP_UNGROUPED, useActiveGroup } from "~/lib/active-group";
 import { GroupSwitcher } from "~/components/views/GroupSwitcher";
 import { PromptSearchProvider } from "~/lib/prompt-search-store";
-import { ScratchPadProvider } from "~/lib/scratch-pad-store";
 import { HeaderToolsCluster } from "~/components/views/HeaderToolsCluster";
 import { projectIdFromPath } from "~/lib/project-id-from-path";
 import {
@@ -245,7 +244,6 @@ function RootComponent() {
               <AddProjectProvider>
                 <GroupsDialogProvider>
                 <PromptSearchProvider>
-                <ScratchPadProvider>
                   <HeaderActionsProvider>
                     <DiagramDialogHost>
                       {/*
@@ -271,7 +269,6 @@ function RootComponent() {
                       </ClientOnly>
                     </DiagramDialogHost>
                   </HeaderActionsProvider>
-                </ScratchPadProvider>
                 </PromptSearchProvider>
                 </GroupsDialogProvider>
               </AddProjectProvider>

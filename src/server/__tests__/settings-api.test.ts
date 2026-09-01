@@ -359,7 +359,6 @@ describe("settings API", () => {
       headerButtons: DEFAULT_HEADER_BUTTON_VISIBILITY,
     });
     expect(DEFAULT_HEADER_BUTTON_VISIBILITY).toMatchObject({
-      scratchPad: true,
       promptSearch: true,
       voice: true,
       notifications: true,

@@ -467,26 +467,6 @@ export const graphFiles = sqliteTable(
   })
 );
 
-// Scratch pads — per-project temporary text buffers. A lightweight place to
-// paste text while working; listed newest-first in the top-bar dropdown and
-// cascades away with the project. Title is derived client-side from content.
-export const scratchPads = sqliteTable(
-  "scratch_pads",
-  {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    content: text("content").notNull().default(""),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (t) => ({
-    projectIdx: index("scratch_pads_project_idx").on(t.projectId),
-    projectUpdatedIdx: index("scratch_pads_project_updated_idx").on(t.projectId, t.updatedAt),
-  })
-);
-
 export const groupsRelations = relations(groups, ({ many }) => ({
   projects: many(projects),
 }));
@@ -525,10 +505,6 @@ export const projectMemoryRelations = relations(projectMemory, ({ one }) => ({
   sourceTask: one(tasks, { fields: [projectMemory.sourceTaskId], references: [tasks.id] }),
 }));
 
-export const scratchPadsRelations = relations(scratchPads, ({ one }) => ({
-  project: one(projects, { fields: [scratchPads.projectId], references: [projects.id] }),
-}));
-
 export const graphNodesRelations = relations(graphNodes, ({ one }) => ({
   project: one(projects, { fields: [graphNodes.projectId], references: [projects.id] }),
 }));
@@ -564,8 +540,6 @@ export type Prompt = typeof prompts.$inferSelect;
 export type NewPrompt = typeof prompts.$inferInsert;
 export type ProjectMemory = typeof projectMemory.$inferSelect;
 export type NewProjectMemory = typeof projectMemory.$inferInsert;
-export type ScratchPad = typeof scratchPads.$inferSelect;
-export type NewScratchPad = typeof scratchPads.$inferInsert;
 export type GraphNode = typeof graphNodes.$inferSelect;
 export type NewGraphNode = typeof graphNodes.$inferInsert;
 export type GraphEdge = typeof graphEdges.$inferSelect;

@@ -10,7 +10,6 @@
 // so hiding them would strand the action.
 
 export const HEADER_BUTTON_KEYS = [
-  "scratchPad",
   "promptSearch",
   "voice",
   "notifications",
@@ -24,7 +23,6 @@ export type HeaderButtonKey = (typeof HEADER_BUTTON_KEYS)[number];
 export type HeaderButtonVisibility = Record<HeaderButtonKey, boolean>;
 
 export const DEFAULT_HEADER_BUTTON_VISIBILITY: HeaderButtonVisibility = {
-  scratchPad: true,
   promptSearch: true,
   voice: true,
   notifications: true,

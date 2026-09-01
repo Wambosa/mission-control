@@ -48,12 +48,6 @@ const HEADER_BUTTON_META: Record<
   HeaderButtonKey,
   { title: string; description: string; label: string }
 > = {
-  scratchPad: {
-    title: "Scratch pads",
-    description:
-      "The notepad button in the top-bar tools tray. Hidden here, scratch pads still open with their hotkey.",
-    label: "Show scratch pads button",
-  },
   promptSearch: {
     title: "Prompt search",
     description:
@@ -139,7 +133,6 @@ export function InterfaceSettingsPage() {
             onChange={(next) => update({ providerUsageEnabled: next })}
             label="Show AI usage indicator"
           />
-          {headerButtonRow("scratchPad")}
           {headerButtonRow("promptSearch")}
           {headerButtonRow("voice")}
           {headerButtonRow("notifications")}

@@ -27,7 +27,6 @@ export const HOTKEY_ACTIONS = [
   "git.diff",
   "voice.pushToTalk",
   "prompt.search",
-  "scratch.toggle",
   "screenshot.capture",
   "group.next",
   "group.prev",
@@ -107,11 +106,6 @@ export const ACTION_META: Record<HotkeyAction, { label: string; description: str
     label: "Search prompt history",
     description:
       "Open a searchable popup of every prompt you've sent to a session; pick one to jump to that session.",
-  },
-  "scratch.toggle": {
-    label: "Toggle scratch pad",
-    description:
-      "Open or close the current project's scratch pad — a temporary place to paste text.",
   },
   "screenshot.capture": {
     label: "Capture screenshot",

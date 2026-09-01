@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Btn } from "~/components/ui/Btn";
 import { PromptSearchButton } from "~/components/views/PromptSearchButton";
-import { ScratchPadButton } from "~/components/views/ScratchPadButton";
 import { VoicePushToTalkButton } from "~/components/views/VoicePushToTalkButton";
 import { useHideableMenu } from "~/lib/hideable-elements";
 import { useSettings } from "~/queries";
@@ -45,16 +44,13 @@ export function HeaderToolsCluster() {
       return next;
     });
 
-  const anyVisible = visibility.scratchPad || visibility.promptSearch || visibility.voice;
+  const anyVisible = visibility.promptSearch || visibility.voice;
   if (!anyVisible) return null;
 
   return (
     <>
       {expanded && (
         <>
-          {visibility.scratchPad && (
-            <ScratchPadButton onContextMenu={hideElementContextMenu("header-button:scratchPad")} />
-          )}
           {visibility.promptSearch && (
             <PromptSearchButton
               onContextMenu={hideElementContextMenu("header-button:promptSearch")}

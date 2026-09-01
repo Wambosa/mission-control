@@ -78,11 +78,6 @@ import {
   normalizeTerminalLineHeight,
 } from "~/shared/terminal-appearance";
 import {
-  emptyVoiceCommandAliases,
-  normalizeVoiceCommandAliases,
-  type VoiceCommandAliases,
-} from "~/shared/voice-command-aliases";
-import {
   normalizeSessionHeaderButtonVisibility,
   type SessionHeaderButtonVisibility,
 } from "~/shared/session-header-buttons";
@@ -123,7 +118,6 @@ const THEME_STYLE_KEY = "theme_style";
 const MINIMAL_THEME_KEY = "minimal_theme";
 const SURFACE_TINT_KEY = "surface_tint";
 const BACKGROUND_IMAGE_KEY = "background_image";
-const VOICE_COMMAND_ALIASES_KEY = "voice_command_aliases";
 const CLAUDE_USAGE_LIMITS_ENABLED_KEY = "claude_usage_limits_enabled";
 const CLAUDE_USAGE_LIMITS_SHOW_SESSION_KEY = "claude_usage_limits_show_session";
 const CLAUDE_USAGE_LIMITS_SHOW_WEEKLY_KEY = "claude_usage_limits_show_weekly";
@@ -146,18 +140,6 @@ const INTERFACE_FONT_SCALE_KEY = "interface_font_scale";
 const SHOW_GROUP_SWITCHER_KEY = "show_group_switcher";
 const SHOW_PROJECT_HEADER_GROUP_KEY = "show_project_header_group";
 const SHOW_BACKGROUND_GRID_KEY = "show_background_grid";
-
-const voiceCommandAliasesBody = z.unknown().transform((value, ctx): VoiceCommandAliases => {
-  try {
-    return normalizeVoiceCommandAliases(value);
-  } catch (error) {
-    ctx.addIssue({
-      code: "custom",
-      message: error instanceof Error ? error.message : "invalid voiceCommandAliases",
-    });
-    return z.NEVER;
-  }
-});
 
 const aiModelBody = z.union([z.string(), z.null()]).transform((value, ctx): AiModelId | null => {
   const normalized = normalizeAiModelId(value);
@@ -202,7 +184,6 @@ const updateSettingsBody = z
     automaticUpdateDownloadsEnabled: z.boolean(),
     automaticUpdateInstallOnQuitEnabled: z.boolean(),
     worktreesEnabled: z.boolean(),
-    voiceControlEnabled: z.boolean(),
     questionOverlayEnabled: z.boolean(),
     gitDiffChangedFilesView: z.enum(GIT_DIFF_CHANGED_FILES_VIEWS).nullable(),
     gitDiffChangedFilesWidth: z
@@ -271,7 +252,6 @@ const updateSettingsBody = z
     syncAgent: z.enum(AI_RUNTIME_HARNESS_VALUES),
     syncModel: aiModelBody,
     syncPrompt: z.string().transform((value) => normalizeSyncPrompt(value)),
-    voiceCommandAliases: voiceCommandAliasesBody,
     claudeUsageLimitsEnabled: z.boolean(),
     claudeUsageLimitsShowSession: z.boolean(),
     claudeUsageLimitsShowWeekly: z.boolean(),
@@ -448,15 +428,6 @@ function getAgentLauncherConfigSetting(): AgentLauncherConfig {
   );
 }
 
-function getVoiceCommandAliasesSetting() {
-  const raw = getSetting(VOICE_COMMAND_ALIASES_KEY);
-  try {
-    return normalizeVoiceCommandAliases(safeJsonParse<unknown>(raw, null));
-  } catch {
-    return emptyVoiceCommandAliases();
-  }
-}
-
 function getShowGroupSwitcherSetting(): boolean {
   return getBooleanSetting(SHOW_GROUP_SWITCHER_KEY, true);
 }
@@ -513,9 +484,8 @@ function settingsPayload() {
     ),
     // Always on — worktrees graduated from experimental; ignore any stored preference.
     worktreesEnabled: true,
-    // These features graduated from experimental; retained in the payload for
-    // compatibility with older renderers, but stored preferences no longer gate them.
-    voiceControlEnabled: true,
+    // Graduated from experimental; retained in the payload for compatibility
+    // with older renderers, but stored preferences no longer gate it.
     questionOverlayEnabled: true,
     gitDiffChangedFilesView: getGitDiffChangedFilesViewSetting(),
     gitDiffChangedFilesWidth: getGitDiffChangedFilesWidthSetting(),
@@ -540,7 +510,6 @@ function settingsPayload() {
     syncAgent: getSyncAgentSetting(),
     syncModel: getSyncModelSetting(),
     syncPrompt: getSyncPromptSetting(),
-    voiceCommandAliases: getVoiceCommandAliasesSetting(),
     // Off by default: usage reaches out to provider APIs using local logins.
     claudeUsageLimitsEnabled: getBooleanSetting(CLAUDE_USAGE_LIMITS_ENABLED_KEY, false),
     claudeUsageLimitsShowSession: getBooleanSetting(CLAUDE_USAGE_LIMITS_SHOW_SESSION_KEY, true),
@@ -676,9 +645,9 @@ export async function update(request: Request): Promise<Response> {
       body.automaticUpdateInstallOnQuitEnabled,
     );
   }
-  // worktreesEnabled is always on; ignore writes so old clients can't turn it off.
-  // Voice control and native question popups are also always on; their legacy
-  // fields remain accepted so older clients can update other settings safely.
+  // worktreesEnabled is always on; ignore writes so old clients can't turn it
+  // off. Native question popups are the same; their legacy fields remain
+  // accepted so older clients can update other settings safely.
   if (body.gitDiffChangedFilesView !== undefined) {
     if (body.gitDiffChangedFilesView === null) {
       deleteSetting(GIT_DIFF_CHANGED_FILES_VIEW_KEY);
@@ -794,9 +763,6 @@ export async function update(request: Request): Promise<Response> {
   }
   if (body.syncPrompt !== undefined) {
     setSetting(SYNC_PROMPT_SETTING_KEY, body.syncPrompt);
-  }
-  if (body.voiceCommandAliases !== undefined) {
-    setSetting(VOICE_COMMAND_ALIASES_KEY, JSON.stringify(body.voiceCommandAliases));
   }
   if (body.claudeUsageLimitsEnabled !== undefined) {
     setBooleanSetting(CLAUDE_USAGE_LIMITS_ENABLED_KEY, body.claudeUsageLimitsEnabled);

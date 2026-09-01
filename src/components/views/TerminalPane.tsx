@@ -27,11 +27,7 @@ import {
 import { getElectron } from "~/lib/electron";
 import { useHideableMenu } from "~/lib/hideable-elements";
 import { enterFocusSession, takePendingRefocus } from "~/lib/focus-session";
-import { takePendingInitialInput } from "~/lib/voice-session-prompts";
-import {
-  VOICE_PASTE_TO_FOCUSED_SESSION_EVENT,
-  type VoicePasteToFocusedSessionDetail,
-} from "~/lib/voice-events";
+import { takePendingInitialInput } from "~/lib/session-initial-prompts";
 import { consumeIntentionalSessionClose } from "~/lib/intentional-session-close";
 import { DEFAULT_SESSION_ICON, isSessionIcon } from "~/lib/session-icons";
 import { isRemotePtyId } from "~/lib/pty-id";
@@ -955,20 +951,6 @@ export function TerminalPane({
         });
       }
 
-      const onVoicePaste = (event: Event) => {
-        const detail = (event as CustomEvent<VoicePasteToFocusedSessionDetail>).detail;
-        if (!detail?.text || !activePtyId) return;
-        const activeEl = document.activeElement;
-        if (!(activeEl instanceof HTMLElement) || !host.contains(activeEl)) return;
-        term.paste(detail.text);
-        term.focus();
-        detail.handled = true;
-      };
-      window.addEventListener(VOICE_PASTE_TO_FOCUSED_SESSION_EVENT, onVoicePaste);
-      subscriptions.push(() =>
-        window.removeEventListener(VOICE_PASTE_TO_FOCUSED_SESSION_EVENT, onVoicePaste),
-      );
-
       // If an agent process exits before it has had a chance to render its
       // first useful prompt, preserve the panel so the user can read the error.
       const START_FAILURE_EXIT_MS = 3000;
@@ -1313,7 +1295,7 @@ export function TerminalPane({
                 dangerouslySkipPermissions: descriptor.dangerouslySkipPermissions,
                 mcEnv: await resolveMcEnv(electron),
                 missionControlTheme: getTerminalColorScheme(),
-                // Voice-seeded starting prompt, consumed once on the first spawn so
+                // Staged starting prompt, consumed once on the first spawn so
                 // reloads/re-spawns never re-inject it. Undefined for normal sessions.
                 initialInput,
               });

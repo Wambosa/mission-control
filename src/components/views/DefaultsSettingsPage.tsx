@@ -19,7 +19,7 @@ import {
 } from "~/shared/ai-runtime-defaults";
 import { DEFAULT_SYNC_PROMPT } from "~/shared/sync-defaults";
 
-type DefaultsFeatureId = "voice" | "markdown" | "sync";
+type DefaultsFeatureId = "agent" | "markdown" | "sync";
 
 const DEFAULTS_FEATURES: Array<{
   id: DefaultsFeatureId;
@@ -27,9 +27,9 @@ const DEFAULTS_FEATURES: Array<{
   description: string;
 }> = [
   {
-    id: "voice",
-    label: "Voice Agents",
-    description: "Harness and model for voice-started sessions.",
+    id: "agent",
+    label: "Agent Model",
+    description: "Model passed to a new agent session when the harness supports one.",
   },
   {
     id: "markdown",
@@ -54,7 +54,7 @@ export function DefaultsSettingsPage() {
   const currentSyncModel = settings?.syncModel ?? null;
   const currentSyncPrompt = settings?.syncPrompt ?? DEFAULT_SYNC_PROMPT;
 
-  const [activeFeature, setActiveFeature] = useState<DefaultsFeatureId>("voice");
+  const [activeFeature, setActiveFeature] = useState<DefaultsFeatureId>("agent");
   const [runtimeUpdating, setRuntimeUpdating] = useState(false);
   const runtimeUpdateInFlightRef = useRef(false);
   const [syncPromptDraft, setSyncPromptDraft] = useState(currentSyncPrompt);
@@ -135,14 +135,14 @@ export function DefaultsSettingsPage() {
               padding: 16,
             }}
           >
-            {activeFeature === "voice" && (
+            {activeFeature === "agent" && (
                 <FeaturePanel
-                  featureId="voice"
-                title="Voice Agents"
+                  featureId="agent"
+                title="Agent Model"
                 description={
                   <>
-                    When voice starts an agent without naming one, Mission
-                    Control launches this harness and passes the selected model.
+                    Every new session started with this harness is launched with
+                    the model selected here.
                   </>
                 }
               >

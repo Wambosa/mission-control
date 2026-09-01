@@ -39,7 +39,6 @@ import {
   type OsNotificationPermission,
 } from "~/lib/os-notifications";
 import { isElectron } from "~/lib/electron";
-import { emptyVoiceCommandAliases } from "~/shared/voice-command-aliases";
 import { normalizeSessionHeaderButtonVisibility } from "~/shared/session-header-buttons";
 import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
 import { DEFAULT_SYNC_PROMPT } from "~/shared/sync-defaults";
@@ -142,8 +141,6 @@ export function GeneralSettingsPage() {
     syncAgent: settings?.syncAgent ?? "claude-code",
     syncModel: settings?.syncModel ?? null,
     syncPrompt: settings?.syncPrompt ?? DEFAULT_SYNC_PROMPT,
-    voiceCommandAliases: settings?.voiceCommandAliases ?? emptyVoiceCommandAliases(),
-    voiceControlEnabled: settings?.voiceControlEnabled ?? true,
     questionOverlayEnabled: settings?.questionOverlayEnabled ?? true,
     claudeUsageLimitsEnabled: settings?.claudeUsageLimitsEnabled ?? false,
     claudeUsageLimitsShowSession: settings?.claudeUsageLimitsShowSession ?? true,

@@ -62,7 +62,6 @@ import type {
   GraphStatus,
   GraphSummary,
 } from "~/shared/code-graph";
-import type { VoiceCommandAliases } from "~/shared/voice-command-aliases";
 import type { SessionHeaderButtonVisibility } from "~/shared/session-header-buttons";
 import type { HeaderButtonVisibility } from "~/shared/header-buttons";
 import type { PetHomeSide, PetPersistentState } from "~/shared/pet";
@@ -119,7 +118,6 @@ export type AppSettings = {
   /** Git worktrees per project (always on). */
   worktreesEnabled: boolean;
   /** Legacy compatibility field; push-to-talk is always enabled on desktop. */
-  voiceControlEnabled: boolean;
   /** Legacy compatibility field; native Claude Code question popups are always enabled. */
   questionOverlayEnabled: boolean;
   gitDiffChangedFilesView: GitDiffChangedFilesView | null;
@@ -161,15 +159,15 @@ export type AppSettings = {
    */
   headerButtons: HeaderButtonVisibility;
   /**
-   * Default harness/model for voice-started agents when the command doesn't name one.
-   * `null` means "not set" — don't pass a model flag, so the CLI uses its own default.
+   * Default harness/model applied to a new agent session. `null` means
+   * "not set" — don't pass a model flag, so the CLI uses its own default.
    */
   defaultAgent: AiRuntimeHarness;
   defaultModel: AiModelId | null;
   /**
    * Model used by the markdown-preview "Refine" action (rewrites a .md file from
    * reviewer annotations). `null` means "not set" — the selected CLI uses its own
-   * default. Independent from `defaultModel` (voice agents).
+   * default. Independent from `defaultModel`.
    */
   annotationAgent: AiRuntimeHarness;
   annotationModel: AiModelId | null;
@@ -181,8 +179,6 @@ export type AppSettings = {
   syncAgent: AiRuntimeHarness;
   syncModel: AiModelId | null;
   syncPrompt: string;
-  /** User-defined phrases that map to built-in voice commands. */
-  voiceCommandAliases: VoiceCommandAliases;
   /**
    * Show Claude Code's live session (5h) + weekly usage limits in the top bar.
    * Off by default — enabling it makes the app fetch usage from Anthropic using
@@ -704,7 +700,6 @@ export const api = {
         | "automaticUpdateDownloadsEnabled"
         | "automaticUpdateInstallOnQuitEnabled"
         | "worktreesEnabled"
-        | "voiceControlEnabled"
         | "questionOverlayEnabled"
         | "gitDiffChangedFilesView"
         | "gitDiffChangedFilesWidth"
@@ -729,7 +724,6 @@ export const api = {
         | "syncAgent"
         | "syncModel"
         | "syncPrompt"
-        | "voiceCommandAliases"
         | "claudeUsageLimitsEnabled"
         | "claudeUsageLimitsShowSession"
         | "claudeUsageLimitsShowWeekly"

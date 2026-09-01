@@ -4195,17 +4195,6 @@ body[data-card-glow] .cursor-glow {
   }
 }
 
-/* Push-to-talk recording indicator pulse. */
-@keyframes mc-voice-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-
 /* Markdown-preview annotation affordance: a "+" that appears in the gutter when
    hovering an annotatable block, revealed via CSS so the block markup stays
    layout-neutral when annotations are off. */

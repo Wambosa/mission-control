@@ -87,7 +87,7 @@ export type AgentPtySpawnOptions = BasePtySpawnOptions & {
   agent: PtySpawnAgent;
   dangerouslySkipPermissions?: boolean;
   shell?: never;
-  /** Starting prompt written to the agent's stdin once its TUI is ready (voice control). */
+  /** Starting prompt written to the agent's stdin once its TUI is ready. */
   initialInput?: string;
 };
 
@@ -276,10 +276,6 @@ export type ScreenshotCaptureResult =
   | { cancelled: true }
   | { error: string };
 
-export type VoiceTranscribeResult =
-  | { ok: true; text: string }
-  | { ok: false; error: string; code?: "unavailable" };
-
 export type FocusModeStateBridge = {
   active: boolean;
   taskId: string | null;
@@ -314,12 +310,6 @@ export type ElectronBridge = {
   settings: {
     getToken: () => Promise<string>;
     regenerateToken: () => Promise<string>;
-  };
-  voice: {
-    available: () => Promise<boolean>;
-    prewarm: () => Promise<boolean>;
-    /** `prompt` biases the decoder toward expected words (e.g. project names). */
-    transcribe: (wav: ArrayBuffer, prompt?: string) => Promise<VoiceTranscribeResult>;
   };
   getPathForFile: (file: File) => string;
   browseFolder: () => Promise<string | null>;

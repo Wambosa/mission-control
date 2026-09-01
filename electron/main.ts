@@ -25,13 +25,6 @@ import { spawn, ChildProcess, spawnSync } from "node:child_process";
 import { registerPtyHandlers, killAllPtys } from "./pty-manager";
 import { setPtyStreamHidden, setPtyStreamPowerSave } from "./pty-output-batch";
 import { setAppThemeFromBackground } from "./app-theme";
-import {
-  isWhisperAvailable,
-  prewarmWhisper,
-  shutdownWhisper,
-  transcribeWav,
-  WhisperUnavailableError,
-} from "./whisper-server";
 import { registerFileHandlers, disposeAllFileWatchers } from "./file-handlers";
 import { startPreviewServer, disposeAllPreviewServers } from "./preview-server";
 import { IPC } from "./ipc-channels";
@@ -65,11 +58,7 @@ import { AGENT_CLI_CONFIG_BY_COMMAND } from "./agent-cli-version-requirements";
 import { disposeAppSettingsStore, getBooleanAppSetting } from "./app-settings-store";
 import { getBinding, matchElectronInput } from "./keybindings-reader";
 import { resolveProductionServerEntry } from "./production-server-entry";
-import {
-  MICROPHONE_WEB_PERMISSION,
-  shouldAllowAudioCapture,
-  shouldAllowWebPermission,
-} from "./notification-permissions";
+import { shouldAllowWebPermission } from "./notification-permissions";
 import {
   getNativeOsNotificationPermission,
   showSessionFinishOsNotification,
@@ -978,21 +967,12 @@ async function openExternalHttpUrl(url: string): Promise<{ ok: true } | { ok: fa
 
 function configurePermissionHandlers(): void {
   const ses = session.defaultSession;
-  ses.setPermissionRequestHandler((_webContents, permission, callback, details) => {
-    if (permission === MICROPHONE_WEB_PERMISSION) {
-      const mediaTypes = (details as { mediaTypes?: string[] } | undefined)?.mediaTypes;
-      callback(shouldAllowAudioCapture(mediaTypes));
-      return;
-    }
+  ses.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(shouldAllowWebPermission(permission));
   });
-  ses.setPermissionCheckHandler((_webContents, permission, _origin, details) => {
-    if (permission === MICROPHONE_WEB_PERMISSION) {
-      const mediaType = (details as { mediaType?: string } | undefined)?.mediaType;
-      return mediaType === "audio";
-    }
-    return shouldAllowWebPermission(permission);
-  });
+  ses.setPermissionCheckHandler((_webContents, permission) =>
+    shouldAllowWebPermission(permission),
+  );
 }
 
 async function startProductionServer(): Promise<string> {
@@ -1876,24 +1856,6 @@ safeHandle(IPC.terminalDeleteImage, (_evt, p: unknown) => deleteTerminalImageFil
 safeHandle(IPC.screenshotCaptureRegion, () => captureScreenshotRegion());
 safeHandle(IPC.screenshotReadImage, (_evt, p: unknown) => readTerminalImageForEdit(p));
 
-safeHandle(IPC.voiceAvailable, () => isWhisperAvailable());
-safeHandle(IPC.voicePrewarm, () => {
-  void prewarmWhisper();
-  return true;
-});
-safeHandle(IPC.voiceTranscribe, async (_event, wav: ArrayBuffer, prompt?: string) => {
-  try {
-    const text = await transcribeWav(Buffer.from(wav), prompt);
-    return { ok: true as const, text };
-  } catch (err) {
-    if (err instanceof WhisperUnavailableError) {
-      return { ok: false as const, error: err.message, code: "unavailable" as const };
-    }
-    log.error("voice.transcribe-failed", err);
-    return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
-  }
-});
-
 safeHandle(IPC.appGetRuntimePort, () => runtimePort);
 safeHandle(IPC.appGetUserDataDir, () => missionControlUserDataDir);
 
@@ -2088,7 +2050,6 @@ app.on("activate", () => {
 app.on("before-quit", () => {
   (app as any).isQuiting = true;
   killAllPtys();
-  shutdownWhisper();
   disposeAllFileWatchers();
   disposeAllPreviewServers();
   disposeSandboxManager();

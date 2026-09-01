@@ -20,24 +20,13 @@ describe("electron-builder package config", () => {
     expect(readPackageJson().build?.files).toContain("dist/**/*");
   });
 
-  it("bundles the whisper voice-control resources into the app", () => {
-    const entries = readPackageJson().build?.extraResources ?? [];
-    const whisper = entries.find((e) => e.from === "resources/whisper");
-    expect(whisper).toBeTruthy();
-    // Resolved at runtime as process.resourcesPath/whisper in whisper-server.ts.
-    expect(whisper?.to).toBe("whisper");
-  });
-
-  it("declares the macOS microphone usage string required for getUserMedia", () => {
+  it("carries no microphone usage string or audio-input entitlement", () => {
+    // Voice capture is gone; asking macOS for the mic would prompt the user for
+    // a permission the app never uses.
     const extendInfo = readPackageJson().build?.mac?.extendInfo ?? {};
-    expect(typeof extendInfo.NSMicrophoneUsageDescription).toBe("string");
-  });
-
-  it("grants the hardened-runtime audio-input entitlement voice capture needs", () => {
-    // Without this entitlement, signed builds get a silent mic stream (no
-    // error) and whisper hallucinates tokens like [BEEP] on the silence.
+    expect(extendInfo.NSMicrophoneUsageDescription).toBeUndefined();
     const plistPath = path.resolve(__dirname, "..", "..", "build", "entitlements.mac.plist");
     const plist = fs.readFileSync(plistPath, "utf8");
-    expect(plist).toContain("<key>com.apple.security.device.audio-input</key>");
+    expect(plist).not.toContain("com.apple.security.device.audio-input");
   });
 });

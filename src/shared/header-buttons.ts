@@ -11,7 +11,6 @@
 
 export const HEADER_BUTTON_KEYS = [
   "promptSearch",
-  "voice",
   "notifications",
   "screenshot",
   "gridView",
@@ -24,7 +23,6 @@ export type HeaderButtonVisibility = Record<HeaderButtonKey, boolean>;
 
 export const DEFAULT_HEADER_BUTTON_VISIBILITY: HeaderButtonVisibility = {
   promptSearch: true,
-  voice: true,
   notifications: true,
   screenshot: true,
   gridView: true,

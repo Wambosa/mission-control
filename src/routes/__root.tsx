@@ -93,7 +93,6 @@ import {
 } from "~/lib/settings-navigation";
 
 import { UsagePanel } from "~/components/views/UsagePanel";
-import { VoiceController } from "~/components/views/VoiceController";
 import { SessionNotificationsButton } from "~/components/views/SessionNotificationsButton";
 import { Toaster } from "sonner";
 import { MC_TOAST_CLASS_NAMES, MC_TOAST_CLOSE_ICON } from "~/lib/mc-toast";
@@ -899,9 +898,9 @@ function Shell() {
             <>
               <UpdateAvailableButton />
               <ProviderUsageIndicator />
-              {/* Scratch pads / prompt search / voice collapse behind "…" so
-               * the rail stays at status + settings; grid view moved into the
-               * project header beside the session controls it acts on. */}
+              {/* Prompt search collapses behind "…" so the rail stays at
+               * status + settings; grid view moved into the project header
+               * beside the session controls it acts on. */}
               <HeaderToolsCluster />
               <SessionNotificationsButton
                 notifications={appNotifications}
@@ -996,7 +995,6 @@ function Shell() {
             classNames: MC_TOAST_CLASS_NAMES,
           }}
         />
-        <VoiceController />
         {/* PetWidget + RemotePets render via the lazy PetHost (Shell sibling). */}
         <SessionFileDropZone />
       </div>

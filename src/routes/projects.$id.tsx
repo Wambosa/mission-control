@@ -89,7 +89,7 @@ import {
 import { useServerEvents } from "~/lib/use-events";
 import { useDebouncedCallback } from "~/lib/use-debounced-callback";
 import { applyQuestionServerEvent } from "~/lib/agent-question-store";
-import { setPendingInitialInput, takePendingInitialInput } from "~/lib/voice-session-prompts";
+import { setPendingInitialInput, takePendingInitialInput } from "~/lib/session-initial-prompts";
 import {
   clearPendingSessionModel,
   peekPendingSessionModel,
@@ -97,16 +97,6 @@ import {
 } from "~/lib/session-model-overrides";
 import { DEFAULT_SYNC_PROMPT } from "~/shared/sync-defaults";
 import type { AiModelId } from "~/shared/ai-runtime-defaults";
-import {
-  VOICE_NEW_AGENT_EVENT,
-  VOICE_OPEN_DIFF_EVENT,
-  VOICE_REMEMBER_EVENT,
-  VOICE_RUN_SCRIPT_EVENT,
-  type VoiceNewAgentDetail,
-  type VoiceRememberDetail,
-  type VoiceRunScriptDetail,
-} from "~/lib/voice-events";
-import { MEMORY_TITLE_MAX } from "~/shared/project-memory";
 import { useTerminals } from "~/lib/terminal-store";
 import { useUserTerminals } from "~/lib/user-terminal-store";
 import {
@@ -116,7 +106,6 @@ import {
 } from "~/lib/task-display-order";
 import {
   DEFAULT_BRANCH,
-  type TaskAgent,
   parseCustomScripts,
   serializeCustomScripts,
   STATUS_DISPLAY_ORDER,
@@ -1350,7 +1339,7 @@ function ProjectPage() {
       const tasksKey = queryKeys.tasks(project.id, selectedWorktreeId, activeRuntimeScopeId);
       void queryClient.cancelQueries({ queryKey: tasksKey });
 
-      // A voice-seeded prompt can't ride a pre-spawned warm slot (it was launched
+      // A staged prompt can't ride a pre-spawned warm slot (it was launched
       // before we knew the prompt), so fall back to the cold path when set.
       const warmSlot = (await isDockerSandboxRuntime()) || opts?.initialInput
         ? null
@@ -1651,37 +1640,6 @@ function ProjectPage() {
     },
   );
 
-  // Start an agent session seeded with a spoken task (voice control). When the
-  // user didn't name a harness, use Settings -> Defaults.
-  const startVoiceAgent = useCallback(
-    (prompt: string, agent?: TaskAgent) => {
-      if (!project || !projectPathReady) return;
-      // Voice-seeded prompts only flow through the local cold-spawn path; remote
-      // sandbox sessions spawn via remotePty (no initialInput) and would drop it.
-      if (activeRuntimeScopeId !== LOCAL_SCOPE_ID) {
-        toast.error("Voice agents aren't supported in sandbox sessions yet.");
-        return;
-      }
-      const payload = defaultSessionPayload(project);
-      // Drop the new session beside the active one and focus it, like Clone.
-      const anchor = anchorSessionId();
-      if (anchor) terminals.requestCloneInsertAfter(anchor);
-      void createSession(
-        { ...payload, agent: agent ?? settings?.defaultAgent ?? "claude-code", bareSession: false },
-        { initialInput: prompt, focusOnCreate: true },
-      );
-    },
-    [
-      project,
-      projectPathReady,
-      activeRuntimeScopeId,
-      createSession,
-      settings?.defaultAgent,
-      anchorSessionId,
-      terminals,
-    ],
-  );
-
   // Sync: open an AI session that pulls upstream changes into the current
   // branch (stash/commit → pull → resolve conflicts → stash pop), driven by the
   // prompt in Settings → Defaults → Sync, plus a re-entry guard: two
@@ -1724,63 +1682,6 @@ function ProjectPage() {
     settings?.syncPrompt,
     anchorSessionId,
     terminals,
-  ]);
-
-  // Command bus: VoiceController (mounted at root) dispatches these for the
-  // active project route to perform.
-  useEffect(() => {
-    const onNewAgent = (e: Event) => {
-      const detail = (e as CustomEvent<VoiceNewAgentDetail>).detail;
-      startVoiceAgent(detail?.prompt ?? "", detail?.agent);
-    };
-    const onRunScript = (e: Event) => {
-      const detail = (e as CustomEvent<VoiceRunScriptDetail>).detail;
-      const script = customScripts.find((s) => s.id === detail?.scriptId);
-      if (script) runScript(script);
-    };
-    const onOpenDiff = () => {
-      if (projectPathReady) setDiffViewOpen(true);
-    };
-    const onRemember = (e: Event) => {
-      const text = (e as CustomEvent<VoiceRememberDetail>).detail?.text?.trim();
-      if (!text) return;
-      // A spoken fact is a user-confirmed discovery. Long dictations overflow the
-      // title, so clamp to its limit — the whole utterance still reads as one line.
-      const title = text.slice(0, MEMORY_TITLE_MAX);
-      void api
-        .createMemory(id, { type: "discovery", title, source: "voice", confidence: "confirmed" })
-        .then(() => {
-          void queryClient.invalidateQueries({ queryKey: queryKeys.projectMemory(id) });
-          toast.success(`Remembered: “${title}”`);
-        })
-        .catch((err) =>
-          toast.error(err instanceof Error ? err.message : "Could not save that memory"),
-        );
-    };
-    window.addEventListener(VOICE_NEW_AGENT_EVENT, onNewAgent as EventListener);
-    window.addEventListener(VOICE_RUN_SCRIPT_EVENT, onRunScript as EventListener);
-    window.addEventListener(VOICE_OPEN_DIFF_EVENT, onOpenDiff);
-    window.addEventListener(VOICE_REMEMBER_EVENT, onRemember as EventListener);
-    return () => {
-      window.removeEventListener(VOICE_NEW_AGENT_EVENT, onNewAgent as EventListener);
-      window.removeEventListener(VOICE_RUN_SCRIPT_EVENT, onRunScript as EventListener);
-      window.removeEventListener(VOICE_OPEN_DIFF_EVENT, onOpenDiff);
-      window.removeEventListener(VOICE_REMEMBER_EVENT, onRemember as EventListener);
-    };
-  }, [
-    showNewAgent,
-    showEdit,
-    confirmRemove,
-    projectPathIssue,
-    projectPathCheck.state,
-    startVoiceAgent,
-    project,
-    customScripts,
-    runScript,
-    projectPathReady,
-    setDiffViewOpen,
-    id,
-    queryClient,
   ]);
 
   const anyBlockingDialogOpen =

@@ -116,7 +116,7 @@ export async function create(projectId: string, request: Request): Promise<Respo
   if (off) return off;
   const parsed = await parseJsonBody(request, createBody);
   if (!parsed.ok) return parsed.response;
-  // Agent-written memories obey the agent-write toggle; user/voice writes don't.
+  // Agent-written memories obey the agent-write toggle; user writes don't.
   if (parsed.data.source === "agent" && !readRecallSettings().agentWriteEnabled) {
     return forbidden("agent memory writes are disabled");
   }

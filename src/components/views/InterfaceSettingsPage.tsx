@@ -54,12 +54,6 @@ const HEADER_BUTTON_META: Record<
       "The prompt-history search button in the top-bar tools tray. The search palette keeps its hotkey.",
     label: "Show prompt search button",
   },
-  voice: {
-    title: "Push-to-talk",
-    description:
-      "The microphone button in the top-bar tools tray (only shown while voice control is on). Push-to-talk keeps its hotkey.",
-    label: "Show push-to-talk button",
-  },
   notifications: {
     title: "Notifications bell",
     description:
@@ -134,7 +128,6 @@ export function InterfaceSettingsPage() {
             label="Show AI usage indicator"
           />
           {headerButtonRow("promptSearch")}
-          {headerButtonRow("voice")}
           {headerButtonRow("notifications")}
         </div>
       </Field>

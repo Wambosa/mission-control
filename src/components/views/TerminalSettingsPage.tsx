@@ -31,7 +31,6 @@ import {
   TERMINAL_LETTER_SPACINGS,
   TERMINAL_LINE_HEIGHTS,
 } from "~/shared/terminal-appearance";
-import { emptyVoiceCommandAliases } from "~/shared/voice-command-aliases";
 import { normalizeSessionHeaderButtonVisibility } from "~/shared/session-header-buttons";
 import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
 import { DEFAULT_SURFACE_TINT } from "~/shared/surface-tint";
@@ -206,8 +205,6 @@ export function TerminalSettingsPage() {
     syncAgent: settings?.syncAgent ?? "claude-code",
     syncModel: settings?.syncModel ?? null,
     syncPrompt: settings?.syncPrompt ?? DEFAULT_SYNC_PROMPT,
-    voiceCommandAliases: settings?.voiceCommandAliases ?? emptyVoiceCommandAliases(),
-    voiceControlEnabled: settings?.voiceControlEnabled ?? true,
     questionOverlayEnabled: settings?.questionOverlayEnabled ?? true,
     claudeUsageLimitsEnabled: settings?.claudeUsageLimitsEnabled ?? false,
     claudeUsageLimitsShowSession: settings?.claudeUsageLimitsShowSession ?? true,

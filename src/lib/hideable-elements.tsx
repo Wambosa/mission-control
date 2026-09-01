@@ -52,7 +52,6 @@ const SESSION_BUTTON_LABELS: Record<SessionHeaderButtonKey, string> = {
 
 const HEADER_BUTTON_LABELS: Record<HeaderButtonKey, string> = {
   promptSearch: "prompt search button",
-  voice: "push-to-talk button",
   notifications: "notifications bell",
   screenshot: "screenshot button",
   gridView: "grid view button",

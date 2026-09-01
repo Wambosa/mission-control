@@ -12,7 +12,6 @@
   },
   "scripts": {
     "check:node": "node scripts/require-node-24.mjs",
-    "setup:whisper": "node scripts/fetch-whisper.mjs",
     "preinstall": "node scripts/require-node-24.mjs",
     "predev": "node scripts/require-node-24.mjs",
     "predev:electron": "node scripts/require-node-24.mjs",
@@ -200,13 +199,6 @@
     },
     "extraResources": [
       {
-        "from": "resources/whisper",
-        "to": "whisper",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
         "from": "dist/bundled-mcp",
         "to": "bundled-mcp",
         "filter": [
@@ -222,7 +214,6 @@
       ],
       "category": "public.app-category.developer-tools",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Mission Control uses the microphone for push-to-talk voice commands. Audio is transcribed locally on your machine and never leaves your computer.",
         "NSScreenCaptureUsageDescription": "Mission Control captures a screen region you select so you can attach it to an AI session as visual context."
       },
       "hardenedRuntime": true,

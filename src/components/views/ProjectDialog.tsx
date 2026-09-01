@@ -17,7 +17,12 @@ import {
   useCliAvailability,
 } from "~/lib/cli-availability";
 import { getElectron } from "~/lib/electron";
-import { useSandboxes, useSettings } from "~/queries";
+import { queryKeys, useSandboxes, useSettings } from "~/queries";
+import { useQueryClient } from "@tanstack/react-query";
+import { api } from "~/lib/api";
+import { AddSshHostDialog } from "~/components/views/AddSshHostDialog";
+import { SandboxConfigModal } from "~/components/views/SandboxConfigModal";
+import { ConfirmDialog } from "~/components/ui/ConfirmDialog";
 import { AGENT_REGISTRY } from "~/shared/agents";
 import {
   DEFAULT_AGENT_LAUNCHER_CONFIG,
@@ -191,6 +196,36 @@ export function ProjectDialog({
     [sandboxState?.sandboxes],
   );
   const selectedHost = sshHosts.find((host) => host.id === sandboxId) ?? null;
+  // Adding, configuring, and removing a host all happen here, where the host is
+  // chosen. There is no separate scope switcher to keep in sync.
+  const queryClient = useQueryClient();
+  const [addHostOpen, setAddHostOpen] = useState(false);
+  const [hostConfigOpen, setHostConfigOpen] = useState(false);
+  const [confirmRemoveHost, setConfirmRemoveHost] = useState(false);
+  const [removingHost, setRemovingHost] = useState(false);
+
+  const removeSelectedHost = async () => {
+    if (!selectedHost || removingHost) return;
+    setRemovingHost(true);
+    try {
+      // Tear the machine's runtime down first — the manager still needs the
+      // persisted config to unregister itself cleanly.
+      await getElectron()?.sandbox.destroy(selectedHost.id).catch(() => undefined);
+      await api.deleteSandbox(selectedHost.id);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.sandboxes });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      // Every project that ran on it falls back to Local, server-side. Mirror
+      // that here so the dialog does not keep offering a host that is gone.
+      setSandboxId("");
+      setRemoteDirectory("");
+      setConfirmRemoveHost(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove the host");
+      setConfirmRemoveHost(false);
+    } finally {
+      setRemovingHost(false);
+    }
+  };
   const [groupQuery, setGroupQuery] = useState("");
   const [groupTypeaheadOpen, setGroupTypeaheadOpen] = useState(false);
   const [groupActiveIndex, setGroupActiveIndex] = useState(-1);
@@ -837,33 +872,66 @@ export function ProjectDialog({
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       <div style={{ flex: "0 0 200px", minWidth: 0 }}>
         <FieldLabel>Runs on</FieldLabel>
-        <select
-          value={sandboxId}
-          aria-label="Machine this project runs on"
-          onChange={(e) => {
-            const next = e.target.value;
-            setSandboxId(next);
-            if (!next) setRemoteDirectory("");
-          }}
-          style={{
-            width: "100%",
-            height: 38,
-            marginTop: 6,
-            padding: "0 10px",
-            borderRadius: 7,
-            border: "1px solid var(--border)",
-            background: "var(--surface-0)",
-            color: "var(--text)",
-            fontSize: 13,
-          }}
-        >
-          <option value="">Local</option>
-          {sshHosts.map((host) => (
-            <option key={host.id} value={host.id}>
-              {host.name}
-            </option>
-          ))}
-        </select>
+        <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
+          <select
+            value={sandboxId}
+            aria-label="Machine this project runs on"
+            onChange={(e) => {
+              const next = e.target.value;
+              setSandboxId(next);
+              if (!next) setRemoteDirectory("");
+            }}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              height: 38,
+              padding: "0 10px",
+              borderRadius: 7,
+              border: "1px solid var(--border)",
+              background: "var(--surface-0)",
+              color: "var(--text)",
+              fontSize: 13,
+            }}
+          >
+            <option value="">Local</option>
+            {sshHosts.map((host) => (
+              <option key={host.id} value={host.id}>
+                {host.name}
+              </option>
+            ))}
+          </select>
+          <Btn
+            variant="ghost"
+            size="sm"
+            icon="plus"
+            onClick={() => setAddHostOpen(true)}
+            title="Add an SSH host"
+            aria-label="Add an SSH host"
+            style={{ width: 34, padding: 0 }}
+          />
+          {selectedHost && (
+            <>
+              <Btn
+                variant="ghost"
+                size="sm"
+                icon="settings"
+                onClick={() => setHostConfigOpen(true)}
+                title={`Configure ${selectedHost.name}`}
+                aria-label={`Configure ${selectedHost.name}`}
+                style={{ width: 34, padding: 0 }}
+              />
+              <Btn
+                variant="ghost"
+                size="sm"
+                icon="trash"
+                onClick={() => setConfirmRemoveHost(true)}
+                title={`Remove ${selectedHost.name}`}
+                aria-label={`Remove ${selectedHost.name}`}
+                style={{ width: 34, padding: 0 }}
+              />
+            </>
+          )}
+        </div>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <TextField
@@ -1443,6 +1511,43 @@ export function ProjectDialog({
           </div>
         </div>
       )}
+
+      {/* Host management lives where the host is chosen — adding one is the
+          same act as picking one. A host added here is shared: another project
+          selects it from the same list rather than re-adding it. */}
+      <AddSshHostDialog
+        open={addHostOpen}
+        onClose={() => setAddHostOpen(false)}
+        onAdded={(addedId) => {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.sandboxes });
+          setSandboxId(addedId);
+          setAddHostOpen(false);
+        }}
+      />
+      <SandboxConfigModal
+        open={hostConfigOpen}
+        onClose={() => setHostConfigOpen(false)}
+        sandboxId={selectedHost?.id ?? null}
+      />
+      <ConfirmDialog
+        open={confirmRemoveHost}
+        onClose={() => {
+          if (!removingHost) setConfirmRemoveHost(false);
+        }}
+        onConfirm={() => void removeSelectedHost()}
+        title={selectedHost ? `Remove ${selectedHost.name}?` : "Remove host?"}
+        confirmLabel="Remove host"
+        icon="trash"
+        variant="danger"
+        loading={removingHost}
+        width={460}
+      >
+        <p style={{ margin: 0, fontSize: 13, color: "var(--text)", lineHeight: 1.5 }}>
+          Mission Control stops using this machine. Nothing on it is deleted, and
+          every project that ran there falls back to Local — you can point them
+          at another host afterwards.
+        </p>
+      </ConfirmDialog>
     </Modal>
   );
 }

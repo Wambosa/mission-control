@@ -21,7 +21,7 @@ import {
   insertSandbox,
   updateSandboxRow,
 } from "../repositories/sandboxes.repo";
-import { findProjectIdsBySandboxId } from "../repositories/projects.repo";
+import { findProjectIdsBySandboxId, updateProjectRow } from "../repositories/projects.repo";
 import { deleteTasksByScope } from "../repositories/tasks.repo";
 import { deleteUserTerminalsByScope } from "../repositories/user-terminals.repo";
 import { deleteHomeTerminalsByScope } from "../repositories/home-terminals.repo";
@@ -299,15 +299,38 @@ export function updateSandbox(id: string, patch: UpdateSandboxPatch): SandboxPub
   return next ? toPublicSandbox(next) : null;
 }
 
-/** Destroys the sandbox row (cascade-deleting its projects). Call
- *  `electron.sandbox.destroy` before this so container/volume teardown still
- *  has the persisted config. */
+/**
+ * Removes a sandbox. What that means to its projects depends on what the
+ * sandbox is:
+ *
+ * - A managed remote VM *contains* the project — Mission Control created it in
+ *   there — so tearing the VM down takes the project with it (the FK cascades).
+ * - An SSH host merely *runs* a project the user already had on disk. Removing
+ *   the host must not take their project with it, so the binding is cleared
+ *   first: the project falls back to Local, stated plainly, with no dangling
+ *   reference to a machine that is gone.
+ *
+ * Call `electron.sandbox.destroy` before this so container/volume teardown
+ * still has the persisted config.
+ */
 export function deleteSandbox(id: string): boolean {
-  if (!findSandboxById(id)) return false;
+  const sandbox = findSandboxById(id);
+  if (!sandbox) return false;
 
-  for (const projectId of findProjectIdsBySandboxId(id)) {
-    deleteAllProjectImagesFor(projectId);
-    events.emit("project:deleted", { id: projectId });
+  if (sandbox.kind === "ssh-host") {
+    for (const projectId of findProjectIdsBySandboxId(id)) {
+      updateProjectRow(projectId, {
+        sandboxId: null,
+        remoteDirectory: null,
+        updatedAt: Date.now(),
+      });
+      events.emit("project:updated", { id: projectId });
+    }
+  } else {
+    for (const projectId of findProjectIdsBySandboxId(id)) {
+      deleteAllProjectImagesFor(projectId);
+      events.emit("project:deleted", { id: projectId });
+    }
   }
   deleteTasksByScope(id);
   deleteUserTerminalsByScope(id);

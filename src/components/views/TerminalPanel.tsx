@@ -68,7 +68,6 @@ export function TerminalPanel({
     const tasks = queryClient.getQueryData<Task[]>(
       queryKeys.tasks(
         active.project.id,
-        active.project.activeWorktreeId ?? null,
         active.project.activeRuntimeScopeId ?? LOCAL_SCOPE_ID,
       ),
     );
@@ -90,7 +89,6 @@ export function TerminalPanel({
         queryClient.invalidateQueries({
           queryKey: queryKeys.tasks(
             active.project.id,
-            active.project.activeWorktreeId ?? null,
             active.project.activeRuntimeScopeId ?? LOCAL_SCOPE_ID,
           ),
         }),

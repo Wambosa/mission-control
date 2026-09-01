@@ -48,7 +48,6 @@ export async function invalidateSessionQueries(
     add(
       queryKeys.tasks(
         project.id,
-        project.activeWorktreeId ?? null,
         project.activeRuntimeScopeId ?? LOCAL_SCOPE_ID,
       ),
     );

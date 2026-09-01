@@ -34,7 +34,6 @@ import {
 import { normalizeSessionHeaderButtonVisibility } from "~/shared/session-header-buttons";
 import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
 import { DEFAULT_SURFACE_TINT } from "~/shared/surface-tint";
-import { DEFAULT_SYNC_PROMPT } from "~/shared/sync-defaults";
 
 type AppearancePatch = Partial<
   Pick<
@@ -202,9 +201,6 @@ export function TerminalSettingsPage() {
     defaultModel: settings?.defaultModel ?? null,
     annotationAgent: settings?.annotationAgent ?? "claude-code",
     annotationModel: settings?.annotationModel ?? null,
-    syncAgent: settings?.syncAgent ?? "claude-code",
-    syncModel: settings?.syncModel ?? null,
-    syncPrompt: settings?.syncPrompt ?? DEFAULT_SYNC_PROMPT,
     questionOverlayEnabled: settings?.questionOverlayEnabled ?? true,
     claudeUsageLimitsEnabled: settings?.claudeUsageLimitsEnabled ?? false,
     claudeUsageLimitsShowSession: settings?.claudeUsageLimitsShowSession ?? true,

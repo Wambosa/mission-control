@@ -221,7 +221,6 @@ export function replenishSessionWarmSlot(input: {
 export async function persistWarmSlotTask(
   projectId: string,
   slot: SessionWarmSlot,
-  worktreeId: string | null,
   scopeId: string | null = LOCAL_SCOPE_ID,
 ): Promise<Task> {
   const { task } = await api.createTaskInternal(projectId, {
@@ -235,7 +234,7 @@ export async function persistWarmSlotTask(
     claudeSkipPermissions: agentSupportsSkipPermissions(slot.payload.agent)
       ? slot.payload.skipPermissions
       : undefined,
-    worktreeId,
+    worktreeId: null,
     scopeId,
   });
   return task;

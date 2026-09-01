@@ -2,19 +2,7 @@ import type { Group, Project, Task, UserTerminal } from "~/db/schema";
 import type { TaskAgent, TaskStatus } from "~/shared/domain";
 import type { ProjectPathStatus, ProjectWithCounts } from "~/shared/projects";
 import { DEV_SERVER_ORIGIN } from "~/shared/dev-server";
-import type {
-  CommitResult,
-  CreatePullRequestResult,
-  FetchResult,
-  GitBranch,
-  GitBranchesResult,
-  GitCheckoutResult,
-  GitDiff,
-  GitStatus,
-  PullResult,
-  PushResult,
-} from "~/server/services/git";
-export type { GitBranch, GitBranchesResult, GitCheckoutResult };
+import type { GitDiff, GitStatus } from "~/server/services/git";
 import type { Binding, BindingMap, HotkeyAction } from "~/lib/keybindings/types";
 import type { AccentColorId } from "~/lib/accent-colors";
 import type { UsageSummary } from "~/shared/token-usage";
@@ -171,14 +159,6 @@ export type AppSettings = {
    */
   annotationAgent: AiRuntimeHarness;
   annotationModel: AiModelId | null;
-  /**
-   * Harness/model/prompt for the branch Sync split-button, which opens an AI
-   * session to pull upstream changes into the current branch (stash/commit,
-   * conflict resolution, stash-pop).
-   */
-  syncAgent: AiRuntimeHarness;
-  syncModel: AiModelId | null;
-  syncPrompt: string;
   /**
    * Show Claude Code's live session (5h) + weekly usage limits in the top bar.
    * Off by default — enabling it makes the app fetch usage from Anthropic using
@@ -556,10 +536,8 @@ export const api = {
   deleteGroup: (id: string) =>
     req<void>(`/api/groups/${id}`, { method: "DELETE" }),
 
-  listTasks: (projectId: string, worktreeId?: string | null, scopeId?: string | null) =>
-    req<{ tasks: Task[] }>(
-      `/api/projects/${projectId}/tasks${scopedWorktreeQuery(worktreeId, scopeId)}`,
-    ),
+  listTasks: (projectId: string, scopeId?: string | null) =>
+    req<{ tasks: Task[] }>(`/api/projects/${projectId}/tasks${scopeQuery(scopeId)}`),
   getTask: (id: string) => req<{ task: Task }>(`/api/tasks/${id}`),
   getTaskQuestion: (id: string) =>
     req<{ question: PendingQuestion | null }>(`/api/tasks/${id}/question`),
@@ -720,9 +698,6 @@ export const api = {
         | "defaultModel"
         | "annotationAgent"
         | "annotationModel"
-        | "syncAgent"
-        | "syncModel"
-        | "syncPrompt"
         | "claudeUsageLimitsEnabled"
         | "claudeUsageLimitsShowSession"
         | "claudeUsageLimitsShowWeekly"
@@ -766,21 +741,6 @@ export const api = {
 
   getGitStatus: (projectId: string, worktreeId?: string | null) =>
     req<GitStatus>(`/api/projects/${projectId}/git/status${worktreeQuery(worktreeId)}`),
-  getGitBranches: (projectId: string, worktreeId?: string | null) =>
-    req<GitBranchesResult>(`/api/projects/${projectId}/git/branches${worktreeQuery(worktreeId)}`),
-  gitCheckout: (
-    projectId: string,
-    branch: string,
-    opts: { create?: boolean; worktreeId?: string | null } = {},
-  ) =>
-    req<GitCheckoutResult>(`/api/projects/${projectId}/git/checkout`, {
-      method: "POST",
-      body: JSON.stringify({
-        branch,
-        create: opts.create,
-        worktreeId: opts.worktreeId ?? null,
-      }),
-    }),
   getGitDiff: (projectId: string, file: string, staged: boolean, worktreeId?: string | null) =>
     req<GitDiff>(
       `/api/projects/${projectId}/git/diff?file=${encodeURIComponent(file)}&staged=${staged ? "1" : "0"}${worktreeId ? `&worktreeId=${encodeURIComponent(worktreeId)}` : ""}`,
@@ -794,43 +754,6 @@ export const api = {
     req<{ ok: true }>(`/api/projects/${projectId}/git/unstage`, {
       method: "POST",
       body: JSON.stringify({ files, worktreeId: worktreeId ?? null }),
-    }),
-  gitCommit: (
-    projectId: string,
-    opts: {
-      autoStage?: boolean;
-      worktreeId?: string | null;
-      /** Verbatim commit message. */
-      message: string;
-    },
-  ) =>
-    req<CommitResult>(`/api/projects/${projectId}/git/commit`, {
-      method: "POST",
-      body: JSON.stringify(opts),
-    }),
-  gitPush: (projectId: string, worktreeId?: string | null) =>
-    req<PushResult>(`/api/projects/${projectId}/git/push`, {
-      method: "POST",
-      body: JSON.stringify({ worktreeId: worktreeId ?? null }),
-    }),
-  gitFetch: (projectId: string, worktreeId?: string | null) =>
-    req<FetchResult>(`/api/projects/${projectId}/git/fetch`, {
-      method: "POST",
-      body: JSON.stringify({ worktreeId: worktreeId ?? null }),
-    }),
-  gitPull: (
-    projectId: string,
-    worktreeId?: string | null,
-    mode: "ff-only" | "rebase" | "merge" = "ff-only",
-  ) =>
-    req<PullResult>(`/api/projects/${projectId}/git/pull`, {
-      method: "POST",
-      body: JSON.stringify({ worktreeId: worktreeId ?? null, mode }),
-    }),
-  gitCreatePullRequest: (projectId: string, worktreeId?: string | null) =>
-    req<CreatePullRequestResult>(`/api/projects/${projectId}/git/create-pr`, {
-      method: "POST",
-      body: JSON.stringify({ worktreeId: worktreeId ?? null }),
     }),
   getUsage: (days: number = 30) =>
     req<UsageSummary>(`/api/usage?days=${days}`),
@@ -879,6 +802,13 @@ export const api = {
 function worktreeQuery(worktreeId?: string | null): string {
   if (worktreeId === undefined) return "";
   return `?worktreeId=${encodeURIComponent(worktreeId || "main")}`;
+}
+
+function scopeQuery(scopeId?: string | null): string {
+  const params = new URLSearchParams();
+  if (scopeId) params.set("scopeId", scopeId);
+  const query = params.toString();
+  return query ? `?${query}` : "";
 }
 
 function scopedWorktreeQuery(worktreeId?: string | null, scopeId?: string | null): string {

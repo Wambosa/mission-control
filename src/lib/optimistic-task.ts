@@ -54,18 +54,17 @@ export function buildOptimisticTask(input: {
   };
 }
 
-function tasksQueryKey(projectId: string, worktreeId: string | null, scopeId?: string | null) {
-  return queryKeys.tasks(projectId, worktreeId, scopeId);
+function tasksQueryKey(projectId: string, scopeId?: string | null) {
+  return queryKeys.tasks(projectId, scopeId);
 }
 
 export function removeTaskFromCache(
   queryClient: QueryClient,
   projectId: string,
-  worktreeId: string | null,
   taskId: string,
   scopeId?: string | null,
 ) {
-  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, worktreeId, scopeId), (current) =>
+  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, scopeId), (current) =>
     (current ?? []).filter((t) => t.id !== taskId),
   );
 }
@@ -73,12 +72,11 @@ export function removeTaskFromCache(
 export function removeTasksFromCache(
   queryClient: QueryClient,
   projectId: string,
-  worktreeId: string | null,
   taskIds: Iterable<string>,
   scopeId?: string | null,
 ) {
   const ids = taskIds instanceof Set ? taskIds : new Set(taskIds);
-  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, worktreeId, scopeId), (current) =>
+  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, scopeId), (current) =>
     (current ?? []).filter((t) => !ids.has(t.id)),
   );
 }
@@ -86,34 +84,31 @@ export function removeTasksFromCache(
 export function restoreTasksCache(
   queryClient: QueryClient,
   projectId: string,
-  worktreeId: string | null,
   tasks: Task[],
   scopeId?: string | null,
 ) {
-  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, worktreeId, scopeId), tasks);
+  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, scopeId), tasks);
 }
 
 export function setTaskArchivedInCache(
   queryClient: QueryClient,
   projectId: string,
-  worktreeId: string | null,
   taskId: string,
   archived: boolean,
   scopeId?: string | null,
 ) {
-  setTasksArchivedInCache(queryClient, projectId, worktreeId, [taskId], archived, scopeId);
+  setTasksArchivedInCache(queryClient, projectId, [taskId], archived, scopeId);
 }
 
 export function setTasksArchivedInCache(
   queryClient: QueryClient,
   projectId: string,
-  worktreeId: string | null,
   taskIds: Iterable<string>,
   archived: boolean,
   scopeId?: string | null,
 ) {
   const ids = taskIds instanceof Set ? taskIds : new Set(taskIds);
-  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, worktreeId, scopeId), (current) =>
+  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, scopeId), (current) =>
     (current ?? []).map((t) => (ids.has(t.id) ? { ...t, archived } : t)),
   );
 }
@@ -121,12 +116,11 @@ export function setTasksArchivedInCache(
 export function setTaskPinnedInCache(
   queryClient: QueryClient,
   projectId: string,
-  worktreeId: string | null,
   taskId: string,
   pinned: boolean,
   scopeId?: string | null,
 ) {
-  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, worktreeId, scopeId), (current) =>
+  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, scopeId), (current) =>
     (current ?? []).map((t) => (t.id === taskId ? { ...t, pinned, updatedAt: Date.now() } : t)),
   );
 }
@@ -134,11 +128,10 @@ export function setTaskPinnedInCache(
 export function appendOptimisticTask(
   queryClient: QueryClient,
   projectId: string,
-  worktreeId: string | null,
   task: Task,
   scopeId?: string | null,
 ) {
-  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, worktreeId, scopeId), (current) => [
+  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, scopeId), (current) => [
     task,
     ...(current ?? []),
   ]);
@@ -147,12 +140,11 @@ export function appendOptimisticTask(
 export function replaceOptimisticTask(
   queryClient: QueryClient,
   projectId: string,
-  worktreeId: string | null,
   optimisticId: string,
   task: Task,
   scopeId?: string | null,
 ) {
-  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, worktreeId, scopeId), (current) => {
+  queryClient.setQueryData<Task[]>(tasksQueryKey(projectId, scopeId), (current) => {
     const withoutOptimistic = (current ?? []).filter((t) => t.id !== optimisticId);
     if (withoutOptimistic.some((t) => t.id === task.id)) return withoutOptimistic;
     return [task, ...withoutOptimistic];
@@ -162,9 +154,8 @@ export function replaceOptimisticTask(
 export function removeOptimisticTask(
   queryClient: QueryClient,
   projectId: string,
-  worktreeId: string | null,
   optimisticId: string,
   scopeId?: string | null,
 ) {
-  removeTaskFromCache(queryClient, projectId, worktreeId, optimisticId, scopeId);
+  removeTaskFromCache(queryClient, projectId, optimisticId, scopeId);
 }

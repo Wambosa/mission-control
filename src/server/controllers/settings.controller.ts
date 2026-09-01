@@ -95,16 +95,12 @@ import {
   type PetHomeSide,
 } from "~/shared/pet";
 import { HTTP_BAD_REQUEST } from "~/shared/http-status";
-import { DEFAULT_SYNC_PROMPT, normalizeSyncPrompt } from "~/shared/sync-defaults";
 import { json, jsonError, parseJsonBody } from "./_helpers";
 
 const DEFAULT_AGENT_SETTING_KEY = "default_agent";
 const DEFAULT_MODEL_SETTING_KEY = "default_model";
 const ANNOTATION_AGENT_SETTING_KEY = "annotation_agent";
 const ANNOTATION_MODEL_SETTING_KEY = "annotation_model";
-const SYNC_AGENT_SETTING_KEY = "sync_agent";
-const SYNC_MODEL_SETTING_KEY = "sync_model";
-const SYNC_PROMPT_SETTING_KEY = "sync_prompt";
 const GIT_DIFF_CHANGED_FILES_VIEW_KEY = "git_diff_changed_files_view";
 const GIT_DIFF_CHANGED_FILES_WIDTH_KEY = "git_diff_changed_files_width";
 const SELECTED_WORKTREE_BY_PROJECT_KEY = "selected_worktree_by_project";
@@ -249,9 +245,6 @@ const updateSettingsBody = z
     defaultModel: aiModelBody,
     annotationAgent: z.enum(AI_RUNTIME_HARNESS_VALUES),
     annotationModel: aiModelBody,
-    syncAgent: z.enum(AI_RUNTIME_HARNESS_VALUES),
-    syncModel: aiModelBody,
-    syncPrompt: z.string().transform((value) => normalizeSyncPrompt(value)),
     claudeUsageLimitsEnabled: z.boolean(),
     claudeUsageLimitsShowSession: z.boolean(),
     claudeUsageLimitsShowWeekly: z.boolean(),
@@ -327,21 +320,6 @@ function getAnnotationAgentSetting(): AiRuntimeHarness {
 function getAnnotationModelSetting(): AiModelId | null {
   const value = getSetting(ANNOTATION_MODEL_SETTING_KEY);
   return normalizeAiModelId(value);
-}
-
-function getSyncAgentSetting(): AiRuntimeHarness {
-  const value = getSetting(SYNC_AGENT_SETTING_KEY);
-  return isAiRuntimeHarness(value) ? value : "claude-code";
-}
-
-function getSyncModelSetting(): AiModelId | null {
-  const value = getSetting(SYNC_MODEL_SETTING_KEY);
-  return normalizeAiModelId(value);
-}
-
-function getSyncPromptSetting(): string {
-  const value = getSetting(SYNC_PROMPT_SETTING_KEY);
-  return value === null ? DEFAULT_SYNC_PROMPT : normalizeSyncPrompt(value);
 }
 
 function getGitDiffChangedFilesViewSetting() {
@@ -507,9 +485,6 @@ function settingsPayload() {
     defaultModel: getDefaultModelSetting(),
     annotationAgent: getAnnotationAgentSetting(),
     annotationModel: getAnnotationModelSetting(),
-    syncAgent: getSyncAgentSetting(),
-    syncModel: getSyncModelSetting(),
-    syncPrompt: getSyncPromptSetting(),
     // Off by default: usage reaches out to provider APIs using local logins.
     claudeUsageLimitsEnabled: getBooleanSetting(CLAUDE_USAGE_LIMITS_ENABLED_KEY, false),
     claudeUsageLimitsShowSession: getBooleanSetting(CLAUDE_USAGE_LIMITS_SHOW_SESSION_KEY, true),
@@ -750,19 +725,6 @@ export async function update(request: Request): Promise<Response> {
     } else {
       setSetting(ANNOTATION_MODEL_SETTING_KEY, body.annotationModel);
     }
-  }
-  if (body.syncAgent !== undefined) {
-    setSetting(SYNC_AGENT_SETTING_KEY, body.syncAgent);
-  }
-  if (body.syncModel !== undefined) {
-    if (body.syncModel === null) {
-      deleteSetting(SYNC_MODEL_SETTING_KEY);
-    } else {
-      setSetting(SYNC_MODEL_SETTING_KEY, body.syncModel);
-    }
-  }
-  if (body.syncPrompt !== undefined) {
-    setSetting(SYNC_PROMPT_SETTING_KEY, body.syncPrompt);
   }
   if (body.claudeUsageLimitsEnabled !== undefined) {
     setBooleanSetting(CLAUDE_USAGE_LIMITS_ENABLED_KEY, body.claudeUsageLimitsEnabled);

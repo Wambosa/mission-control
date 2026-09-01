@@ -475,12 +475,7 @@ export function TerminalPane({
   const activeRuntimeScopeId = project.activeRuntimeScopeId ?? LOCAL_SCOPE_ID;
   // Per-row subscription: with N panes mounted, a whole-array subscription
   // re-rendered every pane's header on any task change.
-  const { data: selectedLiveTask } = useTask(
-    project.id,
-    project.activeWorktreeId ?? null,
-    activeRuntimeScopeId,
-    task.id,
-  );
+  const { data: selectedLiveTask } = useTask(project.id, activeRuntimeScopeId, task.id);
   const liveTask = selectedLiveTask ?? task;
   liveTaskStatusRef.current = liveTask.status;
   const meta = AGENT_META[liveTask.agent];
@@ -489,7 +484,6 @@ export function TerminalPane({
   const sessionRunning = liveTask.status === "running";
   const tasksKey = queryKeys.tasks(
     project.id,
-    project.activeWorktreeId ?? null,
     activeRuntimeScopeId,
   );
 
@@ -965,7 +959,6 @@ export function TerminalPane({
             queryClient.invalidateQueries({
               queryKey: queryKeys.tasks(
                 project.id,
-                project.activeWorktreeId ?? null,
                 activeRuntimeScopeId,
               ),
             }),
@@ -1110,7 +1103,6 @@ export function TerminalPane({
                   queryClient.invalidateQueries({
                     queryKey: queryKeys.tasks(
                       project.id,
-                      project.activeWorktreeId ?? null,
                       activeRuntimeScopeId,
                     ),
                   }),

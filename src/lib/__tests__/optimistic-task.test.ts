@@ -67,7 +67,7 @@ describe("optimistic-task", () => {
       agent: "codex",
       branch: "main",
     });
-    appendOptimisticTask(qc as never, "p1", null, optimistic);
+    appendOptimisticTask(qc as never, "p1", optimistic);
 
     const tasks = qc.getQueryData<Task[]>(key)!;
     expect(tasks.map((t) => t.id)).toEqual([optimistic.id, "t-existing"]);
@@ -91,10 +91,10 @@ describe("optimistic-task", () => {
       agent: "codex",
       branch: "main",
     });
-    appendOptimisticTask(qc as never, "p1", null, optimistic);
+    appendOptimisticTask(qc as never, "p1", optimistic);
 
     const persisted = { ...optimistic, id: "t-real", updatedAt: optimistic.updatedAt + 1 } satisfies Task;
-    replaceOptimisticTask(qc as never, "p1", null, optimistic.id, persisted);
+    replaceOptimisticTask(qc as never, "p1", optimistic.id, persisted);
 
     const tasks = qc.getQueryData<Task[]>(key)!;
     expect(tasks).toHaveLength(2);
@@ -111,8 +111,8 @@ describe("optimistic-task", () => {
       agent: "codex",
       branch: "main",
     });
-    appendOptimisticTask(qc as never, "p1", null, optimistic);
-    removeOptimisticTask(qc as never, "p1", null, optimistic.id);
+    appendOptimisticTask(qc as never, "p1", optimistic);
+    removeOptimisticTask(qc as never, "p1", optimistic.id);
     expect(qc.getQueryData<Task[]>(key)).toEqual([]);
   });
 
@@ -136,10 +136,10 @@ describe("optimistic-task", () => {
     const snapshot = [keep, remove];
     qc.setQueryData(key, snapshot);
 
-    removeTaskFromCache(qc as never, "p1", null, "t-remove");
+    removeTaskFromCache(qc as never, "p1", "t-remove");
     expect(qc.getQueryData<Task[]>(key)).toEqual([keep]);
 
-    restoreTasksCache(qc as never, "p1", null, snapshot);
+    restoreTasksCache(qc as never, "p1", snapshot);
     expect(qc.getQueryData<Task[]>(key)).toEqual(snapshot);
   });
 
@@ -153,14 +153,14 @@ describe("optimistic-task", () => {
     ];
     qc.setQueryData(key, tasks);
 
-    removeTasksFromCache(qc as never, "p1", null, new Set(["t-1", "t-3"]));
+    removeTasksFromCache(qc as never, "p1", new Set(["t-1", "t-3"]));
     expect(qc.getQueryData<Task[]>(key)?.map((t) => t.id)).toEqual(["t-2"]);
   });
 
   it("keeps optimistic updates scoped to the selected sandbox", () => {
     const qc = createQueryClientStub();
-    const localKey = queryKeys.tasks("p1", null, "local");
-    const sandboxKey = queryKeys.tasks("p1", null, "sb-1");
+    const localKey = queryKeys.tasks("p1", "local");
+    const sandboxKey = queryKeys.tasks("p1", "sb-1");
     const localTask = buildOptimisticTask({
       id: "t-local",
       projectId: "p1",
@@ -179,7 +179,7 @@ describe("optimistic-task", () => {
     });
     qc.setQueryData(localKey, [localTask]);
 
-    appendOptimisticTask(qc as never, "p1", null, sandboxTask, "sb-1");
+    appendOptimisticTask(qc as never, "p1", sandboxTask, "sb-1");
 
     expect(qc.getQueryData<Task[]>(localKey)?.map((t) => t.id)).toEqual(["t-local"]);
     expect(qc.getQueryData<Task[]>(sandboxKey)?.map((t) => t.id)).toEqual(["t-sandbox"]);

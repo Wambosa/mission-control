@@ -11,7 +11,6 @@ import {
   findActiveLocalTasks,
   findTaskById,
   findTasksByProjectId,
-  findTasksByProjectIdAndWorktreeId,
   insertTask,
   updateTaskRow,
 } from "../repositories/tasks.repo";
@@ -30,18 +29,6 @@ export function listTasksForProject(
   scopeId: string | null = LOCAL_SCOPE_ID,
 ): Task[] {
   return findTasksByProjectId(projectId, normalizeProjectScopeId(projectId, scopeId));
-}
-
-export function listTasksForProjectWorktree(
-  projectId: string,
-  worktreeId: string | null,
-  scopeId: string | null = LOCAL_SCOPE_ID,
-): Task[] {
-  return findTasksByProjectIdAndWorktreeId(
-    projectId,
-    worktreeId,
-    normalizeProjectScopeId(projectId, scopeId),
-  );
 }
 
 export function getTask(id: string): Task | null {

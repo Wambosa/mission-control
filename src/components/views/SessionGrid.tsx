@@ -607,7 +607,6 @@ function HiddenSessionsBar({
   const scopeProject = sessions[0]?.project;
   const { data: liveTasks } = useTasks(
     scopeProject?.id ?? "",
-    scopeProject?.activeWorktreeId ?? null,
     scopeProject?.activeRuntimeScopeId ?? LOCAL_SCOPE_ID,
   );
 
@@ -1186,7 +1185,6 @@ export function SessionGrid({
       const tasks = queryClient.getQueryData<Task[]>(
         queryKeys.tasks(
           session.project.id,
-          session.project.activeWorktreeId ?? null,
           session.project.activeRuntimeScopeId ?? LOCAL_SCOPE_ID,
         ),
       );

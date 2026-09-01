@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "~/db/client";
 import { tasks } from "~/db/schema";
 import type { Task } from "~/db/schema";
@@ -41,27 +41,6 @@ export function findTasksByProjectId(
     .all();
 }
 
-export function findTasksByProjectIdAndWorktreeId(
-  projectId: string,
-  worktreeId: string | null,
-  scopeId: string | null = LOCAL_SCOPE_ID,
-): Task[] {
-  const scope = normalizeScopeId(scopeId);
-  return getDb()
-    .select()
-    .from(tasks)
-    .where(
-      worktreeId
-        ? and(
-            eq(tasks.projectId, projectId),
-            eq(tasks.worktreeId, worktreeId),
-            eq(tasks.scopeId, scope),
-          )
-        : and(eq(tasks.projectId, projectId), isNull(tasks.worktreeId), eq(tasks.scopeId, scope))
-    )
-    .orderBy(desc(tasks.createdAt))
-    .all();
-}
 
 // Hot path (every task read + status poll). Hoist the prepared statement once
 // so drizzle/better-sqlite3 skips re-parsing and re-planning the query on each

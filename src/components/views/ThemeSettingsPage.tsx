@@ -57,7 +57,6 @@ import {
 } from "~/lib/font-detection";
 import { normalizeSessionHeaderButtonVisibility } from "~/shared/session-header-buttons";
 import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
-import { DEFAULT_SYNC_PROMPT } from "~/shared/sync-defaults";
 
 export function ThemeSettingsPage() {
   const queryClient = useQueryClient();
@@ -142,9 +141,6 @@ export function ThemeSettingsPage() {
     defaultModel: settings?.defaultModel ?? null,
     annotationAgent: settings?.annotationAgent ?? "claude-code",
     annotationModel: settings?.annotationModel ?? null,
-    syncAgent: settings?.syncAgent ?? "claude-code",
-    syncModel: settings?.syncModel ?? null,
-    syncPrompt: settings?.syncPrompt ?? DEFAULT_SYNC_PROMPT,
     questionOverlayEnabled: settings?.questionOverlayEnabled ?? true,
     claudeUsageLimitsEnabled: settings?.claudeUsageLimitsEnabled ?? false,
     claudeUsageLimitsShowSession: settings?.claudeUsageLimitsShowSession ?? true,

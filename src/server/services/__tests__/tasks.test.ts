@@ -7,7 +7,7 @@ const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mc-tasks-test-"));
 process.env.MC_USER_DATA_DIR = tmpRoot;
 
 const { createProject } = await import("../projects");
-const { createTask, listTasksForProjectWorktree } = await import("../tasks");
+const { createTask, listTasksForProject } = await import("../tasks");
 const { getDb } = await import("~/db/client");
 const { projects, tasks, userTerminals, worktrees, sandboxes } = await import("~/db/schema");
 
@@ -58,10 +58,10 @@ describe("tasks service", () => {
     createTask({ projectId: p.id, title: "Local", agent: "claude-code", scopeId: "local" });
     createTask({ projectId: p.id, title: "Sandbox", agent: "claude-code", scopeId: "sb-1" });
 
-    expect(listTasksForProjectWorktree(p.id, null, "local").map((task) => task.title)).toEqual([
+    expect(listTasksForProject(p.id, "local").map((task: { title: string }) => task.title)).toEqual([
       "Local",
     ]);
-    expect(listTasksForProjectWorktree(p.id, null, "sb-1").map((task) => task.title)).toEqual([
+    expect(listTasksForProject(p.id, "sb-1").map((task: { title: string }) => task.title)).toEqual([
       "Sandbox",
     ]);
   });

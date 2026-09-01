@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Btn } from "~/components/ui/Btn";
 import { Field, SettingsSection } from "~/components/views/SettingsParts";
 import { ApiError, api, type AppSettings } from "~/lib/api";
 import { syncDefaultRuntimeDefaults } from "~/lib/default-model-store";
@@ -17,9 +16,8 @@ import {
   type AiRuntimeHarness,
   type AiRuntimeModelsResponse,
 } from "~/shared/ai-runtime-defaults";
-import { DEFAULT_SYNC_PROMPT } from "~/shared/sync-defaults";
 
-type DefaultsFeatureId = "agent" | "markdown" | "sync";
+type DefaultsFeatureId = "agent" | "markdown";
 
 const DEFAULTS_FEATURES: Array<{
   id: DefaultsFeatureId;
@@ -36,11 +34,6 @@ const DEFAULTS_FEATURES: Array<{
     label: "Markdown Refine",
     description: "Harness and model for annotation rewrites.",
   },
-  {
-    id: "sync",
-    label: "Sync",
-    description: "Harness, model, and prompt for the branch Sync button.",
-  },
 ];
 
 export function DefaultsSettingsPage() {
@@ -50,20 +43,10 @@ export function DefaultsSettingsPage() {
   const currentModel = settings?.defaultModel ?? null;
   const currentAnnotationAgent = settings?.annotationAgent ?? "claude-code";
   const currentAnnotationModel = settings?.annotationModel ?? null;
-  const currentSyncAgent = settings?.syncAgent ?? "claude-code";
-  const currentSyncModel = settings?.syncModel ?? null;
-  const currentSyncPrompt = settings?.syncPrompt ?? DEFAULT_SYNC_PROMPT;
 
   const [activeFeature, setActiveFeature] = useState<DefaultsFeatureId>("agent");
   const [runtimeUpdating, setRuntimeUpdating] = useState(false);
   const runtimeUpdateInFlightRef = useRef(false);
-  const [syncPromptDraft, setSyncPromptDraft] = useState(currentSyncPrompt);
-  const [syncPromptSaving, setSyncPromptSaving] = useState(false);
-
-  useEffect(() => {
-    setSyncPromptDraft(currentSyncPrompt);
-  }, [currentSyncPrompt]);
-
   const updateRuntimeDefaults = async (
     patch: Partial<
       Pick<
@@ -72,9 +55,6 @@ export function DefaultsSettingsPage() {
         | "defaultModel"
         | "annotationAgent"
         | "annotationModel"
-        | "syncAgent"
-        | "syncModel"
-        | "syncPrompt"
       >
     >,
   ) => {
@@ -193,99 +173,6 @@ export function DefaultsSettingsPage() {
                 />
               </FeaturePanel>
             )}
-            {activeFeature === "sync" && (
-              <FeaturePanel
-                featureId="sync"
-                title="Sync"
-                description={
-                  <>
-                    When the branch is behind its upstream, a <strong>Sync</strong>{" "}
-                    button appears next to the branch selector. Pressing it opens
-                    an AI session with this harness and injects the prompt below so
-                    the agent can pull upstream changes in — stashing or committing
-                    local work first, resolving conflicts, then restoring it.
-                  </>
-                }
-              >
-                <RuntimeDefaultControl
-                  agent={currentSyncAgent}
-                  model={currentSyncModel}
-                  disabled={runtimeUpdating}
-                  onAgentSelect={(agent) =>
-                    void updateRuntimeDefaults({
-                      syncAgent: agent,
-                      syncModel: modelForSelectedHarness(agent, currentSyncModel),
-                    })
-                  }
-                  onModelSelect={(model) =>
-                    void updateRuntimeDefaults({ syncModel: model })
-                  }
-                />
-                <Field label="Sync prompt">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <textarea
-                      value={syncPromptDraft}
-                      onChange={(e) => setSyncPromptDraft(e.target.value)}
-                      rows={4}
-                      disabled={syncPromptSaving || runtimeUpdating}
-                      style={{
-                        width: "100%",
-                        resize: "vertical",
-                        minHeight: 88,
-                        padding: "10px 12px",
-                        borderRadius: 7,
-                        border: "1px solid var(--border)",
-                        background: "var(--surface-0)",
-                        color: "var(--text)",
-                        fontFamily: "var(--mono)",
-                        fontSize: 12,
-                        lineHeight: 1.45,
-                      }}
-                    />
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <Btn
-                        variant="primary"
-                        size="sm"
-                        disabled={
-                          syncPromptSaving ||
-                          runtimeUpdating ||
-                          syncPromptDraft.trim() === currentSyncPrompt
-                        }
-                        onClick={() => {
-                          const next = syncPromptDraft.trim() || DEFAULT_SYNC_PROMPT;
-                          setSyncPromptSaving(true);
-                          void updateRuntimeDefaults({ syncPrompt: next }).finally(() => {
-                            setSyncPromptSaving(false);
-                          });
-                        }}
-                      >
-                        {syncPromptSaving ? "Saving…" : "Save prompt"}
-                      </Btn>
-                      <Btn
-                        variant="ghost"
-                        size="sm"
-                        disabled={
-                          syncPromptSaving ||
-                          runtimeUpdating ||
-                          syncPromptDraft === DEFAULT_SYNC_PROMPT
-                        }
-                        onClick={() => {
-                          setSyncPromptDraft(DEFAULT_SYNC_PROMPT);
-                          setSyncPromptSaving(true);
-                          void updateRuntimeDefaults({
-                            syncPrompt: DEFAULT_SYNC_PROMPT,
-                          }).finally(() => {
-                            setSyncPromptSaving(false);
-                          });
-                        }}
-                      >
-                        Reset to default
-                      </Btn>
-                    </div>
-                  </div>
-                </Field>
-              </FeaturePanel>
-            )}
           </div>
         </div>
       </SettingsSection>
@@ -305,7 +192,7 @@ function isStaleSettingsSchemaError(
   patch: Partial<
     Pick<
       AppSettings,
-      "defaultAgent" | "annotationAgent" | "syncAgent"
+      "defaultAgent" | "annotationAgent"
     >
   >,
 ): boolean {
@@ -313,8 +200,7 @@ function isStaleSettingsSchemaError(
   const message = error.message;
   return (
     ("defaultAgent" in patch && message.includes('Unrecognized key: "defaultAgent"')) ||
-    ("annotationAgent" in patch && message.includes('Unrecognized key: "annotationAgent"')) ||
-    ("syncAgent" in patch && message.includes('Unrecognized key: "syncAgent"'))
+    ("annotationAgent" in patch && message.includes('Unrecognized key: "annotationAgent"'))
   );
 }
 

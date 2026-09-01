@@ -47,6 +47,7 @@ import {
 } from "./sandbox-store";
 import type { SandboxConfig, OpResult } from "./sandbox-types";
 import { SandboxAgentClient } from "./sandbox-agent-client";
+import { ensureRemoteClaudeShiftEnterBinding } from "./remote-shift-enter";
 import { PtyOutputBatcher } from "./pty-output-batch";
 import { buildSandboxHookRelayUrl } from "./pty-hook-env";
 import {
@@ -473,10 +474,19 @@ export function sandboxRemoteRoot(config: SandboxConfig | null): string | null {
   if (config.kind !== "ssh-host") return SANDBOX_WORKSPACE_ROOT;
   const host = config.sshHost;
   if (!host) return null;
-  // The prefix is `<home>/.mission-control`, so the home it was derived from
-  // is what remains once that last segment goes.
-  const homeDir = host.prefix ? host.prefix.replace(/\/[^/]+\/?$/, "") || "/" : null;
-  return host.workspaceRoot ?? homeDir;
+  return host.workspaceRoot ?? sshHostHomeDir(config);
+}
+
+/**
+ * The SSH user's home directory on a host, derived the same way the workspace
+ * root is: the provisioned prefix is `<home>/.mission-control`. Null for a
+ * managed VM (whose layout is its own) and for a host not provisioned yet.
+ */
+export function sshHostHomeDir(config: SandboxConfig | null): string | null {
+  if (config?.kind !== "ssh-host") return null;
+  const prefix = config.sshHost?.prefix;
+  if (!prefix) return null;
+  return prefix.replace(/\/[^/]+\/?$/, "") || "/";
 }
 
 /**
@@ -490,8 +500,8 @@ function sshServiceTargetFor(
   const host = config.sshHost;
   if (!host?.platform || !host.prefix) return null;
   if (!isSafeSshAlias(host.alias)) return null;
-  // The prefix was derived from the home directory; this walks that back.
-  const homeDir = host.prefix.replace(/\/[^/]+\/?$/, "") || "/";
+  const homeDir = sshHostHomeDir(config);
+  if (!homeDir) return null;
   return { alias: host.alias, platform: host.platform, homeDir };
 }
 
@@ -1681,6 +1691,18 @@ export function registerSandboxManager(
         await provisionAgentCredsFor(id, { requireConfigured: true, requireTool: requiredTool });
         if (clients.get(id) !== client) {
           throw new Error("The host's connection was replaced before the terminal started.");
+        }
+      }
+      // Shift+Enter has to be set up where the agent reads its settings, which
+      // is the host — see remote-shift-enter.ts. Awaited so the flag is in
+      // place before the agent starts and reads it; it never throws.
+      if (opts.agent === "claude-code") {
+        const homeDir = sshHostHomeDir(config);
+        if (homeDir) {
+          await ensureRemoteClaudeShiftEnterBinding(
+            (method, params) => client.rpc(method, params),
+            homeDir,
+          );
         }
       }
       const ptyId = `rpty-${randomUUID()}`;

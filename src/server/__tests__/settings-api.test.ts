@@ -321,15 +321,13 @@ describe("settings API", () => {
     expect(await jsonBody(read!)).toMatchObject({ terminalZoomLevel: 2 });
   });
 
-  it("hides the zoom session button by default and shows the rest", async () => {
+  it("shows both session buttons by default", async () => {
     const response = await handleApiRequest(authedRequest("http://localhost/api/settings"));
     expect(await jsonBody(response!)).toMatchObject({
       sessionHeaderButtons: DEFAULT_SESSION_HEADER_BUTTON_VISIBILITY,
     });
-    expect(DEFAULT_SESSION_HEADER_BUTTON_VISIBILITY).toMatchObject({
+    expect(DEFAULT_SESSION_HEADER_BUTTON_VISIBILITY).toEqual({
       rename: true,
-      zoom: false,
-      clone: true,
       focus: true,
     });
   });
@@ -339,15 +337,16 @@ describe("settings API", () => {
       authedRequest("http://localhost/api/settings", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        // Only send the two the user changed; unknown keys are dropped and the
-        // rest fall back to their defaults.
-        body: JSON.stringify({ sessionHeaderButtons: { zoom: true, clone: false, bogus: true } }),
+        // Only send the one the user changed; unknown keys (including the
+        // retired clone/expand/zoom) are dropped and the rest fall back to
+        // their defaults.
+        body: JSON.stringify({ sessionHeaderButtons: { rename: false, clone: false, bogus: true } }),
       }),
     );
     const read = await handleApiRequest(authedRequest("http://localhost/api/settings"));
 
     expect(update?.status).toBe(200);
-    const expected = { rename: true, zoom: true, clone: false, focus: true };
+    const expected = { rename: false, focus: true };
     expect(await jsonBody(update!)).toMatchObject({ sessionHeaderButtons: expected });
     expect(await jsonBody(read!)).toMatchObject({ sessionHeaderButtons: expected });
   });

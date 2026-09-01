@@ -20,27 +20,10 @@ const BUTTON_META: Record<
     description: "The pencil button that opens the rename dialog for a session pane.",
     label: "Show rename button",
   },
-  zoom: {
-    title: "Zoom in / out",
-    description:
-      "The terminal text zoom buttons. Hidden by default — zoom with Cmd/Ctrl and + / − / 0 instead.",
-    label: "Show zoom buttons",
-  },
-  clone: {
-    title: "Clone session",
-    description: "The copy button that duplicates a session into a new pane.",
-    label: "Show clone button",
-  },
   focus: {
     title: "Focus session",
     description: "The pin button that pops a session out into a floating focus window.",
     label: "Show focus button",
-  },
-  expand: {
-    title: "Expand session panel",
-    description:
-      "The maximize button that expands a session pane. Hidden here, the panel still toggles with its hotkey (Cmd/Ctrl K).",
-    label: "Show expand button",
   },
 };
 
@@ -51,7 +34,7 @@ const HEADER_BUTTON_META: Record<
   promptSearch: {
     title: "Prompt search",
     description:
-      "The prompt-history search button in the top-bar tools tray. The search palette keeps its hotkey.",
+      "The prompt-history search button in the top bar. The search palette keeps its hotkey.",
     label: "Show prompt search button",
   },
   notifications: {

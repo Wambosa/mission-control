@@ -27,7 +27,6 @@ import {
   useTerminals,
   useTerminalActions,
   useGridView,
-  useHasActiveSession,
 } from "~/lib/terminal-store";
 import { Z_INDEX } from "~/lib/z-index";
 import { DEFAULT_PET_HOME_SIDE } from "~/shared/pet";
@@ -118,7 +117,6 @@ import { isUserTerminalXtermFocused, isTerminalXtermFocused, terminalZoomIntentF
 import { useWarmCliAvailability } from "~/lib/cli-availability";
 import {
   CLEAR_USER_TERMINAL_EVENT,
-  GRID_EXPAND_TOGGLE_EVENT,
   TERMINAL_ZOOM_IN_EVENT,
   TERMINAL_ZOOM_OUT_EVENT,
   TERMINAL_ZOOM_RESET_EVENT,
@@ -317,15 +315,11 @@ const ProjectTerminalPanel = memo(function ProjectTerminalPanel({
   onClose,
   onHide,
   onPtyReady,
-  expanded,
-  onToggleExpanded,
 }: {
   projectId: string;
   onClose: (taskId: string, opts?: { activateTaskId?: string | null }) => Promise<void>;
   onHide: (projectId: string) => void;
   onPtyReady: (taskId: string, ptyId: string | null, scopeKey?: string) => void;
-  expanded: boolean;
-  onToggleExpanded: () => void;
 }) {
   const { activeFor } = useTerminals();
   return (
@@ -334,8 +328,6 @@ const ProjectTerminalPanel = memo(function ProjectTerminalPanel({
       onClose={onClose}
       onHide={() => onHide(projectId)}
       onPtyReady={onPtyReady}
-      expanded={expanded}
-      onToggleExpanded={onToggleExpanded}
     />
   );
 });
@@ -456,9 +448,6 @@ function Shell() {
 
   const path = useRouterState({ select: (state) => state.location.pathname });
   const projectId = projectIdFromPath(path);
-  // Flip-only: true iff this project has a materialized active session. Gates
-  // the expanded-terminal layout without subscribing to the churning data slice.
-  const hasActiveSession = useHasActiveSession(projectId);
   // Focused Session Mode strips the whole shell: the /focus route renders the
   // only visible chrome, and the Electron window is a small floating card.
   const focusActive = isFocusPath(path);
@@ -485,33 +474,6 @@ function Shell() {
     // Once per app boot, not on navigation.
   }, []);
 
-  const expandedKey = projectId ? `mc:terminalExpanded:${projectId}` : null;
-  const [terminalExpanded, setTerminalExpanded] = useState<boolean>(false);
-  useEffect(() => {
-    if (!expandedKey) {
-      setTerminalExpanded(false);
-      return;
-    }
-    try {
-      setTerminalExpanded(window.localStorage.getItem(expandedKey) === "1");
-    } catch {
-      setTerminalExpanded(false);
-    }
-  }, [expandedKey]);
-  const toggleTerminalExpanded = useCallback(() => {
-    if (!expandedKey) return;
-    setTerminalExpanded((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem(expandedKey, next ? "1" : "0");
-      } catch {
-        // ignore quota / privacy-mode errors
-      }
-      return next;
-    });
-  }, [expandedKey]);
-  const sessionExpanded =
-    !!projectId && terminalExpanded && hasActiveSession;
   // Grid view takes over the whole workspace: the Outlet (which renders the
   // grid below the project header) spans full width and the single right-hand
   // terminal panel is hidden.
@@ -686,19 +648,11 @@ function Shell() {
 
   useHotkey("terminal.toggle", () => togglePanel());
   useHotkey(
-    "terminal.expandToggle",
+    "terminal.clear",
     () => {
       if (userTerminalPanelOpen && isUserTerminalXtermFocused()) {
         window.dispatchEvent(new Event(CLEAR_USER_TERMINAL_EVENT));
-        return;
       }
-      // While the grid owns the workspace there's no single-session panel; hand
-      // the shortcut to SessionGrid so it expands/collapses the focused cell.
-      if (gridActive) {
-        window.dispatchEvent(new Event(GRID_EXPAND_TOGGLE_EVENT));
-        return;
-      }
-      if (projectId && hasActiveSession) toggleTerminalExpanded();
     },
     { capture: true },
   );
@@ -943,10 +897,7 @@ function Shell() {
               style={{
                 position: "relative",
                 flex: 1,
-                // Grid view lives inside the Outlet, so the expanded-terminal
-                // flag must never hide it — both can be true at once (the
-                // expand flag persists per project, the grid flag globally).
-                display: sessionExpanded && !gridActive ? "none" : "flex",
+                display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
                 // On the project detail view the terminal panel sits to the
@@ -966,8 +917,6 @@ function Shell() {
                 onClose={close}
                 onHide={deselect}
                 onPtyReady={setPtyId}
-                expanded={sessionExpanded}
-                onToggleExpanded={toggleTerminalExpanded}
               />
             )}
           </div>

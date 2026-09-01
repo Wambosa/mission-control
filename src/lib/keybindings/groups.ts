@@ -11,11 +11,11 @@ export const KEYBINDING_GROUPS: KeybindingGroup[] = [
   {
     id: "session",
     label: "Session management",
-    description: "Create, hide, expand, and duplicate agent sessions on a project.",
+    description: "Create, hide, and duplicate agent sessions on a project.",
     actions: [
       "agent.new",
       "terminal.close",
-      "terminal.expandToggle",
+      "terminal.clear",
       "session.closeWindow",
       "session.clone",
       "session.newRow",

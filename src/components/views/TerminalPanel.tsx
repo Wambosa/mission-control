@@ -29,15 +29,11 @@ export function TerminalPanel({
   onClose,
   onHide,
   onPtyReady,
-  expanded = false,
-  onToggleExpanded,
 }: {
   active: OpenTerminal | null;
   onClose: (taskId: string) => Promise<void> | void;
   onHide: () => void;
   onPtyReady: (taskId: string, ptyId: string | null, scopeKey?: string) => void;
-  expanded?: boolean;
-  onToggleExpanded?: () => void;
 }) {
   const queryClient = useQueryClient();
   const userTerminals = useUserTerminals();
@@ -201,34 +197,31 @@ export function TerminalPanel({
       data-session-terminal-panel
       data-task-id={active.taskId}
       style={{
-        width: expanded ? "100%" : width,
-        flex: expanded ? 1 : undefined,
-        minWidth: expanded ? 0 : MIN_WIDTH,
+        width,
+        minWidth: MIN_WIDTH,
         // Hard cap relative to the actual flex-row width (not window.innerWidth)
         // so the panel can never paint past the right edge: 96px ProjectBar +
         // the project view's 640px left-panel floor = 736px reserved.
-        maxWidth: expanded ? undefined : "calc(100% - 736px)",
+        maxWidth: "calc(100% - 736px)",
         display: "flex",
         flexDirection: "column",
         flexShrink: 0,
         overflow: "visible",
       }}
     >
-      {!expanded && (
-        <div
-          onMouseDown={onResizeMouseDown}
-          title="Drag to resize"
-          style={{
-            position: "absolute",
-            left: -9,
-            top: 0,
-            bottom: 0,
-            width: 12,
-            cursor: "col-resize",
-            zIndex: 10,
-          }}
-        />
-      )}
+      <div
+        onMouseDown={onResizeMouseDown}
+        title="Drag to resize"
+        style={{
+          position: "absolute",
+          left: -9,
+          top: 0,
+          bottom: 0,
+          width: 12,
+          cursor: "col-resize",
+          zIndex: 10,
+        }}
+      />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <TerminalPane
           key={`${active.taskId}:${activeScopeKey ?? LOCAL_SCOPE_ID}`}
@@ -237,8 +230,6 @@ export function TerminalPanel({
           descriptor={active}
           isLast
           onHide={onHide}
-          expanded={expanded}
-          onToggleExpanded={onToggleExpanded}
           onPtyReady={(ptyId) => onPtyReady(active.taskId, ptyId, activeScopeKey ?? undefined)}
         />
       </div>

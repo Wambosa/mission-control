@@ -19,7 +19,7 @@ import { SessionIcon } from "~/components/ui/SessionIcon";
 import { StatusDot } from "~/components/ui/StatusDot";
 import { Tooltip } from "~/components/ui/Tooltip";
 import { archiveOpenSession } from "~/lib/archive-session";
-import { AGENT_META, GRID_EXPAND_TOGGLE_EVENT, STATUS_META } from "~/lib/design-meta";
+import { AGENT_META, STATUS_META } from "~/lib/design-meta";
 import { getElectron, isElectron } from "~/lib/electron";
 import {
   GRID_PREFS_EVENT,
@@ -164,39 +164,6 @@ function saveHiddenTaskIds(scopeKey: string, ids: ReadonlySet<string>): void {
       window.localStorage.removeItem(hiddenStorageKey(scopeKey));
     } else {
       window.localStorage.setItem(hiddenStorageKey(scopeKey), JSON.stringify(Array.from(ids)));
-    }
-  } catch {
-    /* quota or disabled */
-  }
-}
-
-// The expanded (spotlighted) cell is stored per scope alongside the layout, so
-// an expansion survives switching to another project and back. A stale id
-// (archived/closed session) is pruned against the live session list by the
-// reconcile effect after load.
-const GRID_EXPANDED_PREFIX = "mc.gridExpanded";
-
-function expandedStorageKey(scopeKey: string): string {
-  return `${GRID_EXPANDED_PREFIX}:${scopeKey}`;
-}
-
-function loadExpandedTaskId(scopeKey: string): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(expandedStorageKey(scopeKey));
-    return raw && raw.length > 0 ? raw : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveExpandedTaskId(scopeKey: string, taskId: string | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (taskId === null) {
-      window.localStorage.removeItem(expandedStorageKey(scopeKey));
-    } else {
-      window.localStorage.setItem(expandedStorageKey(scopeKey), taskId);
     }
   } catch {
     /* quota or disabled */
@@ -501,18 +468,11 @@ type GridCellProps = {
   /** False while this cell's pane mount is deferred (progressive first mount);
    *  the cell renders as an empty frame holding its grid slot. */
   mounted: boolean;
-  expanded: boolean;
-  /** True when another cell is expanded and this one is overlaid/hidden. */
-  hidden: boolean;
   isDragging: boolean;
   isFocused: boolean;
   isNavSelected: boolean;
   navActive: boolean;
   reorderEnabled: boolean;
-  /** Grid outer padding (0 in the flush ember layout) — the expanded cell
-   *  insets by this to cover the grid content box exactly. */
-  gridPadding: number;
-  onToggleExpanded: (taskId: string) => void;
   onRequestClose: (session: OpenTerminal) => void;
   onPtyReady: (taskId: string, ptyId: string | null, scopeKey: string) => void;
   onHeaderPointerDown: (taskId: string, event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -539,15 +499,11 @@ const GridCell = memo(function GridCell({
   session,
   scopeKey,
   mounted,
-  expanded,
-  hidden,
   isDragging,
   isFocused,
   isNavSelected,
   navActive,
   reorderEnabled,
-  gridPadding,
-  onToggleExpanded,
   onRequestClose,
   onPtyReady,
   onHeaderPointerDown,
@@ -568,27 +524,19 @@ const GridCell = memo(function GridCell({
         flexDirection: "column",
         minWidth: 0,
         minHeight: 0,
-        // The expanded cell floats above its (hidden) row-mates and every other
-        // row, covering the whole grid content box. Because the row containers
-        // are non-positioned, `inset` resolves against the positioned grid.
-        ...(expanded ? { position: "absolute" as const, inset: gridPadding } : null),
         overflow: "hidden",
-        // A cell hidden behind an expanded sibling keeps its grid slot (and pixel
-        // size — so its terminal never refits), it's just not painted or hit.
-        visibility: hidden ? "hidden" : undefined,
-        pointerEvents: hidden ? "none" : undefined,
         // Dim the unselected cells while navigating to spotlight the pick — but
         // never dim a cell being spotlighted by a notification "Open".
         opacity: navActive && !isNavSelected && !isFocused ? 0.4 : isDragging ? 0.9 : 1,
         outline:
           isDragging || isFocused || isNavSelected ? "2px solid var(--accent)" : undefined,
         outlineOffset: isDragging || isFocused || isNavSelected ? -2 : undefined,
-        // The expanded cell floats above its (hidden) siblings; while held, a card
-        // floats with a lift shadow as it tracks the pointer; the nav selection
-        // sits above its dimmed neighbours so its ring/glow isn't clipped. A
-        // focused cell lifts one step so its accent border + drop shadow read
-        // over flush neighbours (the ember layout has no gap between cells).
-        zIndex: expanded ? 8 : isDragging ? 5 : isNavSelected ? 4 : isFocused ? 3 : undefined,
+        // While held, a card floats with a lift shadow as it tracks the
+        // pointer; the nav selection sits above its dimmed neighbours so its
+        // ring/glow isn't clipped. A focused cell lifts one step so its accent
+        // border + drop shadow read over flush neighbours (the ember layout has
+        // no gap between cells).
+        zIndex: isDragging ? 5 : isNavSelected ? 4 : isFocused ? 3 : undefined,
         boxShadow: isDragging
           ? "0 16px 40px rgba(0, 0, 0, 0.5)"
           : isFocused || isNavSelected
@@ -612,8 +560,6 @@ const GridCell = memo(function GridCell({
             task={session.task}
             descriptor={session}
             isLast
-            expanded={expanded}
-            onToggleExpanded={() => onToggleExpanded(session.taskId)}
             onHide={() => onRequestClose(session)}
             onPtyReady={(ptyId) => onPtyReady(session.taskId, ptyId, scopeKey)}
             onHeaderPointerDown={
@@ -779,8 +725,8 @@ function HiddenSessionsBar({
 
 /**
  * Grid of the current project/scope's open sessions, laid out as authored rows.
- * Each cell reuses TerminalPane (which carries its own title header + expand/
- * close controls). Every row sizes its own columns independently; expanding a
+ * Each cell reuses TerminalPane (which carries its own title header). Every
+ * row sizes its own columns independently; expanding a
  * cell fills the grid; closing archives the session. Cards can be reordered by
  * dragging the handle rail at the top of each cell — within a row or across rows
  * — and the layout (order + per-row column widths + row heights) is persisted
@@ -831,11 +777,6 @@ export function SessionGrid({
     (settings?.themeStyle ?? readCachedThemeStyle()) === "flat";
   const gridGap = flushLayout ? 0 : GRID_GAP;
   const gridPad = flushLayout ? 0 : GRID_PADDING;
-  // Persisted per scope so an expansion survives switching projects and back
-  // (the scope-swap block reloads it; the reconcile effect prunes a stale id).
-  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(() =>
-    loadExpandedTaskId(scopeKey),
-  );
   // Task whose cell is momentarily spotlighted after a notification "Open".
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
   // Cell pulsing the "image landed here" flash after a screenshot attach. The
@@ -850,11 +791,6 @@ export function SessionGrid({
   // scroll + caret as usual — but its attach flash is stale by the time the
   // grid appears, so only requests raised after this nonce may pulse.
   const preMountFlashNonceRef = useRef(gridFocusRequest?.nonce ?? 0);
-  // Live mirror of `expandedTaskId` for the spotlight effect: reading the state
-  // there would add it to the effect's deps, and the dep-change cleanup would
-  // kill the in-flight focus poll on every expand/collapse.
-  const expandedTaskIdRef = useRef<string | null>(null);
-  expandedTaskIdRef.current = expandedTaskId;
   // Keyboard-navigation mode (Cmd/Ctrl+G): the selected cell, or null when off.
   const [navTaskId, setNavTaskId] = useState<string | null>(null);
   const [pendingArchive, setPendingArchive] = useState<OpenTerminal | null>(null);
@@ -959,12 +895,6 @@ export function SessionGrid({
     saveHiddenTaskIds(scopeKey, hiddenTaskIds);
   }, [scopeKey, hiddenTaskIds]);
 
-  // Persist the expanded cell whenever it changes, so an expansion survives
-  // switching projects and back (the scope-swap block reloads it per scope).
-  useEffect(() => {
-    saveExpandedTaskId(scopeKey, expandedTaskId);
-  }, [scopeKey, expandedTaskId]);
-
   // The authored layout for the current scope. Reconciled against live sessions:
   // new sessions land in the current/new row, closed ones (and empty rows) are
   // pruned. Seeded from this scope's persisted layout.
@@ -1004,11 +934,9 @@ export function SessionGrid({
 
   // Switch scopes during render (React's "adjust state when a prop changes"
   // pattern) so the previous project's rows never paint for the new one — which
-  // would flash the wrong layout and, worse, carry the previous scope's
-  // expandedTaskId over, matching no new cell and hiding every cell for a frame.
-  // Each per-scope slice (layout, hidden set, column lock, expanded cell) is
-  // reloaded from that scope's storage here; the reconcile effect below then
-  // prunes/places against the new scope's live sessions.
+  // would flash the wrong layout. Each per-scope slice (layout, hidden set,
+  // column lock) is reloaded from that scope's storage here; the reconcile
+  // effect below then prunes/places against the new scope's live sessions.
   const scopeSwapRef = useRef(scopeKey);
   if (scopeSwapRef.current !== scopeKey) {
     scopeSwapRef.current = scopeKey;
@@ -1017,7 +945,6 @@ export function SessionGrid({
     setColumnLimit(loadGridColumnLimit(scopeKey));
     setQuickPickerOpen(false);
     lastHiddenTaskIdRef.current = null;
-    setExpandedTaskId(loadExpandedTaskId(scopeKey));
     setNavTaskId(null);
     setDragLayout(null);
     setDraggingId(null);
@@ -1036,7 +963,6 @@ export function SessionGrid({
   useLayoutEffect(() => {
     const renames = takeSessionIdRenames();
     const liveIds = scopedSessions.map((s) => s.taskId);
-    const idSet = new Set(liveIds);
     const scopeChanged = prevScopeRef.current !== scopeKey;
     // A scope switch isn't a create, so it never consumes a clone/new-row request.
     const prevIds = scopeChanged ? new Set<string>() : prevIdsRef.current;
@@ -1066,20 +992,14 @@ export function SessionGrid({
       if (next.rows.length > 0) saveGridLayout(scopeKey, next);
       return next;
     });
-
-    // A session removed out from under a stale expandedTaskId must not leave the
-    // grid with reorder/resize disabled while no cell is visibly expanded. (The
-    // scope-swap above already cleared transient state on a project change.)
-    setExpandedTaskId((prev) => (prev && !idSet.has(prev) ? null : prev));
   }, [scopedSessions, scopeKey, columnLimit]);
 
   useEffect(() => () => cleanupDragRef.current?.(), []);
   useEffect(() => () => resizeCleanupRef.current?.(), []);
 
   // The header's layout dropdown lives outside this component, so it talks to
-  // the mounted grid over window events (the GRID_EXPAND_TOGGLE_EVENT bridge
-  // pattern). Handlers run through render-refreshed refs so the two listeners
-  // subscribe exactly once.
+  // the mounted grid over window events. Handlers run through render-refreshed
+  // refs so the two listeners subscribe exactly once.
   const onGridPrefsRef = useRef<(scope: string) => void>(() => {});
   onGridPrefsRef.current = (scope: string) => {
     if (scope !== scopeKey) return;
@@ -1151,8 +1071,8 @@ export function SessionGrid({
 
   // Spotlight a cell — either a notification's "Open" landing on a grid session,
   // or a freshly created/cloned session that should take the caret. Make it
-  // visible (collapse an unrelated expanded cell), scroll it into view, focus its
-  // terminal so the user can type immediately, and ring it briefly.
+  // visible, scroll it into view, focus its terminal so the user can type
+  // immediately, and ring it briefly.
   useEffect(() => {
     if (!gridFocusRequest) return;
     // Claim the request exactly once (store-side ref): the request state lingers
@@ -1175,18 +1095,15 @@ export function SessionGrid({
     // A spotlight targets one session — end any keyboard-nav selection so its
     // dimming/ring doesn't fight the spotlight and Enter can't open a stale pick.
     setNavTaskId(null);
-    setExpandedTaskId((prev) => (prev && prev !== taskId ? null : prev));
     setFocusedTaskId(taskId);
     // An attach-flagged request also pulses the cell: the static spotlight ring
     // is invisible when the target is already the focused cell — exactly the
     // click-to-attach case, which targets the active session. Skip the pulse
-    // where it can't inform: the receiving cell is expanded (it fills the grid,
-    // there's nothing to pick it out from), or the request predates this grid
-    // (attached from focus mode / single view — stale by the time cells exist).
+    // where it can't inform: a request that predates this grid (attached from
+    // focus mode / single view — stale by the time cells exist).
     if (
       gridFocusRequest.flash &&
-      gridFocusRequest.nonce > preMountFlashNonceRef.current &&
-      expandedTaskIdRef.current !== taskId
+      gridFocusRequest.nonce > preMountFlashNonceRef.current
     ) {
       setAttachFlash({ taskId, nonce: gridFocusRequest.nonce });
     }
@@ -1282,7 +1199,7 @@ export function SessionGrid({
 
   // Move the caret into a grid cell's terminal (after the layout settles) so the
   // user can type in it straight away, mirroring a click. Only touches gridRef,
-  // so it's stable and safe to call from any of the close/expand handlers.
+  // so it's stable and safe to call from the close handlers.
   const focusSessionTerminal = useCallback((taskId: string) => {
     requestAnimationFrame(() => {
       const selector = `[data-grid-cell][data-task-id="${CSS.escape(taskId)}"]`;
@@ -1331,14 +1248,13 @@ export function SessionGrid({
   // the agent.
   const requestClose = useCallback(
     (session: OpenTerminal) => {
-      if (expandedTaskId === session.taskId) setExpandedTaskId(null);
       if (shouldConfirmClose(session)) {
         setPendingArchive(session);
         return;
       }
       void archiveSession(session);
     },
-    [archiveSession, shouldConfirmClose, expandedTaskId],
+    [archiveSession, shouldConfirmClose],
   );
 
   const confirmArchive = useCallback(async () => {
@@ -1354,17 +1270,17 @@ export function SessionGrid({
 
   // Cmd/Ctrl+W while the grid owns the workspace: TerminalPanel (the usual
   // close-intent handler) is unmounted, so the grid archives the session whose
-  // terminal owns focus instead — falling back to the expanded cell. Routed
-  // through requestClose so the running-session confirm still applies. A
-  // focused user terminal claims the shortcut first (mirrors TerminalPanel).
+  // terminal owns focus instead. Routed through requestClose so the
+  // running-session confirm still applies. A focused user terminal claims the
+  // shortcut first (mirrors TerminalPanel).
   const handleCloseIntent = useCallback(() => {
     if (userTerminals.panelOpen && isUserTerminalXtermFocused()) return;
     const focusedCell = document.activeElement?.closest("[data-grid-cell]");
-    const taskId = focusedCell?.getAttribute("data-task-id") ?? expandedTaskId;
+    const taskId = focusedCell?.getAttribute("data-task-id");
     if (!taskId) return;
     const session = scopedSessions.find((s) => s.taskId === taskId);
     if (session) requestClose(session);
-  }, [userTerminals.panelOpen, expandedTaskId, scopedSessions, requestClose]);
+  }, [userTerminals.panelOpen, scopedSessions, requestClose]);
 
   useEffect(() => {
     const electron = getElectron();
@@ -1417,15 +1333,14 @@ export function SessionGrid({
   const handleHideIntent = useCallback(() => {
     if (userTerminals.panelOpen && isUserTerminalXtermFocused()) return;
     const focusedCell = document.activeElement?.closest("[data-grid-cell]");
-    // The session the chord means by "current": the cell owning the caret, else
-    // the expanded cell, else — when nothing in the grid holds focus, e.g. right
-    // after switching back to this project — the last-focused cell, then the
-    // scope's persisted active session, then the first visible cell. Candidates
-    // must be visible in this scope (a stale ref from another project, or an
-    // active id that is itself hidden, falls through to the next).
+    // The session the chord means by "current": the cell owning the caret,
+    // else — when nothing in the grid holds focus, e.g. right after switching
+    // back to this project — the last-focused cell, then the scope's persisted
+    // active session, then the first visible cell. Candidates must be visible
+    // in this scope (a stale ref from another project, or an active id that is
+    // itself hidden, falls through to the next).
     const candidates = [
       focusedCell?.getAttribute("data-task-id"),
-      expandedTaskId,
       lastFocusedTaskIdRef.current,
       activeTaskIdFor(scopeKey),
       scopedSessions[0]?.taskId,
@@ -1438,7 +1353,6 @@ export function SessionGrid({
       // Hand focus to the hiding cell's neighbour (read before removal) so the
       // grid keeps a focused pane instead of going inert — mirrors archive.
       const neighbour = neighbourAfterClose(target.taskId);
-      if (expandedTaskId === target.taskId) setExpandedTaskId(null);
       lastHiddenTaskIdRef.current = target.taskId;
       setHiddenTaskIds((prev) => {
         const next = new Set(prev);
@@ -1459,7 +1373,6 @@ export function SessionGrid({
     restoreHiddenSession(restore);
   }, [
     userTerminals.panelOpen,
-    expandedTaskId,
     scopedSessions,
     scopeKey,
     activeTaskIdFor,
@@ -1539,10 +1452,8 @@ export function SessionGrid({
           : (curIdx + delta + ids.length) % ids.length;
       const nextId = ids[nextIdx];
       if (!nextId || nextId === focusedId) return;
-      // A cycle is a deliberate move: drop any keyboard-nav selection and collapse
-      // an unrelated expanded cell so the target is actually on screen.
+      // A cycle is a deliberate move: drop any keyboard-nav selection.
       setNavTaskId(null);
-      setExpandedTaskId((prev) => (prev && prev !== nextId ? null : prev));
       const selector = `[data-grid-cell][data-task-id="${CSS.escape(nextId)}"]`;
       requestAnimationFrame(() => {
         const cell = gridRef.current?.querySelector<HTMLElement>(selector);
@@ -1636,7 +1547,7 @@ export function SessionGrid({
   }, []);
 
   // FLIP animation: whenever cells change slots (drag-preview swaps, sessions
-  // opening/closing, expand toggles, row changes) each card glides from its
+  // opening/closing, row changes) each card glides from its
   // previous rect to the new one instead of snapping. Runs on every commit —
   // non-reorder renders only refresh the measured baseline so divider/window
   // resizes never animate, and a card already mid-flight continues from where it
@@ -1645,8 +1556,8 @@ export function SessionGrid({
   const cellRectsRef = useRef<Map<string, DOMRect>>(new Map());
   const flipSigRef = useRef<string | null>(null);
   const orderSig = viewRows.map((r) => r.cells.map((c) => c.session.taskId).join(",")).join("|");
-  const flipSig = `${expandedTaskId ?? ""}::${orderSig}`;
-  // Everything that can move a cell's box: order/expand, the grid's pixel size,
+  const flipSig = orderSig;
+  // Everything that can move a cell's box: order, the grid's pixel size,
   // the gap/pad, and the painted track weights. A background session status tick
   // re-renders the grid without touching any of these — when the signature is
   // unchanged (and no drag/animation is live) the measurement below would read
@@ -1751,7 +1662,7 @@ export function SessionGrid({
   // packed subset would write geometry back against cells that aren't on screen.
   // So arranging happens in the Active tab (where the full layout lives); the
   // Pinned tab is a read-through view.
-  const reorderEnabled = !expandedTaskId && visibleSessions.length > 1 && !isFiltered;
+  const reorderEnabled = visibleSessions.length > 1 && !isFiltered;
 
   // Pixel space the row-height tracks share, once outer padding + gaps are gone.
   const totalRowFr = layout.rowSizes.reduce((a, b) => a + b, 0) || 1;
@@ -1778,7 +1689,6 @@ export function SessionGrid({
     [gridSize.width, gridPad, gridGap],
   );
   const resizeEnabled =
-    !expandedTaskId &&
     !dragLayout &&
     visibleSessions.length > 1 &&
     gridSize.width > 0 &&
@@ -1942,35 +1852,6 @@ export function SessionGrid({
     [],
   );
 
-  // Move keyboard focus into a session's terminal so the user can type right
-  // away — after the reordered cells have settled into their new DOM positions.
-  // Stable callback handed to the memoized GridCell so its memo holds across
-  // per-grid renders — a session just toggles its own expand state.
-  const toggleExpanded = useCallback(
-    (taskId: string) => {
-      setExpandedTaskId((prev) => (prev === taskId ? null : taskId));
-      // Clicking the expand/shrink button moved focus onto the button; hand it
-      // straight back to the session's terminal (after the toggled layout
-      // settles) so the user can keep typing without clicking back in.
-      focusSessionTerminal(taskId);
-    },
-    [focusSessionTerminal],
-  );
-
-  // Cmd/Ctrl+K (terminal.expandToggle) while the grid owns the workspace:
-  // TerminalPanel's single-session expand is unmounted, so __root dispatches to
-  // the grid instead. Toggle the cell whose terminal owns focus, falling back to
-  // the currently expanded cell (its terminal is focused, so this collapses it).
-  useEffect(() => {
-    const onToggle = () => {
-      const focusedCell = document.activeElement?.closest("[data-grid-cell]");
-      const taskId = focusedCell?.getAttribute("data-task-id") ?? expandedTaskId;
-      if (taskId && scopedSessions.some((s) => s.taskId === taskId)) toggleExpanded(taskId);
-    };
-    window.addEventListener(GRID_EXPAND_TOGGLE_EVENT, onToggle);
-    return () => window.removeEventListener(GRID_EXPAND_TOGGLE_EVENT, onToggle);
-  }, [expandedTaskId, scopedSessions, toggleExpanded]);
-
   // ── Keyboard grid navigation (Cmd/Ctrl+Shift+G) ────────────────────────────
   // Enter a selection mode where arrow keys move a highlight between cells and
   // Enter activates the chosen session (focuses its terminal, like a click).
@@ -2054,18 +1935,14 @@ export function SessionGrid({
   // user was already in stays focused.
   const cancelGridNav = useCallback(() => setNavTaskId(null), []);
 
-  // Leave nav mode if it goes stale: the selected session closed, the grid
-  // collapsed to a single cell, or a cell was expanded to fill the grid.
+  // Leave nav mode if it goes stale: the selected session closed, or the grid
+  // collapsed to a single cell.
   useEffect(() => {
     if (navTaskId === null) return;
-    if (
-      expandedTaskId ||
-      scopedSessions.length < 2 ||
-      !scopedSessions.some((s) => s.taskId === navTaskId)
-    ) {
+    if (scopedSessions.length < 2 || !scopedSessions.some((s) => s.taskId === navTaskId)) {
       setNavTaskId(null);
     }
-  }, [navTaskId, expandedTaskId, scopedSessions]);
+  }, [navTaskId, scopedSessions]);
 
   // Any pointer interaction takes over from the keyboard — clicking a terminal
   // to type, grabbing a divider, hitting a toolbar button — so end nav mode.
@@ -2145,7 +2022,7 @@ export function SessionGrid({
     // (e.g. a browser build's "find previous" on Cmd/Ctrl+Shift+G) acts on it.
     e.preventDefault();
     e.stopPropagation();
-    if (expandedTaskId || scopedSessions.length < 2) return;
+    if (scopedSessions.length < 2) return;
     enterGridNav();
   };
 
@@ -2161,7 +2038,7 @@ export function SessionGrid({
       if (event.button !== 0) return;
       cleanupDragRef.current?.();
 
-      // A press that lands on a header button (rename, expand, close) must not
+      // A press that lands on a header button (rename, focus) must not
       // steal focus into the terminal — let those controls do their own thing.
       const startedOnControl = !!(event.target as HTMLElement | null)?.closest(
         "button, a, input, textarea",
@@ -2176,8 +2053,8 @@ export function SessionGrid({
         moved: false,
       };
       // The header bar is the drag handle. Pointer capture is deferred until the
-      // move threshold is crossed so a plain click on a header button (rename,
-      // expand, close) still fires its onClick instead of being hijacked.
+      // move threshold is crossed so a plain click on a header button still
+      // fires its onClick instead of being hijacked.
       const handleEl = event.currentTarget;
 
       const applyMove = (clientX: number, clientY: number) => {
@@ -2403,7 +2280,6 @@ export function SessionGrid({
           >
             {row.cells.map(({ session }) => {
               const cellScopeKey = scopeKeyFor(session);
-              const isExpandedCell = expandedTaskId === session.taskId;
               const isDragging = draggingId === session.taskId;
               return (
                 <GridCell
@@ -2411,15 +2287,11 @@ export function SessionGrid({
                   session={session}
                   scopeKey={cellScopeKey}
                   mounted={mountedByTask.get(session.taskId) ?? true}
-                  expanded={isExpandedCell}
-                  hidden={expandedTaskId !== null && !isExpandedCell}
                   isDragging={isDragging}
                   isFocused={!isDragging && focusedTaskId === session.taskId}
                   isNavSelected={navTaskId === session.taskId}
                   navActive={navActive}
                   reorderEnabled={reorderEnabled}
-                  gridPadding={gridPad}
-                  onToggleExpanded={toggleExpanded}
                   onRequestClose={requestClose}
                   onPtyReady={setPtyId}
                   onHeaderPointerDown={startPointerReorder}

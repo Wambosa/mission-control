@@ -14,7 +14,7 @@ export const DEFAULT_BINDINGS: BindingMap = {
   "search.focus": makeBinding({ mod: true, key: "/" }),
   "terminal.toggle": makeBinding({ mod: true, key: "`" }),
   "terminal.close": makeBinding({ mod: true, key: "l" }),
-  "terminal.expandToggle": makeBinding({ mod: true, key: "k" }),
+  "terminal.clear": makeBinding({ mod: true, key: "k" }),
   "terminal.newTab": makeBinding({ mod: true, key: "t" }),
   "terminal.cycleNext": makeBinding({ mod: true, key: "]" }),
   "terminal.cyclePrev": makeBinding({ mod: true, key: "[" }),

@@ -21,7 +21,6 @@ import { EscTooltip, HotkeyTooltip, Tooltip } from "~/components/ui/Tooltip";
 import { Z_INDEX } from "~/lib/z-index";
 import {
   AGENT_META,
-  DUPLICATE_ACTIVE_SESSION_EVENT,
   STATUS_META,
 } from "~/lib/design-meta";
 import { getElectron } from "~/lib/electron";
@@ -55,7 +54,6 @@ import {
 } from "~/lib/use-terminal-zoom";
 import { useHotkey } from "~/lib/use-hotkey";
 import { SandboxCloneOfferBanner } from "~/components/views/SandboxCloneOfferBanner";
-import { TerminalZoomControls } from "~/components/views/TerminalZoomControls";
 import { api, resolveApiToken } from "~/lib/api";
 import { remoteStartErrorMessage } from "~/lib/remote-runtime-errors";
 import { useSandboxCloneConfirm } from "~/lib/use-sandbox-clone-confirm";
@@ -197,20 +195,12 @@ function HeaderMoreMenu({
   statusColor,
   showTitle,
   showSandboxBadge,
-  expanded,
-  onToggleExpanded,
-  onHide,
   onTogglePin,
   pinned,
   pinBusy,
   buttons,
   onRename,
-  onClone,
   onFocusMode,
-  canZoomIn,
-  canZoomOut,
-  onZoomIn,
-  onZoomOut,
 }: {
   title: string;
   statusLabel: string;
@@ -218,11 +208,6 @@ function HeaderMoreMenu({
   /** Tiny header: the pane title is hidden, so show it at the top of the menu. */
   showTitle: boolean;
   showSandboxBadge: boolean;
-  expanded: boolean;
-  /** Present only when the expand control was also collapsed into the menu. */
-  onToggleExpanded?: () => void;
-  /** Present only when the close control was also collapsed into the menu. */
-  onHide?: () => void;
   /** Present only when the pin control was collapsed into the menu (micro). */
   onTogglePin?: () => void;
   pinned: boolean;
@@ -230,12 +215,7 @@ function HeaderMoreMenu({
   /** Which discretionary actions the user has chosen to show (mirrors the header). */
   buttons: SessionHeaderButtonVisibility;
   onRename: () => void;
-  onClone: () => void;
   onFocusMode: () => void;
-  canZoomIn: boolean;
-  canZoomOut: boolean;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
 }) {
   const [open, setOpen] = useState(false);
   useSuspendAppDragRegion(open);
@@ -360,21 +340,6 @@ function HeaderMoreMenu({
                 Rename session
               </DropdownMenuItem>
             )}
-            {buttons.zoom && (
-              <>
-                <DropdownMenuItem icon="zoom-out" disabled={!canZoomOut} onClick={onZoomOut}>
-                  Zoom out
-                </DropdownMenuItem>
-                <DropdownMenuItem icon="zoom-in" disabled={!canZoomIn} onClick={onZoomIn}>
-                  Zoom in
-                </DropdownMenuItem>
-              </>
-            )}
-            {buttons.clone && (
-              <DropdownMenuItem icon="copy" onClick={() => pick(onClone)}>
-                Clone session
-              </DropdownMenuItem>
-            )}
             {buttons.focus && (
               <DropdownMenuItem icon="external-link" onClick={() => pick(onFocusMode)}>
                 Focus session
@@ -389,22 +354,6 @@ function HeaderMoreMenu({
                 {pinned ? "Unpin session" : "Pin session"}
               </DropdownMenuItem>
             )}
-            {buttons.expand && onToggleExpanded && (
-              <DropdownMenuItem
-                icon={expanded ? "minimize" : "maximize"}
-                onClick={() => pick(onToggleExpanded)}
-              >
-                {expanded ? "Shrink panel" : "Expand panel"}
-              </DropdownMenuItem>
-            )}
-            {onHide && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem icon="x" danger onClick={() => pick(onHide)}>
-                  Hide session panel
-                </DropdownMenuItem>
-              </>
-            )}
           </CardFrame>,
           document.body,
         )}
@@ -416,8 +365,6 @@ export function TerminalPane({
   project,
   task,
   onHide,
-  expanded = false,
-  onToggleExpanded,
   isLast,
   descriptor,
   onPtyReady,
@@ -429,9 +376,9 @@ export function TerminalPane({
 }: {
   project: Project & { activeWorktreeId?: string | null; activeRuntimeScopeId?: string | null };
   task: Task;
+  /** Dismiss/close this session. No longer a header control — invoked by the
+   *  route-level close handler and by a clean shell exit. */
   onHide?: () => void;
-  expanded?: boolean;
-  onToggleExpanded?: () => void;
   isLast: boolean;
   descriptor: TerminalDescriptor;
   onPtyReady: (ptyId: string | null) => void;
@@ -476,21 +423,18 @@ export function TerminalPane({
   const [cloneOffer, setCloneOffer] = useState<{ remote: string; slug: string } | null>(null);
   const [cloning, setCloning] = useState(false);
   const {
-    level: zoomLevel,
     fontSize: terminalFontSize,
     zoomBy,
     zoomIn,
     zoomOut,
     resetZoom,
-    canZoomIn,
-    canZoomOut,
   } = useTerminalZoom(descriptor.taskId);
   useTerminalPaneZoomShortcuts(paneRef, zoomIn, zoomOut, resetZoom);
   useTerminalPaneWheelZoom(paneRef, zoomBy);
 
-  // Which discretionary header buttons the user has chosen to show. Zoom is
-  // hidden by default; the keyboard shortcuts (Cmd/Ctrl +/-/0) still work. The
-  // zoom shortcuts and wheel-zoom above stay wired regardless of visibility.
+  // Which discretionary header buttons the user has chosen to show. The zoom
+  // shortcuts (Cmd/Ctrl +/-/0) and wheel-zoom above are always wired — they
+  // never had a header control of their own to hide.
   const { data: appSettings } = useSettings();
   const sessionButtons: SessionHeaderButtonVisibility =
     normalizeSessionHeaderButtonVisibility(appSettings?.sessionHeaderButtons);
@@ -522,12 +466,10 @@ export function TerminalPane({
   const tinyHeader = headerTier === "tiny" || headerTier === "micro";
   const microHeader = headerTier === "micro";
   // Whether the "…" overflow menu carries anything. At tiny/micro it always
-  // holds the title (and folded expand/close), so it's kept even with every
-  // discretionary button hidden. At the plain compact tier it only holds those
-  // buttons — so if the user hid them all, skip the menu rather than open an
-  // empty popover (expand/close still render inline below).
-  const anyDiscretionaryButton =
-    sessionButtons.rename || sessionButtons.zoom || sessionButtons.clone || sessionButtons.focus;
+  // holds the title, so it's kept even with every discretionary button hidden.
+  // At the plain compact tier it only holds those buttons — so if the user hid
+  // them all, skip the menu rather than open an empty popover.
+  const anyDiscretionaryButton = sessionButtons.rename || sessionButtons.focus;
   const showMoreMenu = compactHeader && (tinyHeader || anyDiscretionaryButton);
 
   const activeRuntimeScopeId = project.activeRuntimeScopeId ?? LOCAL_SCOPE_ID;
@@ -623,16 +565,6 @@ export function TerminalPane({
   const router = useRouter();
   const requestFocusMode = () => {
     enterFocusSession(router, task.id);
-  };
-
-  const requestSessionClone = () => {
-    if (typeof window === "undefined") return;
-    // Carry this pane's own session id so the handler clones (and, in grid view,
-    // positions the clone next to) the session whose button was clicked — not
-    // whatever session happens to be active in the current scope.
-    window.dispatchEvent(
-      new CustomEvent(DUPLICATE_ACTIVE_SESSION_EVENT, { detail: { taskId: task.id } }),
-    );
   };
 
   useEffect(() => {
@@ -1622,20 +1554,12 @@ export function TerminalPane({
               statusColor={statusMeta.color}
               showTitle={tinyHeader}
               showSandboxBadge={isSandboxTerminal}
-              expanded={expanded}
-              onToggleExpanded={tinyHeader ? onToggleExpanded : undefined}
-              onHide={microHeader ? onHide : undefined}
               onTogglePin={microHeader ? onTogglePin : undefined}
               pinned={liveTask.pinned}
               pinBusy={pinBusy}
               buttons={sessionButtons}
               onRename={openRenameDialog}
-              onClone={requestSessionClone}
               onFocusMode={requestFocusMode}
-              canZoomIn={canZoomIn}
-              canZoomOut={canZoomOut}
-              onZoomIn={zoomIn}
-              onZoomOut={zoomOut}
             />
             ) : null
           ) : (
@@ -1652,33 +1576,6 @@ export function TerminalPane({
                     style={{ width: 34, padding: 0 }}
                   />
                 </Tooltip>
-              )}
-              {sessionButtons.zoom && (
-                <span
-                  style={{ display: "contents" }}
-                  onContextMenu={hideElementContextMenu("session-button:zoom")}
-                >
-                  <TerminalZoomControls
-                    level={zoomLevel}
-                    canZoomIn={canZoomIn}
-                    canZoomOut={canZoomOut}
-                    onZoomIn={zoomIn}
-                    onZoomOut={zoomOut}
-                  />
-                </span>
-              )}
-              {sessionButtons.clone && (
-                <HotkeyTooltip action="session.clone" label="Clone session">
-                  <Btn
-                    variant="ghost"
-                    size="sm"
-                    icon="copy"
-                    onClick={requestSessionClone}
-                    onContextMenu={hideElementContextMenu("session-button:clone")}
-                    aria-label="Clone session"
-                    style={{ width: 34, padding: 0 }}
-                  />
-                </HotkeyTooltip>
               )}
               {sessionButtons.focus && (
                 <HotkeyTooltip action="session.focusMode" label="Focus session (floating window)">
@@ -1716,35 +1613,6 @@ export function TerminalPane({
                 }}
               />
             </Tooltip>
-          )}
-          {sessionButtons.expand && onToggleExpanded && !tinyHeader && (
-            <HotkeyTooltip
-              action="terminal.expandToggle"
-              label={expanded ? "Shrink session panel" : "Expand session panel"}
-            >
-              <Btn
-                variant="ghost"
-                size="sm"
-                icon={expanded ? "minimize" : "maximize"}
-                onClick={onToggleExpanded}
-                onContextMenu={hideElementContextMenu("session-button:expand")}
-                aria-label={expanded ? "Shrink session panel" : "Expand session panel"}
-                aria-pressed={expanded}
-                style={{ width: 34, padding: 0 }}
-              />
-            </HotkeyTooltip>
-          )}
-          {onHide && !microHeader && (
-            <HotkeyTooltip action="terminal.close" label="Hide session panel">
-              <Btn
-                variant="ghost"
-                size="sm"
-                icon="x"
-                onClick={onHide}
-                aria-label="Hide session panel"
-                style={{ width: 34, padding: 0 }}
-              />
-            </HotkeyTooltip>
           )}
         </div>
       </div>

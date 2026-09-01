@@ -53,7 +53,7 @@ import {
   screenshotSupported as isScreenshotSupported,
 } from "~/lib/screenshot";
 import { playScreenshotCapture } from "~/lib/screenshot-sound";
-import { isDockerSandboxRuntime } from "~/lib/sandbox-runtime";
+import { isRemoteProjectRuntime } from "~/lib/sandbox-runtime";
 import { newSessionId } from "~/lib/claude-command";
 import { TITLE_WAITING } from "~/lib/task-sentinels";
 import {
@@ -110,6 +110,7 @@ import {
 } from "~/queries";
 import { useActiveGroup } from "~/lib/active-group";
 import { useGitStatus } from "~/queries/git";
+import type { ProjectFsScope } from "~/lib/project-fs";
 import { GitDiffModal } from "~/components/views/GitDiffView/GitDiffModal";
 import { RecallModal } from "~/components/views/RecallModal";
 import { SandboxProvisioningState } from "~/components/views/SandboxProvisioningState";
@@ -205,6 +206,16 @@ function ProjectPage() {
   // (Which worktree an agent has moved into is read per session from its
   // lifecycle events — see the session header.)
   const projectPath = project?.path ?? "";
+  // Which machine this project runs on, and where it lives there. Read from the
+  // project, not from an application-wide scope: two projects on two machines
+  // are live at once.
+  const projectFsScope = useMemo<ProjectFsScope>(
+    () => ({
+      sandboxId: project?.sandboxId ?? null,
+      remoteDirectory: project?.remoteDirectory ?? null,
+    }),
+    [project?.sandboxId, project?.remoteDirectory],
+  );
   const activeRuntimeSandbox =
     sandboxState?.activeScopeId && sandboxState.activeScopeId !== LOCAL_SCOPE_ID
       ? sandboxState.sandboxes.find((sandbox) => sandbox.id === sandboxState.activeScopeId) ?? null
@@ -888,7 +899,7 @@ function ProjectPage() {
 
       // A staged prompt can't ride a pre-spawned warm slot (it was launched
       // before we knew the prompt), so fall back to the cold path when set.
-      const warmSlot = (await isDockerSandboxRuntime()) || opts?.initialInput
+      const warmSlot = isRemoteProjectRuntime(project.sandboxId) || opts?.initialInput
         ? null
         : takeSessionWarmSlot(payload, terminalProject.path);
       if (warmSlot) {
@@ -2505,7 +2516,7 @@ function ProjectPage() {
         projectId={project.id}
         worktreeId={null}
         projectPath={projectPath || project.path}
-        remoteDirectory={project.remoteDirectory}
+        scope={projectFsScope}
         enabled={projectPathReady}
         onClose={closeDiffView}
       />
@@ -2679,7 +2690,7 @@ function ProjectPage() {
       <FileFinderDialog
         open={fileFinderOpen}
         projectRoot={projectPath || project.path}
-        remoteDirectory={project.remoteDirectory}
+        scope={projectFsScope}
         resetKey={fileFinderResetKey}
         onClose={() => setFileFinderOpen(false)}
         onPick={(rel) => setOpenFileRel(rel)}
@@ -2689,7 +2700,7 @@ function ProjectPage() {
         <Suspense fallback={null}>
           <FileEditorDialog
             projectRoot={projectPath || project.path}
-            remoteDirectory={project.remoteDirectory}
+            scope={projectFsScope}
             relPath={openFileRel}
             onClose={() => setOpenFileRel(null)}
             onBack={() => {

@@ -30,7 +30,7 @@ import { takePendingInitialInput } from "~/lib/session-initial-prompts";
 import { consumeIntentionalSessionClose } from "~/lib/intentional-session-close";
 import { DEFAULT_SESSION_ICON, isSessionIcon } from "~/lib/session-icons";
 import { isRemotePtyId } from "~/lib/pty-id";
-import { isDockerSandboxRuntime } from "~/lib/sandbox-runtime";
+import { isRemoteProjectRuntime, readSandboxRemoteRoot } from "~/lib/sandbox-runtime";
 import {
   attachTerminalKeyHandler,
   terminalExitTaskStatus,
@@ -692,11 +692,17 @@ export function TerminalPane({
       const { Terminal, FitAddon } = await prefetchTerminalModules();
       if (cancelled || !containerRef.current) return;
 
-      // Sandbox terminals talk to the remote agent via `remotePty`; host
-      // terminals use the local PTY.
-      // `remotePty` mirrors `pty`'s method shape, so only spawn differs below.
-      // Read the runtime setting fresh at terminal start; default to host.
-      const useSandbox = !!electron && (await isDockerSandboxRuntime(electron));
+      // Which machine this session runs on comes from its own project, not
+      // from an application-wide scope — so a Local project and a project on a
+      // host can both hold live sessions at the same time. `remotePty` mirrors
+      // `pty`'s method shape, so only spawn differs below.
+      const projectScopeId = project.sandboxId ?? null;
+      const useSandbox = !!electron && isRemoteProjectRuntime(projectScopeId);
+      // Warm this scope's project root so the managed-VM derivation below can
+      // read it synchronously. No-op for a host project, which states its own.
+      if (useSandbox && !project.remoteDirectory) {
+        await readSandboxRemoteRoot(projectScopeId, electron);
+      }
       if (cancelled || !containerRef.current) return;
       const ptyApi = electron ? (useSandbox ? electron.remotePty : electron.pty) : null;
       // Split on either separator: a Windows project path never split at all,
@@ -706,7 +712,7 @@ export function TerminalPane({
       // which creates the project inside its own workspace, still derives the
       // path from the local folder name (the same name the clone slug below
       // uses, so the two always agree).
-      const sandboxCwd = projectRemoteRoot(project.path, project.remoteDirectory);
+      const sandboxCwd = projectRemoteRoot(project.path, project.remoteDirectory, projectScopeId);
 
       // A grid mounts every pane in one commit; building all their xterm
       // surfaces in one task blocks the route transition's first paint. Take
@@ -1199,6 +1205,7 @@ export function TerminalPane({
         try {
           spawnResult = useSandbox
             ? await electron.remotePty.spawn({
+                sandboxId: projectScopeId!,
                 taskId: descriptor.taskId,
                 cwd: sandboxCwd, // in-container clone path (/workspace/<slug>)
                 command,
@@ -1295,7 +1302,7 @@ export function TerminalPane({
           if (useSandbox && electron) {
             let repoPresent = true;
             try {
-              await electron.remoteGit.status(sandboxCwd);
+              await electron.remoteGit.status(projectScopeId, sandboxCwd);
             } catch {
               repoPresent = false;
             }
@@ -1313,7 +1320,7 @@ export function TerminalPane({
                 setCloning(true);
                 setLiveStatus("Cloning the project into the sandbox…");
                 try {
-                  await electron.remoteGit.clone(remote, slug);
+                  await electron.remoteGit.clone(projectScopeId, remote, slug);
                   if (surface.destroyed) return;
                   setCloneOffer(null);
                   setCloning(false);
@@ -1368,6 +1375,7 @@ export function TerminalPane({
   }, [descriptor.taskId, descriptor.awaitingCreate, descriptor.pendingValidation, retryNonce]);
 
   const confirmClone = useSandboxCloneConfirm({
+    sandboxId: project.sandboxId ?? null,
     cloneOffer,
     setCloneOffer,
     setCloning,

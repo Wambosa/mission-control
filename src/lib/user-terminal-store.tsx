@@ -18,7 +18,7 @@ import {
   takeUserTerminalWarmSlot,
 } from "./user-terminal-warm-pool";
 import { isRemotePtyId } from "./pty-id";
-import { isDockerSandboxRuntime } from "./sandbox-runtime";
+import { isRemoteProjectRuntime } from "./sandbox-runtime";
 import { terminalSurfaceCache } from "./terminal-surface-cache";
 import type { UserTerminal } from "~/db/schema";
 import { HOME_TERMINAL_PROJECT_ID } from "~/shared/home-terminal";
@@ -55,6 +55,8 @@ type Ctx = {
   setProject: (project: ScopedProject | null) => void;
   /** Whether the project-less "home" (dashboard) terminal scope is active. */
   homeActive: boolean;
+  /** The scope home terminals open on (the Local sentinel when on this host). */
+  homeScopeId: string;
   setHomeActive: (active: boolean) => void;
   /** The active sandbox/scope id home terminals are bucketed under. */
   setHomeScopeId: (scopeId: string) => void;
@@ -368,7 +370,7 @@ export function UserTerminalProvider({ children }: { children: ReactNode }) {
         !startCommand &&
         !!cwd &&
         !!electron &&
-        !(await isDockerSandboxRuntime(electron));
+        !isRemoteProjectRuntime(targetProject.sandboxId);
 
       if (canUseWarmSlot) {
         const warmSlot = takeUserTerminalWarmSlot(
@@ -613,6 +615,7 @@ export function UserTerminalProvider({ children }: { children: ReactNode }) {
       project,
       setProject,
       homeActive,
+      homeScopeId,
       setHomeActive,
       setHomeScopeId,
       panelOpen,
@@ -639,6 +642,7 @@ export function UserTerminalProvider({ children }: { children: ReactNode }) {
       project,
       setProject,
       homeActive,
+      homeScopeId,
       setHomeActive,
       setHomeScopeId,
       panelOpen,

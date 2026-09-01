@@ -80,6 +80,7 @@ export async function waitForSandboxConnected(
 
 export async function copyProjectEnvFilesToSandbox(
   electron: ElectronBridge,
+  sandboxId: string,
   projectRoot: string,
   sandboxRoot: string,
 ): Promise<string[]> {
@@ -90,7 +91,12 @@ export async function copyProjectEnvFilesToSandbox(
     const read = await electron.files.read(projectRoot, relPath);
     if (!read.ok) throw new Error(`Could not read ${relPath}: ${read.error}`);
     if (read.kind !== "text") throw new Error(`${relPath} is not a text file.`);
-    const written = await electron.remoteFs.write(`${sandboxRoot}/${relPath}`, read.content, null);
+    const written = await electron.remoteFs.write(
+      sandboxId,
+      `${sandboxRoot}/${relPath}`,
+      read.content,
+      null,
+    );
     if (!written.ok) throw new Error(`Could not copy ${relPath}: ${written.error}`);
   }
   return envFiles;
@@ -107,6 +113,7 @@ const SANDBOX_REPO_READY_TIMEOUT_MS = 30_000;
 
 export async function waitForSandboxSetupReady(
   electron: ElectronBridge,
+  sandboxId: string,
   sandboxRoot: string,
   setupCommand: string | null,
   timeoutMs = SANDBOX_REPO_READY_TIMEOUT_MS,
@@ -115,9 +122,9 @@ export async function waitForSandboxSetupReady(
   let lastError = "";
   while (Date.now() - started < timeoutMs) {
     try {
-      await electron.remoteGit.status(sandboxRoot);
+      await electron.remoteGit.status(sandboxId, sandboxRoot);
       if (setupCommand && setupCommandNeedsPackageJson(setupCommand)) {
-        const packageJson = await electron.remoteFs.read(`${sandboxRoot}/package.json`);
+        const packageJson = await electron.remoteFs.read(sandboxId, `${sandboxRoot}/package.json`);
         if (!packageJson.ok) {
           lastError = packageJson.error;
           await new Promise((resolve) => setTimeout(resolve, SANDBOX_POLL_INTERVAL_MS));
@@ -248,13 +255,13 @@ export async function createProjectSandbox({
       id: toastId,
       description: "Cloning the repo and preparing the project.",
     });
-    await electron.remoteGit.clone(cloneRemote, cloneSlug, baseBranch);
+    await electron.remoteGit.clone(sandbox, cloneRemote, cloneSlug, baseBranch);
 
     const setupCommand = buildProjectSandboxSetupCommand(input);
-    await waitForSandboxSetupReady(electron, sandboxRoot, setupCommand);
+    await waitForSandboxSetupReady(electron, sandbox, sandboxRoot, setupCommand);
 
     const copiedEnvFiles = input.copyEnvFiles
-      ? await copyProjectEnvFilesToSandbox(electron, project.path, sandboxRoot)
+      ? await copyProjectEnvFilesToSandbox(electron, sandbox, project.path, sandboxRoot)
       : [];
 
     if (setupCommand) {

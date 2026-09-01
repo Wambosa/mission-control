@@ -179,7 +179,7 @@ const electronAPI = {
      * inside a Mission Control VM; the user's own home (or a configured root)
      * on an SSH host, where no such container path exists.
      */
-    getRemoteRoot: (sandboxId?: string): Promise<string | null> =>
+    getRemoteRoot: (sandboxId: string | null): Promise<string | null> =>
       ipcRenderer.invoke(IPC.sandboxGetRemoteRoot, sandboxId),
     updateSettings: (patch: SandboxSettingsPatchBridge): Promise<SandboxSettingsBridge> =>
       ipcRenderer.invoke(IPC.sandboxUpdateSettings, patch),
@@ -286,21 +286,30 @@ const electronAPI = {
       subscribe(IPC.remotePtySpawnError, cb),
   },
   remoteFs: {
-    list: (path: string) => ipcRenderer.invoke(IPC.remoteFsList, path),
-    read: (path: string) => ipcRenderer.invoke(IPC.remoteFsRead, path),
-    write: (path: string, content: string, expectedMtimeMs: number | null) =>
-      ipcRenderer.invoke(IPC.remoteFsWrite, path, content, expectedMtimeMs),
-    watch: (path: string) => ipcRenderer.invoke(IPC.remoteFsWatch, path),
-    unwatch: (watchId: string) => ipcRenderer.invoke(IPC.remoteFsUnwatch, watchId),
+    list: (sandboxId: string | null, path: string) =>
+      ipcRenderer.invoke(IPC.remoteFsList, sandboxId, path),
+    read: (sandboxId: string | null, path: string) =>
+      ipcRenderer.invoke(IPC.remoteFsRead, sandboxId, path),
+    write: (
+      sandboxId: string | null,
+      path: string,
+      content: string,
+      expectedMtimeMs: number | null,
+    ) => ipcRenderer.invoke(IPC.remoteFsWrite, sandboxId, path, content, expectedMtimeMs),
+    watch: (sandboxId: string | null, path: string) =>
+      ipcRenderer.invoke(IPC.remoteFsWatch, sandboxId, path),
+    unwatch: (sandboxId: string | null, watchId: string) =>
+      ipcRenderer.invoke(IPC.remoteFsUnwatch, sandboxId, watchId),
     onChange: (cb: (msg: { watchId: string; path: string; mtimeMs: number }) => void) =>
       subscribe(IPC.remoteFsChange, cb),
   },
   remoteGit: {
-    status: (repo: string) => ipcRenderer.invoke(IPC.remoteGitStatus, repo),
-    diff: (repo: string, file: string, staged: boolean) =>
-      ipcRenderer.invoke(IPC.remoteGitDiff, repo, file, staged),
-    clone: (remote: string, slug: string, branch?: string) =>
-      ipcRenderer.invoke(IPC.remoteGitClone, remote, slug, branch),
+    status: (sandboxId: string | null, repo: string) =>
+      ipcRenderer.invoke(IPC.remoteGitStatus, sandboxId, repo),
+    diff: (sandboxId: string | null, repo: string, file: string, staged: boolean) =>
+      ipcRenderer.invoke(IPC.remoteGitDiff, sandboxId, repo, file, staged),
+    clone: (sandboxId: string | null, remote: string, slug: string, branch?: string) =>
+      ipcRenderer.invoke(IPC.remoteGitClone, sandboxId, remote, slug, branch),
   },
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   browseFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.dialogBrowseFolder),

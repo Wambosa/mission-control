@@ -3,7 +3,11 @@
 // behind one `(projectRoot, relPath)` interface. Defaults to host — when the
 // Terminal runtime isn't "docker", every call is exactly the prior behavior.
 import { SANDBOX_WORKSPACE_ROOT, workspaceSlug } from "~/shared/sandbox-workspace";
-import { cachedSandboxRemoteRoot, readSandboxRuntimeMode } from "~/lib/sandbox-runtime";
+import {
+  cachedSandboxRemoteRoot,
+  isRemoteProjectRuntime,
+  readSandboxRemoteRoot,
+} from "~/lib/sandbox-runtime";
 import type {
   FileListResult,
   FileReadResult,
@@ -18,8 +22,8 @@ import type {
  * This is NOT how an SSH host works. There the project is somewhere the user
  * put it, which they now state per project — see `projectRemoteRoot`.
  */
-export function sandboxContainerRoot(projectRoot: string): string {
-  const root = (cachedSandboxRemoteRoot() ?? SANDBOX_WORKSPACE_ROOT).replace(/\/+$/, "");
+export function sandboxContainerRoot(projectRoot: string, sandboxId?: string | null): string {
+  const root = (cachedSandboxRemoteRoot(sandboxId) ?? SANDBOX_WORKSPACE_ROOT).replace(/\/+$/, "");
   // A Windows path arrives with backslashes; its last segment is still the name.
   const name = projectRoot.split(/[\\/]/).filter(Boolean).pop() ?? "project";
   return `${root}/${workspaceSlug(name)}`;
@@ -33,48 +37,62 @@ export function sandboxContainerRoot(projectRoot: string): string {
 export function projectRemoteRoot(
   projectRoot: string,
   remoteDirectory?: string | null,
+  sandboxId?: string | null,
 ): string {
   const configured = remoteDirectory?.trim().replace(/\/+$/, "");
-  return configured || sandboxContainerRoot(projectRoot);
+  return configured || sandboxContainerRoot(projectRoot, sandboxId);
 }
 
-function containerPath(
-  projectRoot: string,
-  relPath: string,
-  remoteDirectory?: string | null,
-): string {
-  return `${projectRemoteRoot(projectRoot, remoteDirectory)}/${relPath}`;
+/**
+ * Which machine a project's files live on, and where. Passed to every fs call
+ * so two projects on two hosts can be browsed at once.
+ */
+export type ProjectFsScope = {
+  /** null = Local (this machine). */
+  sandboxId: string | null;
+  /** The project's directory on that machine; null = derive (managed VM). */
+  remoteDirectory: string | null;
+};
+
+const LOCAL_SCOPE: ProjectFsScope = { sandboxId: null, remoteDirectory: null };
+
+function containerPath(projectRoot: string, relPath: string, scope: ProjectFsScope): string {
+  return `${projectRemoteRoot(projectRoot, scope.remoteDirectory, scope.sandboxId)}/${relPath}`;
 }
 
-/** True when the Terminal runtime is the Docker sandbox (so fs/git go over RPC). */
-export async function isSandboxRuntimeActive(): Promise<boolean> {
-  return (await readSandboxRuntimeMode(window.electronAPI ?? null)) === "docker";
+/** True when this project's files live off this machine (so fs/git go over RPC). */
+export async function isRemoteProjectFs(scope: ProjectFsScope): Promise<boolean> {
+  if (!isRemoteProjectRuntime(scope.sandboxId)) return false;
+  // Warm the scope's root so the synchronous path mapping above can read it.
+  if (!scope.remoteDirectory) await readSandboxRemoteRoot(scope.sandboxId);
+  return true;
 }
-
-const useSandboxFs = isSandboxRuntimeActive;
 
 const NOT_ELECTRON = { ok: false as const, error: "Not running in Electron" };
 
 export async function listProjectFiles(
   projectRoot: string,
-  remoteDirectory?: string | null,
+  scope: ProjectFsScope = LOCAL_SCOPE,
 ): Promise<FileListResult> {
   const api = window.electronAPI;
   if (!api) return NOT_ELECTRON;
-  return (await useSandboxFs())
-    ? api.remoteFs.list(projectRemoteRoot(projectRoot, remoteDirectory))
+  return (await isRemoteProjectFs(scope))
+    ? api.remoteFs.list(
+        scope.sandboxId,
+        projectRemoteRoot(projectRoot, scope.remoteDirectory, scope.sandboxId),
+      )
     : api.files.list(projectRoot);
 }
 
 export async function readProjectFile(
   projectRoot: string,
   relPath: string,
-  remoteDirectory?: string | null,
+  scope: ProjectFsScope = LOCAL_SCOPE,
 ): Promise<FileReadResult> {
   const api = window.electronAPI;
   if (!api) return NOT_ELECTRON;
-  return (await useSandboxFs())
-    ? api.remoteFs.read(containerPath(projectRoot, relPath, remoteDirectory))
+  return (await isRemoteProjectFs(scope))
+    ? api.remoteFs.read(scope.sandboxId, containerPath(projectRoot, relPath, scope))
     : api.files.read(projectRoot, relPath);
 }
 
@@ -83,13 +101,14 @@ export async function writeProjectFile(
   relPath: string,
   content: string,
   expectedMtimeMs: number | null,
-  remoteDirectory?: string | null,
+  scope: ProjectFsScope = LOCAL_SCOPE,
 ): Promise<FileWriteResult> {
   const api = window.electronAPI;
   if (!api) return NOT_ELECTRON;
-  return (await useSandboxFs())
+  return (await isRemoteProjectFs(scope))
     ? api.remoteFs.write(
-        containerPath(projectRoot, relPath, remoteDirectory),
+        scope.sandboxId,
+        containerPath(projectRoot, relPath, scope),
         content,
         expectedMtimeMs,
       )
@@ -107,13 +126,14 @@ export async function writeProjectFileSensitive(
   relPath: string,
   content: string,
   expectedMtimeMs: number | null,
-  remoteDirectory?: string | null,
+  scope: ProjectFsScope = LOCAL_SCOPE,
 ): Promise<FileWriteResult> {
   const api = window.electronAPI;
   if (!api) return NOT_ELECTRON;
-  return (await useSandboxFs())
+  return (await isRemoteProjectFs(scope))
     ? api.remoteFs.write(
-        containerPath(projectRoot, relPath, remoteDirectory),
+        scope.sandboxId,
+        containerPath(projectRoot, relPath, scope),
         content,
         expectedMtimeMs,
       )
@@ -144,19 +164,22 @@ export type ProjectFileWatch = {
 export async function watchProjectFile(
   projectRoot: string,
   relPath: string,
-  remoteDirectory?: string | null,
+  scope: ProjectFsScope = LOCAL_SCOPE,
 ): Promise<{ ok: true; watch: ProjectFileWatch } | { ok: false; error: string }> {
   const api = window.electronAPI;
   if (!api) return NOT_ELECTRON;
-  if (await useSandboxFs()) {
-    const r = await api.remoteFs.watch(containerPath(projectRoot, relPath, remoteDirectory));
+  if (await isRemoteProjectFs(scope)) {
+    const r = await api.remoteFs.watch(
+      scope.sandboxId,
+      containerPath(projectRoot, relPath, scope),
+    );
     if (!r.ok) return r;
     return {
       ok: true,
       watch: {
         watchId: r.watchId,
         onChanged: (cb) => api.remoteFs.onChange((m) => cb({ watchId: m.watchId, mtimeMs: m.mtimeMs })),
-        unwatch: () => void api.remoteFs.unwatch(r.watchId),
+        unwatch: () => void api.remoteFs.unwatch(scope.sandboxId, r.watchId),
       },
     };
   }

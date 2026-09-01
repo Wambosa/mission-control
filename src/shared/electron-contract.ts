@@ -105,6 +105,9 @@ export type ShellPtySpawnOptions = BasePtySpawnOptions & {
 export type PtySpawnOptions = AgentPtySpawnOptions | ShellPtySpawnOptions;
 
 export type RemotePtySpawnOptions = {
+  /** The scope this session runs on — the owning project's sandbox id. Required:
+   *  nothing resolves a remote spawn from an application-wide "active" scope. */
+  sandboxId: string;
   taskId: string;
   /** Absolute in-container path (e.g. /workspace/<slug>). */
   cwd: string;
@@ -454,7 +457,8 @@ export type ElectronBridge = {
     getState: (sandboxId?: string) => Promise<SandboxState>;
     getSettings: () => Promise<SandboxSettingsView>;
     /** Directory the active scope keeps its projects under; null when local. */
-    getRemoteRoot: (sandboxId?: string) => Promise<string | null>;
+    /** A scope's project root. null for Local, which has no remote root. */
+    getRemoteRoot: (sandboxId: string | null) => Promise<string | null>;
     updateSettings: (patch: SandboxSettingsPatch) => Promise<SandboxSettingsView>;
     up: (sandboxId?: string) => Promise<{ ok: true } | { ok: false; error: string }>;
     /** Tear down and restart with a forced default-image rebuild (update flow). */
@@ -557,22 +561,34 @@ export type ElectronBridge = {
       cb: (msg: { ptyId: string; code: string; message: string }) => void,
     ) => () => void;
   };
+  // Every remote call names the scope it is for. There is no ambient "active"
+  // scope to fall back to: two projects on two machines are live at once.
   remoteFs: {
-    list: (path: string) => Promise<FileListResult>;
-    read: (path: string) => Promise<FileReadResult>;
+    list: (sandboxId: string | null, path: string) => Promise<FileListResult>;
+    read: (sandboxId: string | null, path: string) => Promise<FileReadResult>;
     write: (
+      sandboxId: string | null,
       path: string,
       content: string,
       expectedMtimeMs: number | null,
     ) => Promise<FileWriteResult>;
-    watch: (path: string) => Promise<{ ok: true; watchId: string } | { ok: false; error: string }>;
-    unwatch: (watchId: string) => Promise<{ ok: true }>;
+    watch: (
+      sandboxId: string | null,
+      path: string,
+    ) => Promise<{ ok: true; watchId: string } | { ok: false; error: string }>;
+    unwatch: (sandboxId: string | null, watchId: string) => Promise<{ ok: true }>;
     onChange: (cb: (msg: { watchId: string; path: string; mtimeMs: number }) => void) => () => void;
   };
   remoteGit: {
-    status: (repo: string) => Promise<GitStatus>;
-    diff: (repo: string, file: string, staged: boolean) => Promise<GitDiff>;
+    status: (sandboxId: string | null, repo: string) => Promise<GitStatus>;
+    diff: (
+      sandboxId: string | null,
+      repo: string,
+      file: string,
+      staged: boolean,
+    ) => Promise<GitDiff>;
     clone: (
+      sandboxId: string | null,
       remote: string,
       slug: string,
       branch?: string,

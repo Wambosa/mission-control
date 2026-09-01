@@ -43,7 +43,6 @@ import {
 } from "./ssh-transport";
 import {
   listSandboxConfigs,
-  readActiveSandboxId,
   readSandboxConfig,
 } from "./sandbox-store";
 import type { SandboxConfig, OpResult } from "./sandbox-types";
@@ -128,7 +127,6 @@ let registry: SandboxRegistry | null = null;
 const clients = new Map<string, SandboxAgentClient>();
 // The scope the renderer is currently showing. Remote PTY/fs/git route here; null
 // = Local (host), in which case the renderer uses the local pty/* surface instead.
-let activeSandboxId: string | null = null;
 // ptyId → owning sandbox id, so write/resize/kill/replay reach the right agent
 // even if the active scope changed since the pty was spawned.
 const ptyOwner = new Map<string, string>();
@@ -577,19 +575,16 @@ function getRegistry(): SandboxRegistry {
   return registry;
 }
 
-function activeClient(): SandboxAgentClient | null {
-  return activeSandboxId ? clients.get(activeSandboxId) ?? null : null;
-}
-
 function ownerClient(ptyId: string): SandboxAgentClient | null {
   const owner = ptyOwner.get(ptyId);
   return owner ? clients.get(owner) ?? null : null;
 }
 
-/** Route a remote-pty op to the pty's owner client (falling back to the active
- *  client). Returns false when no client is available. */
+/** Route a remote-pty op to the pty's own owner client. A pty is bound to the
+ *  scope that spawned it, so there is nothing to fall back to. Returns false
+ *  when that client is gone. */
 function withOwnerClient(ptyId: string, fn: (client: SandboxAgentClient) => void): boolean {
-  const client = ownerClient(ptyId) ?? activeClient();
+  const client = ownerClient(ptyId);
   if (!client) return false;
   fn(client);
   return true;
@@ -713,13 +708,14 @@ async function upgradeSandboxAgent(sandboxId: string): Promise<OpResult> {
   });
 }
 
-async function waitForActiveClient(timeoutMs = AGENT_CONNECT_WAIT_MS): Promise<SandboxAgentClient | null> {
-  const id = activeSandboxId;
+async function waitForClient(
+  id: string | null | undefined,
+  timeoutMs = AGENT_CONNECT_WAIT_MS,
+): Promise<SandboxAgentClient | null> {
   if (!id) return null;
   await ensureSandboxStarted(id);
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    if (activeSandboxId !== id) return null; // scope changed out from under us
     const c = clients.get(id);
     if (c?.isOpen) return c;
     await new Promise((r) => setTimeout(r, 150));
@@ -992,7 +988,6 @@ function publicSettings(
 
 function buildDiagnostics(): string {
   const lines: string[] = ["Mission Control sandbox diagnostics"];
-  lines.push(`active sandbox: ${activeSandboxId ?? "(none / Local)"}`);
   for (const { sandboxId, state } of getRegistry().allStates()) {
     const detail =
       state.status === "connected" || state.status === "update-required"
@@ -1362,6 +1357,8 @@ function detectGitRemote(projectPath: string): Promise<string | null> {
 }
 
 type RemotePtySpawnOpts = {
+  /** The scope this session runs on — required; there is no ambient active one. */
+  sandboxId: string;
   taskId: string;
   cwd: string;
   command: string;
@@ -1398,13 +1395,8 @@ export function registerSandboxManager(
   // of the user's tooling uses. See electron/ssh-binary.ts.
   configureSshBinary(appSettingsKV(appUserDataDir).get("ssh.path"));
   getSandboxHookEnv = hookEnvAccessor ?? null;
-  // Restore the persisted active scope so runtime routing is correct from launch.
-  activeSandboxId = readActiveSandboxId(userDataDir);
-
   // Adopt any sandboxes already running (keep-all-running) on launch.
   void reconcile();
-
-  const resolveId = (id?: string | null): string | null => id ?? activeSandboxId;
 
   // ── Legacy global settings (vestigial under multi-sandbox; kept so the
   //    existing Settings page config fields don't crash). Phase 4 restructures. ──
@@ -1546,10 +1538,11 @@ export function registerSandboxManager(
     },
     ipcMain,
   );
-  safeHandle(IPC.sandboxGetRemoteRoot, (_e, sandboxId?: string) => {
-    const id = sandboxId ?? activeSandboxId;
-    return id ? sandboxRemoteRoot(configFor(id)) : null;
-  });
+  // Required: a project's root is its own scope's, never "whichever scope is
+  // active". A caller with no scope is Local and has no remote root at all.
+  safeHandle(IPC.sandboxGetRemoteRoot, (_e, sandboxId?: string | null) =>
+    sandboxId ? sandboxRemoteRoot(configFor(sandboxId)) : null,
+  );
   safeHandle(IPC.sandboxRevealApiKey, (_e, sandboxId: string) => {
     const config = configFor(sandboxId);
     const apiKey = config?.kind === "remote-vm" ? config.pairingToken?.trim() : "";
@@ -1561,7 +1554,7 @@ export function registerSandboxManager(
   safeHandle(
     IPC.sandboxGetState,
     (_e, sandboxId?: string) => {
-      const id = resolveId(sandboxId);
+      const id = sandboxId ?? null;
       if (!id) return { status: "disabled" } as const;
       return getRegistry().getState(id) ?? ({ status: "stopped", dockerAvailable: true } as const);
     },
@@ -1570,7 +1563,7 @@ export function registerSandboxManager(
   safeHandle(
     IPC.sandboxUp,
     (_e, sandboxId?: string) => {
-      const id = resolveId(sandboxId);
+      const id = sandboxId ?? null;
       if (!id) return Promise.resolve({ ok: false as const, error: "no sandbox selected" });
       const config = configFor(id);
       return config ? getRegistry().start(config) : Promise.resolve({ ok: false as const, error: "unknown sandbox" });
@@ -1580,7 +1573,7 @@ export function registerSandboxManager(
   safeHandle(
     IPC.sandboxRebuild,
     (_e, sandboxId?: string) => {
-      const id = resolveId(sandboxId);
+      const id = sandboxId ?? null;
       if (!id) return Promise.resolve({ ok: false as const, error: "no sandbox selected" });
       const config = configFor(id);
       return config ? getRegistry().rebuild(config) : Promise.resolve({ ok: false as const, error: "unknown sandbox" });
@@ -1590,7 +1583,7 @@ export function registerSandboxManager(
   safeHandle(
     IPC.sandboxDown,
     (_e, sandboxId?: string) => {
-      const id = resolveId(sandboxId);
+      const id = sandboxId ?? null;
       return id ? getRegistry().stop(id) : Promise.resolve({ ok: false as const, error: "no sandbox selected" });
     },
     ipcMain,
@@ -1611,7 +1604,8 @@ export function registerSandboxManager(
   safeHandle(
     IPC.sandboxSetActive,
     async (_e, sandboxId: string | null) => {
-      activeSandboxId = sandboxId;
+      // Nothing routes through a global "active" scope any more — every remote
+      // call names its own. All this still does is warm the machine.
       if (sandboxId) await ensureSandboxStarted(sandboxId);
       return { ok: true as const };
     },
@@ -1620,7 +1614,7 @@ export function registerSandboxManager(
   safeHandle(
     IPC.sandboxConnect,
     async (_e, sandboxId?: string) => {
-      const id = resolveId(sandboxId);
+      const id = sandboxId ?? null;
       if (!id) return { ok: true as const };
       const state = getRegistry().getState(id);
       if (state?.status === "running" || state?.status === "error") {
@@ -1635,7 +1629,7 @@ export function registerSandboxManager(
   safeHandle(
     IPC.sandboxDisconnect,
     (_e, sandboxId?: string) => {
-      const id = resolveId(sandboxId);
+      const id = sandboxId ?? null;
       if (id) void getRegistry().stop(id);
       return { ok: true as const };
     },
@@ -1653,7 +1647,7 @@ export function registerSandboxManager(
   safeHandle(
     IPC.sandboxSetupGitAuth,
     (_e, sandboxId?: string) => {
-      const id = resolveId(sandboxId);
+      const id = sandboxId ?? null;
       return id ? provisionGitAuthFor(id, { requireConfigured: true }) : Promise.resolve({});
     },
     ipcMain,
@@ -1661,18 +1655,19 @@ export function registerSandboxManager(
   safeHandle(
     IPC.sandboxUpgradeAgent,
     (_e, sandboxId?: string) => {
-      const id = resolveId(sandboxId);
+      const id = sandboxId ?? null;
       return id ? upgradeSandboxAgent(id) : Promise.resolve({ ok: false as const, error: "no sandbox selected" });
     },
     ipcMain,
   );
 
-  // ── Remote PTY (active sandbox; ptyId routes write/resize/kill/replay) ──
+  // ── Remote PTY (the caller's own scope; ptyId routes write/resize/kill/replay) ──
   safeHandle(
     IPC.remotePtySpawn,
     async (_e, opts: RemotePtySpawnOpts) => {
-      const id = activeSandboxId;
-      const client = await waitForActiveClient();
+      const id = opts.sandboxId ?? null;
+      if (!id) throw new Error("a remote session needs the project's scope");
+      const client = await waitForClient(id);
       if (!client) throw new Error("sandbox is not connected");
       const config = id ? configFor(id) : null;
       const requiredTool = requiredCredToolForAgent(opts.agent);
@@ -1686,8 +1681,8 @@ export function registerSandboxManager(
       });
       if (id && config?.copyAgentCreds && requiredTool) {
         await provisionAgentCredsFor(id, { requireConfigured: true, requireTool: requiredTool });
-        if (activeSandboxId !== id || clients.get(id) !== client) {
-          throw new Error("Active sandbox changed before the terminal started.");
+        if (clients.get(id) !== client) {
+          throw new Error("The host's connection was replaced before the terminal started.");
         }
       }
       const ptyId = `rpty-${randomUUID()}`;
@@ -1725,7 +1720,7 @@ export function registerSandboxManager(
     return withOwnerClient(ptyId, (c) => c.kill(ptyId));
   }, ipcMain);
   safeHandle(IPC.remotePtyReplay, (_e, ptyId: string) => {
-    const current = ownerClient(ptyId) ?? activeClient();
+    const current = ownerClient(ptyId);
     if (!current) return { data: "", nextSeq: 0 };
     return new Promise<{ data: string; nextSeq: number }>((resolve) => {
       const prior = pendingReplays.get(ptyId);
@@ -1745,46 +1740,70 @@ export function registerSandboxManager(
     });
   }, ipcMain);
 
-  // ── Remote fs/git RPC (routed to the active sandbox's agent) ──
-  const activeRpc = async (
+  // ── Remote fs/git RPC (routed to the scope the caller names) ──
+  const scopedRpc = async (
+    sandboxId: string | null | undefined,
     method: "fs.list" | "fs.read" | "fs.write" | "fs.watch" | "fs.unwatch",
     params: Record<string, unknown>,
   ): Promise<unknown> => {
-    const client = await waitForActiveClient();
+    const client = await waitForClient(sandboxId);
     if (!client) return { ok: false, error: "not-connected" };
     return client.rpc(method, params);
   };
-  safeHandle(IPC.remoteFsList, (_e, p: string) => activeRpc("fs.list", { path: p }), ipcMain);
-  safeHandle(IPC.remoteFsRead, (_e, p: string) => activeRpc("fs.read", { path: p }), ipcMain);
   safeHandle(
-    IPC.remoteFsWrite,
-    (_e, p: string, content: string, expectedMtimeMs: number | null) =>
-      activeRpc("fs.write", { path: p, content, expectedMtimeMs }),
+    IPC.remoteFsList,
+    (_e, sandboxId: string | null, p: string) => scopedRpc(sandboxId, "fs.list", { path: p }),
     ipcMain,
   );
-  safeHandle(IPC.remoteFsWatch, (_e, p: string) => activeRpc("fs.watch", { path: p }), ipcMain);
-  safeHandle(IPC.remoteFsUnwatch, (_e, watchId: string) => activeRpc("fs.unwatch", { watchId }), ipcMain);
+  safeHandle(
+    IPC.remoteFsRead,
+    (_e, sandboxId: string | null, p: string) => scopedRpc(sandboxId, "fs.read", { path: p }),
+    ipcMain,
+  );
+  safeHandle(
+    IPC.remoteFsWrite,
+    (_e, sandboxId: string | null, p: string, content: string, expectedMtimeMs: number | null) =>
+      scopedRpc(sandboxId, "fs.write", { path: p, content, expectedMtimeMs }),
+    ipcMain,
+  );
+  safeHandle(
+    IPC.remoteFsWatch,
+    (_e, sandboxId: string | null, p: string) => scopedRpc(sandboxId, "fs.watch", { path: p }),
+    ipcMain,
+  );
+  safeHandle(
+    IPC.remoteFsUnwatch,
+    (_e, sandboxId: string | null, watchId: string) =>
+      scopedRpc(sandboxId, "fs.unwatch", { watchId }),
+    ipcMain,
+  );
 
-  const activeGitRpc = async (
+  const scopedGitRpc = async (
+    sandboxId: string | null | undefined,
     method: "git.status" | "git.diff" | "git.clone",
     params: Record<string, unknown>,
   ): Promise<unknown> => {
-    const client = await waitForActiveClient();
+    const client = await waitForClient(sandboxId);
     if (!client) throw new Error("sandbox is not connected");
     return client.rpc(method, params, {
       timeoutMs: method === "git.clone" ? GIT_CLONE_TIMEOUT_MS : undefined,
     });
   };
-  safeHandle(IPC.remoteGitStatus, (_e, repo: string) => activeGitRpc("git.status", { repo }), ipcMain);
+  safeHandle(
+    IPC.remoteGitStatus,
+    (_e, sandboxId: string | null, repo: string) => scopedGitRpc(sandboxId, "git.status", { repo }),
+    ipcMain,
+  );
   safeHandle(
     IPC.remoteGitDiff,
-    (_e, repo: string, file: string, staged: boolean) => activeGitRpc("git.diff", { repo, file, staged }),
+    (_e, sandboxId: string | null, repo: string, file: string, staged: boolean) =>
+      scopedGitRpc(sandboxId, "git.diff", { repo, file, staged }),
     ipcMain,
   );
   safeHandle(
     IPC.remoteGitClone,
-    (_e, remote: string, slug: string, branch?: string) => {
-      const id = activeSandboxId;
+    (_e, sandboxId: string | null, remote: string, slug: string, branch?: string) => {
+      const id = sandboxId ?? null;
       // Single-flight by (sandbox, slug): a create-flow clone racing a
       // TerminalPane clone-on-open (or several panes at once) target the same
       // /workspace/<slug> dir; share one git.clone so the loser doesn't fail with
@@ -1795,7 +1814,7 @@ export function registerSandboxManager(
         }
         const cloneParams = branch ? { remote, slug, branch } : { remote, slug };
         try {
-          return await activeGitRpc("git.clone", cloneParams);
+          return await scopedGitRpc(id, "git.clone", cloneParams);
         } catch (err) {
           const cfg = id ? configFor(id) : null;
           if (id && isSafeSshCloneRemote(remote)) {

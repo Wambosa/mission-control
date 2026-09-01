@@ -1,63 +1,50 @@
 import { getElectron, type ElectronBridge } from "~/lib/electron";
 import type { SandboxRuntimeMode } from "~/shared/electron-contract";
 
-let cachedRuntimeMode: SandboxRuntimeMode | null = null;
+/**
+ * Which machine a project's sessions run on. Read from the project itself —
+ * its `sandboxId` column — not from an application-wide "active scope". Two
+ * projects on two different machines are therefore live at the same time, and
+ * a session never resolves its target from whichever project was opened last.
+ *
+ * `null` is Local: the host this app is running on.
+ */
+export function projectRuntimeMode(sandboxId: string | null | undefined): SandboxRuntimeMode {
+  return sandboxId ? "docker" : "host";
+}
+
+/** True when this project's sessions and file/git calls go over the agent. */
+export function isRemoteProjectRuntime(sandboxId: string | null | undefined): boolean {
+  return projectRuntimeMode(sandboxId) === "docker";
+}
 
 /**
- * Where the active scope keeps its projects. Cached beside the runtime mode
- * because the two are read together and change together — switching scope
- * changes both — and because the path mapping needs it synchronously while
- * rendering, where an await is not available.
+ * Where each scope keeps its projects, cached per scope because the path
+ * mapping needs it synchronously while rendering, where an await is not
+ * available. Only the managed-VM derivation reads this: an SSH-host project
+ * states its own directory (see `projectRemoteRoot`).
  */
-let cachedRemoteRoot: string | null = null;
+const remoteRootByScope = new Map<string, string | null>();
 
-export function cachedSandboxRuntimeMode(): SandboxRuntimeMode | null {
-  return cachedRuntimeMode;
+/** A scope's project root, or null before its first read (and for Local). */
+export function cachedSandboxRemoteRoot(sandboxId: string | null | undefined): string | null {
+  return sandboxId ? remoteRootByScope.get(sandboxId) ?? null : null;
 }
 
-/** The active scope's project root, or null before the first read. */
-export function cachedSandboxRemoteRoot(): string | null {
-  return cachedRemoteRoot;
-}
-
-export async function readSandboxRuntimeMode(
+/** One read of a scope's root, tolerant of an older main process. Cached. */
+export async function readSandboxRemoteRoot(
+  sandboxId: string | null | undefined,
   electron: ElectronBridge | null = getElectron(),
-): Promise<SandboxRuntimeMode> {
-  if (!electron?.sandbox) {
-    cachedRuntimeMode = "host";
-    return "host";
-  }
-
+): Promise<string | null> {
+  if (!sandboxId || !electron?.sandbox) return null;
+  const cached = remoteRootByScope.get(sandboxId);
+  if (cached !== undefined) return cached;
+  let root: string | null = null;
   try {
-    // Phase 2: runtime follows the active scope. The manager returns a non-disabled
-    // state for getState() (no arg) exactly when a sandbox scope is active; Local
-    // (or no selection) yields `disabled` → host PTY.
-    const state = await electron.sandbox.getState();
-    const mode: SandboxRuntimeMode = state.status === "disabled" ? "host" : "docker";
-    cachedRuntimeMode = mode;
-    // Refresh the root in the same pass so it can never lag the mode: a scope
-    // switch that updated one but not the other would map paths for the
-    // machine the user just left.
-    cachedRemoteRoot = mode === "docker" ? await readRemoteRoot(electron) : null;
-    return mode;
+    root = (await electron.sandbox.getRemoteRoot?.(sandboxId)) ?? null;
   } catch {
-    cachedRuntimeMode = "host";
-    cachedRemoteRoot = null;
-    return "host";
+    root = null;
   }
-}
-
-export async function isDockerSandboxRuntime(
-  electron: ElectronBridge | null = getElectron(),
-): Promise<boolean> {
-  return (await readSandboxRuntimeMode(electron)) === "docker";
-}
-
-/** One read of the active scope's root, tolerant of an older main process. */
-async function readRemoteRoot(electron: ElectronBridge): Promise<string | null> {
-  try {
-    return (await electron.sandbox.getRemoteRoot?.()) ?? null;
-  } catch {
-    return null;
-  }
+  remoteRootByScope.set(sandboxId, root);
+  return root;
 }

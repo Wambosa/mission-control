@@ -69,7 +69,13 @@ describe("waitForSandboxSetupReady", () => {
       },
     };
 
-    await waitForSandboxSetupReady(electron as unknown as ElectronBridge, "/workspace/project", "set -e\nnpm i", 2_000);
+    await waitForSandboxSetupReady(
+      electron as unknown as ElectronBridge,
+      "sb-1",
+      "/workspace/project",
+      "set -e\nnpm i",
+      2_000,
+    );
 
     expect(packageReads).toBe(2);
   });

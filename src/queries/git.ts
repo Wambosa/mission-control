@@ -8,6 +8,7 @@ import {
 import { api } from "~/lib/api";
 import { isPowerSaveActive } from "~/lib/power-save";
 import { fetchGitStatus, fetchGitDiff } from "~/lib/project-git";
+import type { ProjectFsScope } from "~/lib/project-fs";
 import { MAIN_WORKTREE_ID } from "~/shared/worktrees";
 
 // Each status tick spawns several git processes on the server (status,
@@ -30,13 +31,13 @@ export const gitKeys = {
 export const gitStatusQueryOptions = (
   projectId: string,
   worktreeId?: string | null,
-  opts: { enabled?: boolean; sandboxRepoPath?: string; fastPoll?: boolean } = {},
+  opts: { enabled?: boolean; sandboxRepoPath?: string; scope?: ProjectFsScope; fastPoll?: boolean } = {},
 ) =>
   queryOptions({
     queryKey: gitKeys.status(projectId, worktreeId),
     // Routes to the in-container repo (remoteGit) when sandboxRepoPath is given
     // AND the Terminal runtime is Docker; host HTTP API otherwise.
-    queryFn: () => fetchGitStatus(projectId, worktreeId, opts.sandboxRepoPath),
+    queryFn: () => fetchGitStatus(projectId, worktreeId, opts.sandboxRepoPath, opts.scope),
     enabled: opts.enabled ?? true,
     placeholderData: keepPreviousData,
     // With several observers on the same key, TanStack polls at the smallest
@@ -57,20 +58,20 @@ export const gitDiffQueryOptions = (
   worktreeId: string | null | undefined,
   file: string | null,
   staged: boolean,
-  opts: { enabled?: boolean; sandboxRepoPath?: string } = {},
+  opts: { enabled?: boolean; sandboxRepoPath?: string; scope?: ProjectFsScope } = {},
 ) =>
   queryOptions({
     queryKey: file
       ? gitKeys.diff(projectId, worktreeId, file, staged)
       : (["projects", projectId, "worktrees", worktreeId || MAIN_WORKTREE_ID, "git", "diff", "__none__"] as const),
-    queryFn: () => fetchGitDiff(projectId, file!, staged, worktreeId, opts.sandboxRepoPath),
+    queryFn: () => fetchGitDiff(projectId, file!, staged, worktreeId, opts.sandboxRepoPath, opts.scope),
     enabled: !!file && (opts.enabled ?? true),
   });
 
 export const useGitStatus = (
   projectId: string,
   worktreeId?: string | null,
-  opts: { enabled?: boolean; sandboxRepoPath?: string; fastPoll?: boolean } = {},
+  opts: { enabled?: boolean; sandboxRepoPath?: string; scope?: ProjectFsScope; fastPoll?: boolean } = {},
 ) => useQuery(gitStatusQueryOptions(projectId, worktreeId, opts));
 
 
@@ -79,7 +80,7 @@ export const useGitDiff = (
   worktreeId: string | null | undefined,
   file: string | null,
   staged: boolean,
-  opts: { enabled?: boolean; sandboxRepoPath?: string } = {},
+  opts: { enabled?: boolean; sandboxRepoPath?: string; scope?: ProjectFsScope } = {},
 ) => useQuery(gitDiffQueryOptions(projectId, worktreeId, file, staged, opts));
 
 function useInvalidateGit(projectId: string, worktreeId?: string | null) {

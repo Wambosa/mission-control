@@ -16,13 +16,13 @@ import {
   type FileSelection,
 } from "./ChangedFilesList";
 import { DiffPane } from "./DiffPane";
-import { projectRemoteRoot } from "~/lib/project-fs";
+import { projectRemoteRoot, type ProjectFsScope } from "~/lib/project-fs";
 
 export function GitDiffView({
   projectId,
   worktreeId,
   projectPath,
-  remoteDirectory = null,
+  scope,
   enabled = true,
   onBack,
   showHeader = true,
@@ -30,8 +30,8 @@ export function GitDiffView({
   projectId: string;
   worktreeId?: string | null;
   projectPath: string;
-  /** This project's directory on its SSH host; null for a Local project. */
-  remoteDirectory?: string | null;
+  /** Which machine this project's repo lives on, and where. */
+  scope: ProjectFsScope;
   enabled?: boolean;
   onBack: () => void;
   /**
@@ -44,10 +44,11 @@ export function GitDiffView({
   // For a project running off this machine the repo lives there; status/diff
   // read over remoteGit (the host HTTP path is used otherwise). An SSH host
   // states its directory; a managed VM's is derived from the local folder name.
-  const sandboxRepoPath = projectRemoteRoot(projectPath, remoteDirectory);
+  const sandboxRepoPath = projectRemoteRoot(projectPath, scope.remoteDirectory, scope.sandboxId);
   const { data: status, isLoading, error } = useGitStatus(projectId, worktreeId, {
     enabled,
     sandboxRepoPath,
+    scope,
     // The diff view actively displays file-level changes — poll fast while open.
     fastPoll: enabled,
   });
@@ -123,7 +124,7 @@ export function GitDiffView({
     worktreeId,
     selection?.path ?? null,
     selection?.staged ?? false,
-    { enabled, sandboxRepoPath },
+    { enabled, sandboxRepoPath, scope },
   );
   const selectedDisplay = selection ? displayPath(selection.path) : null;
 

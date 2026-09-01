@@ -67,7 +67,7 @@ describe("session-warm-pool", () => {
     });
   });
 
-  it("does not pre-spawn a host session while Docker sandbox runtime is active", async () => {
+  it("does not pre-spawn a host session for a project that runs off this machine", async () => {
     const spawn = vi.fn();
     vi.stubGlobal("window", {
       electronAPI: {
@@ -78,7 +78,13 @@ describe("session-warm-pool", () => {
 
     await expect(
       prepareSessionWarmSlot({
-        project: { id: "p1", path: "/Users/dev/project", activeWorktreeId: null } as never,
+        // The project's own scope decides, not an application-wide setting.
+        project: {
+          id: "p1",
+          path: "/Users/dev/project",
+          sandboxId: "sb-1",
+          activeWorktreeId: null,
+        } as never,
         payload: {
           agent: "claude-code",
           branch: "main",

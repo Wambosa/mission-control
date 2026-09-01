@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { AGENT_HOOK_EVENTS, mapHookEventToStatus } from "~/shared/agent-hook-events";
 import { ASK_USER_QUESTION_TOOL, parseAskUserQuestionInput } from "~/shared/agent-questions";
-import { getTask, updateStatus, updateTask } from "../services/tasks";
+import { getTask, recordAgentCwd, updateStatus, updateTask } from "../services/tasks";
 import {
   armDeferredFinish,
   clearSubagentActivity,
@@ -64,6 +64,9 @@ const hookPayload = z
     // Synthetic MissionControlSessionEnded (electron/pty-manager): the PTY
     // process's exit code, used to pick finished vs terminated.
     exit_code: z.number(),
+    // The agent's working directory, sent on every Claude Code event. The
+    // session header resolves it against the project's worktrees (KTD4).
+    cwd: z.string(),
   })
   .partial();
 
@@ -238,6 +241,13 @@ export async function receive(url: URL, request: Request): Promise<Response> {
 
   const task = getTask(taskId);
   if (!task) return jsonError(HTTP_NOT_FOUND, "task not found");
+
+  // Follow the agent's working directory. Subagent lifecycle events are
+  // excluded for the same reason as the transcript path: they describe the
+  // child, not the session the header is labeling.
+  if (!isSubagentLifecycleEvent(event)) {
+    recordAgentCwd(taskId, payload.cwd);
+  }
 
   // Stash the transcript path (present on most Claude hooks incl. Stop) so the
   // auto-distill pass can read the full session. Latest wins; stable per

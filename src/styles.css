@@ -2936,6 +2936,26 @@ body[data-card-glow] .cursor-glow {
   background: transparent;
 }
 
+/* The agent's worktree, in the session header (TerminalPane.tsx). R14's
+   fallback can be an arbitrary absolute path, so this is a fixed-width slot
+   that truncates; the full value lives in the element's title. */
+.mc-pane-worktree {
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
 /* Project-header host chip (projects.$id.tsx): states the one machine every
    session in this project runs on, and opens the project's configuration —
    where that machine is chosen. Read-only describes the value, not the

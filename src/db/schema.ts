@@ -157,6 +157,10 @@ export const tasks = sqliteTable(
     claudeSessionId: text("claude_session_id"),
     claudeSkipPermissions: integer("claude_skip_permissions", { mode: "boolean" }).notNull().default(false),
     claudeBareSession: integer("claude_bare_session", { mode: "boolean" }).notNull().default(false),
+    // Where this session's agent last reported working, from its lifecycle
+    // hook. The session header resolves this against the project's worktrees;
+    // null until the first event, and for sessions that predate the column.
+    agentCwd: text("agent_cwd"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },

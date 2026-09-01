@@ -49,6 +49,7 @@ export function buildOptimisticTask(input: {
     claudeSessionId: input.claudeSessionId ?? null,
     claudeSkipPermissions: input.claudeSkipPermissions ?? false,
     claudeBareSession: input.claudeBareSession ?? false,
+    agentCwd: null,
     createdAt: now,
     updatedAt: now,
   };

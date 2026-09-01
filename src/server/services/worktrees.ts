@@ -1,7 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnCapture } from "./_spawn";
-import { MAIN_WORKTREE_ID, WORKTREE_NAME_RE, normalizeWorktreeId } from "~/shared/worktrees";
+import {
+  MAIN_WORKTREE_ID,
+  WORKTREE_CONTAINER_DIRS,
+  WORKTREE_NAME_RE,
+  normalizeWorktreeId,
+} from "~/shared/worktrees";
 import type { WorktreeInfo, WorktreeTaskCounts } from "~/shared/worktrees";
 import { TASK_STATUSES } from "~/shared/domain";
 import { findProjectById } from "../repositories/projects.repo";
@@ -127,10 +132,6 @@ export function canonicalPath(p: string): string {
     return resolved;
   }
 }
-
-// `.worktrees` (plural) is the container older releases used; rows created back
-// then still point there and must stay deletable.
-const WORKTREE_CONTAINER_DIRS = [".worktree", ".worktrees"];
 
 function isContainedWorktreePath(projectRoot: string, worktreePath: string): boolean {
   // Compare both the plain-resolved and realpath'd spellings: rows written by

@@ -439,6 +439,7 @@ function ensureSchema(sqlite: Database.Database) {
       claude_session_id TEXT,
       claude_skip_permissions INTEGER NOT NULL DEFAULT 0,
       claude_bare_session INTEGER NOT NULL DEFAULT 0,
+      agent_cwd TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -703,6 +704,7 @@ function ensureSchema(sqlite: Database.Database) {
   ensureColumn(sqlite, "tasks", "scope_id", `TEXT NOT NULL DEFAULT '${LOCAL_SCOPE_ID}'`);
   ensureColumn(sqlite, "tasks", "title_manually_set", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(sqlite, "tasks", "pinned", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "tasks", "agent_cwd", "TEXT");
   sqlite.exec("CREATE INDEX IF NOT EXISTS tasks_project_worktree_scope_idx ON tasks(project_id, worktree_id, scope_id);");
   sqlite.exec("CREATE INDEX IF NOT EXISTS tasks_scope_idx ON tasks(scope_id);");
   sqlite.exec("CREATE INDEX IF NOT EXISTS tasks_pinned_idx ON tasks(pinned);");

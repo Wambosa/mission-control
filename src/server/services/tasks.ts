@@ -72,6 +72,9 @@ export function createTask(input: {
     claudeSessionId: input.claudeSessionId ?? null,
     claudeSkipPermissions: input.claudeSkipPermissions ?? false,
     claudeBareSession: input.claudeBareSession ?? false,
+    // No lifecycle event has arrived yet; the header falls back to the
+    // worktree this session was created against until one does.
+    agentCwd: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -166,6 +169,27 @@ export function updateTask(
   updateTaskRow(id, next);
   events.emit("task:updated", { id, projectId: existing.projectId });
   return next;
+}
+
+/**
+ * Record the directory the session's agent reports working in.
+ *
+ * Separate from updateTask because this is the only writer and it must stay
+ * quiet: a lifecycle hook fires many times a turn, almost always naming the
+ * same directory, and emitting task:updated for an unchanged value would churn
+ * every session subscriber for nothing. A blank or missing directory is no
+ * signal at all and leaves the stored one alone — the header keeps saying what
+ * it last knew rather than blanking (R13).
+ */
+export function recordAgentCwd(id: string, cwd: string | undefined): Task | null {
+  const next = cwd?.trim();
+  if (!next) return null;
+  const existing = findTaskById(id);
+  if (!existing || existing.agentCwd === next) return existing;
+  const updated = { ...existing, agentCwd: next, updatedAt: Date.now() };
+  updateTaskRow(id, updated);
+  events.emit("task:updated", { id, projectId: existing.projectId });
+  return updated;
 }
 
 export function archiveTask(id: string): Task | null {

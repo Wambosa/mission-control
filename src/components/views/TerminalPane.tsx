@@ -123,7 +123,7 @@ import {
 } from "~/lib/terminal-replay";
 import { getPtyStreamRouter, type PtyStreamHandlers } from "~/lib/pty-stream-router";
 import { isPowerSaveActive, watchPowerSave } from "~/lib/power-save";
-import { queryKeys, useSettings, useTask } from "~/queries";
+import { queryKeys, useSettings, useTask, useWorktrees } from "~/queries";
 import {
   normalizeSessionHeaderButtonVisibility,
   type SessionHeaderButtonVisibility,
@@ -135,6 +135,7 @@ import { workspaceSlug } from "~/shared/sandbox-workspace";
 import { projectRemoteRoot } from "~/lib/project-fs";
 import { AGENT_REGISTRY } from "~/shared/agents";
 import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
+import { resolveSessionWorktree } from "~/shared/session-worktree";
 import { toast } from "sonner";
 import { useSuspendAppDragRegion } from "~/lib/use-dismissable-menu";
 
@@ -188,6 +189,7 @@ function HeaderMoreMenu({
   statusLabel,
   statusColor,
   showTitle,
+  worktreeLabel,
   onTogglePin,
   pinned,
   pinBusy,
@@ -200,6 +202,8 @@ function HeaderMoreMenu({
   statusColor: string;
   /** Tiny header: the pane title is hidden, so show it at the top of the menu. */
   showTitle: boolean;
+  /** The agent's worktree, when the header itself is too narrow to state it. */
+  worktreeLabel: string | null;
   /** Present only when the pin control was collapsed into the menu (micro). */
   onTogglePin?: () => void;
   pinned: boolean;
@@ -320,6 +324,22 @@ function HeaderMoreMenu({
                   >
                     <span style={{ color: statusColor }}>{statusLabel}</span>
                   </div>
+                  {worktreeLabel && (
+                    <div
+                      title={worktreeLabel}
+                      style={{
+                        fontFamily: "var(--mono)",
+                        fontSize: 10,
+                        marginTop: 2,
+                        color: "var(--text-dim)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {worktreeLabel}
+                    </div>
+                  )}
                 </div>
                 <DropdownMenuSeparator />
               </>
@@ -465,6 +485,38 @@ export function TerminalPane({
   // re-rendered every pane's header on any task change.
   const { data: selectedLiveTask } = useTask(project.id, activeRuntimeScopeId, task.id);
   const liveTask = selectedLiveTask ?? task;
+  // Which worktree this session's agent is actually in. The agent reports its
+  // directory on every lifecycle event; the project's worktree list turns that
+  // into a name. A session on a host has no local worktree list to match
+  // against — worktree discovery reads this machine only — so its root is the
+  // configured remote directory and only that comparison runs.
+  const { data: projectWorktrees } = useWorktrees(project.id);
+  const worktreeDisplay = resolveSessionWorktree({
+    cwd: liveTask.agentCwd,
+    projectRoot: project.sandboxId
+      ? projectRemoteRoot(project.path, project.remoteDirectory, project.sandboxId)
+      : project.path,
+    worktrees: project.sandboxId ? [] : projectWorktrees ?? [],
+    assignedWorktreeId: liveTask.worktreeId,
+  });
+  // R14's single refresh: a directory the project does not recognize is most
+  // often a worktree made moments ago inside the session itself. Refresh the
+  // list once per unseen directory — never in a loop, and never for a host
+  // scope, where the list is about the wrong machine.
+  const refreshedCwdsRef = useRef<Set<string>>(new Set());
+  const unresolvedCwd = worktreeDisplay.kind === "path" ? worktreeDisplay.path : null;
+  useEffect(() => {
+    if (!unresolvedCwd || project.sandboxId) return;
+    if (refreshedCwdsRef.current.has(unresolvedCwd)) return;
+    refreshedCwdsRef.current.add(unresolvedCwd);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.worktrees(project.id) });
+  }, [unresolvedCwd, project.id, project.sandboxId, queryClient]);
+  const worktreeLabel =
+    worktreeDisplay.kind === "worktree"
+      ? worktreeDisplay.name
+      : worktreeDisplay.kind === "path"
+        ? worktreeDisplay.path
+        : null;
   liveTaskStatusRef.current = liveTask.status;
   const meta = AGENT_META[liveTask.agent];
   const statusMeta = STATUS_META[liveTask.status];
@@ -1513,6 +1565,16 @@ export function TerminalPane({
           className="mc-pane-header-actions"
           style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}
         >
+          {/* Where this session's agent is working. Nothing for the main
+            * checkout (R12). R14's fallback can be an arbitrary absolute path,
+            * so the slot truncates and carries the whole value in its title —
+            * and gives up entirely at the tier where the header has no room,
+            * surfacing in the overflow menu instead. */}
+          {worktreeLabel && !tinyHeader && (
+            <span className="mc-pane-worktree" title={worktreeLabel}>
+              {worktreeLabel}
+            </span>
+          )}
           {compactHeader ? (
             showMoreMenu ? (
             <HeaderMoreMenu
@@ -1520,6 +1582,7 @@ export function TerminalPane({
               statusLabel={statusMeta.label}
               statusColor={statusMeta.color}
               showTitle={tinyHeader}
+              worktreeLabel={tinyHeader ? worktreeLabel : null}
               onTogglePin={microHeader ? onTogglePin : undefined}
               pinned={liveTask.pinned}
               pinBusy={pinBusy}

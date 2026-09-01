@@ -1,5 +1,10 @@
 savePrefix: ""
 
+# Never resolve a version published less than 7 days ago (value is in minutes).
+# A worm's compromised release is usually yanked well inside that window, so
+# waiting it out keeps a fresh resolve from picking one up.
+minimumReleaseAge: 10080
+
 overrides:
   "@esbuild-kit/core-utils@3.3.2>esbuild": 0.28.1
   "esbuild": 0.28.1

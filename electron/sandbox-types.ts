@@ -24,7 +24,7 @@ export type ScopedSandboxState = { sandboxId: string; state: SandboxState };
 /** The subset of a `sandboxes` DB row the runtime needs to start a sandbox. */
 export type SandboxConfig = {
   id: string;
-  kind: "remote-vm";
+  kind: SandboxKind;
   imageTag: string | null;
   dockerfilePath: string | null;
   buildArgs: Record<string, string>;
@@ -43,11 +43,14 @@ export type SandboxConfig = {
   remoteStatus: string | null;
   /** Managed provider id from `remote_config.provider` (currently only `aws`). */
   remoteProvider: string | null;
+  /** Alias, prefix, and persistence for an `ssh-host`; null for every other kind. */
+  sshHost: SandboxSshHostConfig | null;
 };
 
 export type OpResult = { ok: true } | { ok: false; error: string };
 
 import { AGENT_VERSION } from "@agentsystemlabs/mission-control-agent";
+import type { SandboxKind, SandboxSshHostConfig } from "../src/shared/sandbox";
 
 // Must match the published sandbox agent; a mismatch surfaces as `update-required`.
 export const EXPECTED_SANDBOX_AGENT_VERSION = AGENT_VERSION;

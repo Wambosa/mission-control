@@ -24,7 +24,7 @@ import { useTerminalActions } from "~/lib/terminal-store";
 import { useUserTerminals } from "~/lib/user-terminal-store";
 import { queryKeys, useProjects, useSandboxes } from "~/queries";
 import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
-import type { RemoteVmLifecycleStatus, SandboxGitAuthMode } from "~/shared/sandbox";
+import type { RemoteVmLifecycleStatus, SandboxGitAuthMode, SandboxKind } from "~/shared/sandbox";
 import type {
   RemoteVmDeployJobSnapshot,
   RemoteVmDeployLogEntry,
@@ -43,10 +43,12 @@ function formatConnectElapsed(since: number, now: number): string {
 
 function statusBadge(
   state: SandboxState,
-  kind: "remote-vm" | undefined,
+  kind: SandboxKind | undefined,
   now = Date.now(),
 ): { label: string; color: string; connecting?: boolean } {
-  const isRemote = kind === "remote-vm";
+  // Every sandbox kind is reached over the network — a remote VM or an SSH
+  // host. The Docker wording below is only reachable for a kind-less caller.
+  const isRemote = kind !== undefined;
   const connectingColor = "var(--status-running)";
   switch (state.status) {
     case "disabled":

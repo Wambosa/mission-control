@@ -39,7 +39,11 @@ import { resolveAgentCommandMeetingVersion, resolveAgentCommandOnPath } from "./
 import { augmentProcessEnv, sanitizedProcessEnv } from "./shell-env";
 import { registerUpdateManager } from "./update-manager";
 import { registerFocusMode } from "./focus-mode";
-import { registerSandboxManager, disposeSandboxManager } from "./sandbox-manager";
+import {
+  registerSandboxManager,
+  disposeSandboxManager,
+  agentCliUpdateTargetFor,
+} from "./sandbox-manager";
 import {
   disposeApiTokenStore,
   getOrCreateApiToken,
@@ -1952,7 +1956,20 @@ safeHandle(IPC.cliCheck, (_evt, command: string, opts?: { verifyVersion?: boolea
 
 // The renderer only names an agent — the update command is chosen and run
 // entirely in the main process from the compiled-in CLI config.
-safeHandle(IPC.cliRunUpdate, (_evt, agent: string) => runAgentCliUpdate(agent));
+safeHandle(IPC.cliRunUpdate, (_evt, agent: string, sandboxId?: string | null) => {
+  const target = agentCliUpdateTargetFor(sandboxId);
+  // An SSH host we cannot address is reported as such rather than quietly
+  // updating this machine instead of the one the user asked about.
+  if (!target) {
+    return Promise.resolve({
+      ok: false as const,
+      agent: agent as never,
+      reason: "not-installed" as const,
+      output: "This SSH host has no provisioned prefix to update.",
+    });
+  }
+  return runAgentCliUpdate(agent, target);
+});
 
 safeHandle(IPC.remoteVmDeploy, (_evt, input: RemoteVmDeployInput) => {
   return runRemoteVmDeploy(input);
@@ -2120,10 +2137,16 @@ app.whenReady().then(() => {
     width: MAIN_WINDOW_MIN_WIDTH,
     height: MAIN_WINDOW_MIN_HEIGHT,
   });
-  registerSandboxManager(ipcMain, () => win, missionControlUserDataDir, app.getAppPath(), () =>
-    runtimePort
-      ? { port: runtimePort, token: getOrCreateApiToken(missionControlUserDataDir) }
-      : null,
+  registerSandboxManager(
+    ipcMain,
+    () => win,
+    missionControlUserDataDir,
+    app.getAppPath(),
+    () =>
+      runtimePort
+        ? { port: runtimePort, token: getOrCreateApiToken(missionControlUserDataDir) }
+        : null,
+    () => app.getVersion(),
   );
   return createWindow();
 }).catch((err) => {

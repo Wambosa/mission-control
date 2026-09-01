@@ -15,6 +15,32 @@ import {
   type SandboxSettingsPatch,
 } from "./sandbox-settings";
 import { SandboxRegistry, type RegistryDeps } from "./sandbox-registry";
+import { readSshHostAliases } from "./ssh-hosts";
+import { isSafeSshAlias } from "../src/shared/ssh-config";
+import { probeSshHost } from "./ssh-provision-probe";
+import { removeSshHost, runSshProvision, sshProvisionCommands } from "./ssh-provision";
+import { installSshHarnesses } from "./ssh-provision-harnesses";
+import {
+  generateSshApiKey,
+  installSshService,
+  startSshService,
+  stopSshService,
+} from "./ssh-service-unit";
+import { claimSshHost, readSshRuntime, sshClientId } from "./ssh-claims";
+import { configureSshBinary } from "./ssh-binary";
+import type { AgentCliUpdateTarget } from "./agent-cli-update";
+import { LOCAL_SCOPE_ID, type SandboxSshHostConfig } from "../src/shared/sandbox";
+import { SANDBOX_WORKSPACE_ROOT } from "../src/shared/sandbox-workspace";
+import type {
+  SshHostPlatform,
+  SshProbeOutcome,
+  SshProvisionResult,
+} from "../src/shared/ssh-provision";
+import {
+  openSshTunnel,
+  type SshTunnelCallbacks,
+  type SshTunnelResult,
+} from "./ssh-transport";
 import {
   listSandboxConfigs,
   readActiveSandboxId,
@@ -50,6 +76,7 @@ export { EXPECTED_SANDBOX_AGENT_VERSION, isSandboxAgentVersionCurrent };
 
 let getWindow: (() => BrowserWindow | null) | null = null;
 let userDataDir = "";
+let getAppVersion: () => string = () => "";
 let initialized = false;
 // Supplies the MC API port + token so remote agent spawns can POST hooks back to
 // the host. Injected by main.ts (never trusted from the renderer).
@@ -134,8 +161,15 @@ export function isSafeSshCloneRemote(remote: string): boolean {
 export function gitAuthCloneFailureHint(
   mode: SandboxConfig["gitAuthMode"],
   err: unknown,
+  kind?: SandboxConfig["kind"],
 ): string | null {
   if (!describe(err).includes("Permission denied (publickey)")) return null;
+  // On an SSH host the credentials are the host's own, so the fix is on that
+  // machine — not in a Mission Control panel that would offer to put a second
+  // key there.
+  if (kind === "ssh-host") {
+    return "This host could not authenticate to Git with its own SSH credentials. Check the key or agent the host itself uses — Mission Control does not install Git credentials onto a machine you already own.";
+  }
   if (mode === "none") {
     return "This sandbox is set to no Git authentication. Choose Copy file keys from ~/.ssh or Generate a sandbox key in the sandbox configure panel, then try the clone again.";
   }
@@ -219,6 +253,18 @@ function emitState(sandboxId: string, next: SandboxState): void {
 
 function kv() {
   return appSettingsKV(userDataDir);
+}
+
+/**
+ * The stored record for an SSH host, by alias. Provisioning rewrites the unit,
+ * so any per-host choice that lives in the unit has to be read back first or
+ * re-provisioning silently reverts it.
+ */
+function existingHostConfig(alias: string): SandboxSshHostConfig | null {
+  for (const config of listSandboxConfigs(userDataDir)) {
+    if (config.sshHost?.alias === alias) return config.sshHost;
+  }
+  return null;
 }
 
 function configFor(id: string): SandboxConfig | null {
@@ -386,9 +432,147 @@ function connectAgent(
   };
 }
 
+/** Forward an SSH host's loopback runtime port back to a loopback port here. */
+async function openSshTunnelFor(
+  config: SandboxConfig,
+  cb: SshTunnelCallbacks,
+): Promise<SshTunnelResult> {
+  // Last stop before the alias becomes an `ssh` argument.
+  const alias = config.sshHost?.alias;
+  if (!alias || !isSafeSshAlias(alias)) {
+    return { ok: false, error: "This SSH host's alias is not usable." };
+  }
+
+  // The idle stop and teardown-on-disconnect both unload the unit rather than
+  // delete it, on the promise that connecting again brings it back. Nothing
+  // kept that promise, so a host that had gone idle looked permanently broken:
+  // the tunnel opened onto a port with nothing behind it and the WebSocket
+  // retried forever. Starting an already-running runtime is a no-op, so this
+  // is safe to do on every connect.
+  const target = sshServiceTargetFor(config);
+  if (target) {
+    const started = await startSshService(target.alias, target);
+    if (!started.ok) return { ok: false, error: started.error };
+  }
+  // The host's own port wins. Falling back to this client's global setting
+  // only covers hosts recorded before the port was kept per-host; using it in
+  // preference would break any runtime that chose a different one.
+  const remotePort = config.sshHost?.agentPort ?? readSandboxSettings(kv()).agentPort;
+  return openSshTunnel({ alias, remotePort }, cb);
+}
+
+/**
+ * Where a scope keeps the projects it works on.
+ *
+ * `/workspace` is a Mission Control VM's container layout, and it was baked
+ * into the shared path mapping as a constant — so every remote file, git, and
+ * PTY call against an SSH host asked for a directory that machine has never
+ * had, and that sits outside the root the agent confines itself to. A host
+ * keeps its work where its owner already keeps it.
+ */
+export function sandboxRemoteRoot(config: SandboxConfig | null): string | null {
+  if (!config) return null;
+  if (config.kind !== "ssh-host") return SANDBOX_WORKSPACE_ROOT;
+  const host = config.sshHost;
+  if (!host) return null;
+  // The prefix is `<home>/.mission-control`, so the home it was derived from
+  // is what remains once that last segment goes.
+  const homeDir = host.prefix ? host.prefix.replace(/\/[^/]+\/?$/, "") || "/" : null;
+  return host.workspaceRoot ?? homeDir;
+}
+
+/**
+ * The service target for a host, or null when its record cannot say which
+ * service manager to address. Guessing would mean sending `launchctl` to a
+ * Linux box, so an unknown platform simply does nothing.
+ */
+function sshServiceTargetFor(
+  config: SandboxConfig,
+): { alias: string; platform: SshHostPlatform; homeDir: string } | null {
+  const host = config.sshHost;
+  if (!host?.platform || !host.prefix) return null;
+  if (!isSafeSshAlias(host.alias)) return null;
+  // The prefix was derived from the home directory; this walks that back.
+  const homeDir = host.prefix.replace(/\/[^/]+\/?$/, "") || "/";
+  return { alias: host.alias, platform: host.platform, homeDir };
+}
+
+/**
+ * Sessions live on the host as PTYs, and `ptyOwner` already says which
+ * sandbox owns each one. A session waiting at a prompt still holds its PTY,
+ * which is exactly the case R15 protects.
+ */
+function countSshSessions(config: SandboxConfig): number {
+  let count = 0;
+  for (const owner of ptyOwner.values()) if (owner === config.id) count += 1;
+  return count;
+}
+
+/**
+ * Where a harness update should run for a given scope. Returns null for a
+ * scope that names an SSH host we cannot address — deliberately never falling
+ * back to local, because silently updating this machine when the user asked
+ * about their host is the exact confusion R12 exists to remove.
+ */
+export function agentCliUpdateTargetFor(
+  sandboxId: string | null | undefined,
+): AgentCliUpdateTarget | null {
+  if (!sandboxId || sandboxId === LOCAL_SCOPE_ID) return { kind: "local" };
+  const config = configFor(sandboxId);
+  if (!config) return null;
+  if (config.kind !== "ssh-host") return { kind: "local" };
+  const host = config.sshHost;
+  if (!host?.prefix || !isSafeSshAlias(host.alias)) return null;
+  return { kind: "ssh-host", alias: host.alias, prefix: host.prefix };
+}
+
+/** Ask a host to stop its runtime, leaving it registered to start again. */
+async function stopSshRuntime(config: SandboxConfig): Promise<void> {
+  const target = sshServiceTargetFor(config);
+  if (!target) return;
+  await stopSshService(target.alias, target);
+}
+
+/**
+ * Take Mission Control back off a host being removed: unregister the service,
+ * delete the prefix, leave the SSH config alone. Returns what survived, if
+ * anything — never an error, because a host that cannot be reached must not
+ * stop the user from forgetting it.
+ */
+async function removeSshFootprint(config: SandboxConfig): Promise<string | null> {
+  if (config.kind !== "ssh-host") return null;
+  const target = sshServiceTargetFor(config);
+  if (!target) return null;
+  try {
+    const removal = await removeSshHost(
+      target.alias,
+      {
+        platform: target.platform,
+        homeDir: target.homeDir,
+        prefix: config.sshHost?.prefix ?? "",
+      },
+      { clientId: sshClientId(kv()) },
+    );
+    // A host another client still claims was left whole on purpose; that is
+    // worth saying plainly rather than reporting it as a failed cleanup.
+    if (removal.retained) return removal.retained.reason;
+    return removal.leftBehind
+      ? `${removal.leftBehind.reason} You may want to delete ${removal.leftBehind.prefix} on that host yourself.`
+      : null;
+  } catch (err) {
+    return `Could not clean up this host: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
 function getRegistry(): SandboxRegistry {
   if (registry) return registry;
-  const deps: RegistryDeps = { connectAgent, emitState };
+  const deps: RegistryDeps = {
+    connectAgent,
+    emitState,
+    openSshTunnel: openSshTunnelFor,
+    countSshSessions,
+    stopSshRuntime,
+  };
   registry = new SandboxRegistry(deps);
   return registry;
 }
@@ -571,6 +755,13 @@ async function provisionGitAuthFor(
     return {};
   }
   const config = configFor(id);
+  // An SSH host authenticates to Git as itself. It is the user's own machine,
+  // already holding their keys and their known_hosts — the same premise the
+  // whole SSH feature rests on. Copying keys onto it or generating a second
+  // one would be Mission Control installing credentials into a machine that
+  // already has them, and demanding the user pick one of those first is asking
+  // them to solve a problem they do not have.
+  if (config?.kind === "ssh-host") return {};
   const mode = config?.gitAuthMode ?? "none";
   if (mode === "none") {
     if (options.requireConfigured) {
@@ -1190,11 +1381,22 @@ export function registerSandboxManager(
   appUserDataDir: string,
   _appRoot: string,
   hookEnvAccessor?: () => { port: number; token: string } | null,
+  /**
+   * This build's version, recorded in the claim a host keeps. Injected rather
+   * than read from `app` so this module stays importable without an Electron
+   * runtime, which its tests depend on.
+   */
+  appVersionAccessor?: () => string,
 ): void {
   if (initialized) return;
   initialized = true;
   getWindow = windowAccessor;
+  getAppVersion = appVersionAccessor ?? (() => "");
   userDataDir = appUserDataDir;
+  // Decide which ssh to run before anything spawns one. Left to PATH, Windows
+  // hands us whichever build sorts first, which is often not the one the rest
+  // of the user's tooling uses. See electron/ssh-binary.ts.
+  configureSshBinary(appSettingsKV(appUserDataDir).get("ssh.path"));
   getSandboxHookEnv = hookEnvAccessor ?? null;
   // Restore the persisted active scope so runtime routing is correct from launch.
   activeSandboxId = readActiveSandboxId(userDataDir);
@@ -1225,6 +1427,129 @@ export function registerSandboxManager(
     ipcMain,
   );
   safeHandle(IPC.sandboxDetectRemote, (_e, projectPath: string) => detectGitRemote(projectPath), ipcMain);
+  safeHandle(IPC.sshHostsList, () => readSshHostAliases(), ipcMain);
+  safeHandle(
+    IPC.sshHostsProbe,
+    (_e, alias: string): Promise<SshProbeOutcome> => {
+      // The SSH config is the only source of hosts, so an alias that isn't in
+      // it is not a host — and never reaches an `ssh` argument list.
+      if (!readSshHostAliases().includes(alias)) {
+        return Promise.resolve({
+          ok: false,
+          error: `"${alias}" is not a host in your SSH config.`,
+        });
+      }
+      return probeSshHost(alias, { expectedAgentVersion: EXPECTED_SANDBOX_AGENT_VERSION });
+    },
+    ipcMain,
+  );
+  safeHandle(
+    IPC.sshHostsProvision,
+    async (event, alias: string): Promise<SshProvisionResult> => {
+      // Same guard as the probe: the SSH config is the only source of hosts.
+      if (!readSshHostAliases().includes(alias) || !isSafeSshAlias(alias)) {
+        return { ok: false, error: `"${alias}" is not a host in your SSH config.` };
+      }
+
+      const probed = await probeSshHost(alias, {
+        expectedAgentVersion: EXPECTED_SANDBOX_AGENT_VERSION,
+      });
+      if (!probed.ok) return { ok: false, error: probed.error };
+      if (!probed.plan.ok) return { ok: false, error: probed.plan.message };
+      const plan = probed.plan;
+      const homeDir = probed.probe.homeDir ?? "";
+
+      const sendProgress = (step: string, index: number, total: number) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send(IPC.sshHostsProvisionProgress, { alias, step, index, total });
+        }
+      };
+
+      // Harnesses and the service registration are steps the user waits on
+      // too, so they are counted into the same progress the prefix steps use.
+      const prefixSteps = sshProvisionCommands(plan).length;
+      const harnessSteps = plan.steps.filter((step) => step.kind === "harness").length;
+      const total = prefixSteps + harnessSteps + 1;
+
+      const provisioned = await runSshProvision(alias, plan, {
+        onProgress: ({ command, index, status }) => {
+          if (status === "running") sendProgress(command.label, index, total);
+        },
+      });
+      if (!provisioned.ok) return { ok: false, error: provisioned.error };
+
+      const harnessResults = await installSshHarnesses(alias, plan, {
+        onProgress: ({ agent, index, status }) => {
+          if (status === "running") sendProgress(`Installing ${agent}`, prefixSteps + index, total);
+        },
+      });
+
+      sendProgress("Registering the Mission Control service", total - 1, total);
+
+      // Look before writing. A host can already be running a runtime another
+      // Mission Control provisioned — a second machine, or a dev build beside
+      // an installed one — and that runtime's key and port are the ones the
+      // other client still holds. Generating fresh ones here would revoke its
+      // access silently, so an existing runtime is adopted rather than
+      // overwritten. `readSshRuntime`'s reply carries the secret; it goes into
+      // the service description and nowhere else.
+      const existing = await readSshRuntime(alias, {
+        platform: plan.platform,
+        homeDir,
+        prefix: plan.prefix,
+      });
+      const apiKey = existing?.apiKey ?? generateSshApiKey();
+      const agentPort = existing?.manifest?.agentPort ?? readSandboxSettings(kv()).agentPort;
+
+      const service = await installSshService(alias, {
+        platform: plan.platform,
+        homeDir,
+        prefix: plan.prefix,
+        agentPort,
+        apiKey,
+        agentVersion: EXPECTED_SANDBOX_AGENT_VERSION,
+        // A root the user set for this host survives re-provisioning; the unit
+        // is rewritten here, so forgetting it would silently confine the
+        // runtime back to $HOME.
+        workspaceRoot: existingHostConfig(alias)?.workspaceRoot ?? null,
+      });
+      if (!service.ok) return { ok: false, error: service.error };
+
+      // Say who is using it, so removal by one client cannot take the host
+      // away from another. A claim that fails to write is a warning, not a
+      // failed provision — the runtime is up either way.
+      const claimed = await claimSshHost(alias, plan.prefix, {
+        clientId: sshClientId(kv()),
+        clientVersion: getAppVersion(),
+        agentVersion: EXPECTED_SANDBOX_AGENT_VERSION,
+        claimedAt: new Date().toISOString(),
+      });
+
+      return {
+        ok: true,
+        alias,
+        prefix: plan.prefix,
+        platform: plan.platform,
+        apiKey,
+        agentPort,
+        adopted: existing !== null,
+        claimWarning: claimed.ok ? undefined : claimed.error,
+        harnesses: harnessResults.map((result) => ({
+          agent: result.agent,
+          status: result.status,
+          detail: result.status === "installed" ? undefined : result.status === "failed" ? result.error : result.reason,
+        })),
+        // Without lingering, a Linux host stops the runtime when the user logs
+        // out — worth saying rather than promising persistence it cannot give.
+        survivesLogout: service.lingering !== "unavailable",
+      };
+    },
+    ipcMain,
+  );
+  safeHandle(IPC.sandboxGetRemoteRoot, (_e, sandboxId?: string) => {
+    const id = sandboxId ?? activeSandboxId;
+    return id ? sandboxRemoteRoot(configFor(id)) : null;
+  });
   safeHandle(IPC.sandboxRevealApiKey, (_e, sandboxId: string) => {
     const config = configFor(sandboxId);
     const apiKey = config?.kind === "remote-vm" ? config.pairingToken?.trim() : "";
@@ -1272,10 +1597,14 @@ export function registerSandboxManager(
   );
   safeHandle(
     IPC.sandboxDestroy,
-    (_e, sandboxId: string) => {
+    async (_e, sandboxId: string) => {
       const config = configFor(sandboxId);
-      if (!config) return Promise.resolve({ ok: true as const });
-      return getRegistry().destroy(config);
+      if (!config) return { ok: true as const };
+      const result = await getRegistry().destroy(config);
+      // Disconnect first, then clean the host — a live forward would keep the
+      // runtime busy while we try to unregister it.
+      const leftBehind = await removeSshFootprint(config);
+      return leftBehind ? { ...result, warning: leftBehind } : result;
     },
     ipcMain,
   );
@@ -1470,7 +1799,7 @@ export function registerSandboxManager(
         } catch (err) {
           const cfg = id ? configFor(id) : null;
           if (id && isSafeSshCloneRemote(remote)) {
-            const hint = gitAuthCloneFailureHint(cfg?.gitAuthMode ?? "none", err);
+            const hint = gitAuthCloneFailureHint(cfg?.gitAuthMode ?? "none", err, cfg?.kind);
             if (hint) throw new Error(`${describe(err)}\n\n${hint}`);
           }
           throw err;

@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -9,6 +17,7 @@ import { Icon } from "~/components/ui/Icon";
 import { Modal } from "~/components/ui/Modal";
 import { HotkeyTooltip } from "~/components/ui/Tooltip";
 import { SandboxConfigModal } from "~/components/views/SandboxConfigModal";
+import { AddSshHostDialog } from "~/components/views/AddSshHostDialog";
 import { api } from "~/lib/api";
 import { OPEN_SCOPE_SWITCHER_EVENT } from "~/lib/design-meta";
 import { getElectron, isElectron } from "~/lib/electron";
@@ -29,6 +38,7 @@ import { setSandboxBusyState, type SandboxBusyMap, type SandboxBusyState } from 
 import { pruneStoredSessionFinishNotifications } from "~/lib/session-notification-store";
 import {
   sandboxUsableForProject,
+  groupScopesByKind,
   scopedSandboxesForProject,
 } from "~/lib/project-scoped-sandboxes";
 import { useConnectSandboxFlow } from "~/lib/use-connect-sandbox-flow";
@@ -68,6 +78,25 @@ function isMissingStatus(status: string | null | undefined): boolean {
 
 function isManagedAwsRemote(s: { kind: string; remoteProvider: string | null }): boolean {
   return s.kind === "remote-vm" && s.remoteProvider === "aws";
+}
+
+/** Names the group a run of scope rows belongs to (KD8). */
+function ScopeGroupHeading({ label }: { label: string }) {
+  return (
+    <div
+      style={{
+        padding: "8px 8px 3px",
+        fontFamily: "var(--mono)",
+        fontSize: 10,
+        fontWeight: 500,
+        letterSpacing: "0.05em",
+        textTransform: "uppercase",
+        color: "var(--text-faint)",
+      }}
+    >
+      {label}
+    </div>
+  );
 }
 
 function isRunningManagedRemoteStatus(status: string | null | undefined): boolean {
@@ -336,6 +365,7 @@ export function ScopeDropdown() {
   // modal tells them it's in progress instead of re-triggering delete.
   const [deletingPrompt, setDeletingPrompt] = useState<{ id: string; name: string } | null>(null);
   const [deletingMissingRemote, setDeletingMissingRemote] = useState(false);
+  const [addSshHostOpen, setAddSshHostOpen] = useState(false);
   const [teardownConfirmOpen, setTeardownConfirmOpen] = useState(false);
   // Per-sandbox busy state, keyed by sandbox id — NOT a single global flag, so
   // pausing/tearing down one sandbox never disables the controls of another and
@@ -690,6 +720,11 @@ export function ScopeDropdown() {
     routeProjectScope,
     activeScopeId,
   );
+  // Sandboxes first, then SSH hosts — two kinds of remote, not one list.
+  const orderedScopes = useMemo(() => {
+    const grouped = groupScopesByKind(visibleSandboxes);
+    return [...grouped.sandboxes, ...grouped.sshHosts];
+  }, [visibleSandboxes]);
   const activeSandbox = visibleSandboxes.find((s) => s.id === activeScopeId) ?? null;
   const isLocal = activeScopeId === LOCAL_SCOPE_ID || !activeSandbox;
   const label = isLocal ? "Local" : activeSandbox!.name;
@@ -1124,7 +1159,11 @@ export function ScopeDropdown() {
               active={isLocal}
               onClick={() => void pick(LOCAL_SCOPE_ID)}
             />
-            {visibleSandboxes.map((s) => {
+            {orderedScopes.map((s, index) => {
+              // A sandbox is Mission Control's to destroy; an SSH host is the
+              // user's machine, only borrowed. The switcher says which is which.
+              const startsSshGroup =
+                s.kind === "ssh-host" && orderedScopes[index - 1]?.kind !== "ssh-host";
               // Local "destroying" is the freshest truth — the row's server status is
               // still its stale pre-delete value, so it overrides every status branch.
               const destroying = cloudBusy[s.id] === "destroying";
@@ -1138,7 +1177,12 @@ export function ScopeDropdown() {
                 !stopping &&
                 !resuming &&
                 isResumableStatus(s.remoteStatus);
-              let subtitle = s.remoteProvider === "aws" ? "AWS VM" : "Remote agent";
+              let subtitle =
+                s.kind === "ssh-host"
+                  ? "SSH host"
+                  : s.remoteProvider === "aws"
+                    ? "AWS VM"
+                    : "Remote agent";
               if (s.remoteStatus === "provisioning") subtitle = "Provisioning…";
               if (paused) subtitle = "Paused";
               if (resuming) subtitle = "Resuming…";
@@ -1146,15 +1190,17 @@ export function ScopeDropdown() {
               if (missing) subtitle = "Deleted";
               if (destroying) subtitle = "Deleting…";
               return (
-                <ScopeItem
-                  key={s.id}
-                  label={s.name}
-                  subtitle={subtitle}
-                  color={missing ? "var(--status-failed)" : s.color ?? "var(--accent)"}
-                  active={s.id === activeScopeId}
-                  busy={destroying}
-                  onClick={() => void pick(s.id)}
-                />
+                <Fragment key={s.id}>
+                  {startsSshGroup && <ScopeGroupHeading label="SSH hosts" />}
+                  <ScopeItem
+                    label={s.name}
+                    subtitle={subtitle}
+                    color={missing ? "var(--status-failed)" : s.color ?? "var(--accent)"}
+                    active={s.id === activeScopeId}
+                    busy={destroying}
+                    onClick={() => void pick(s.id)}
+                  />
+                </Fragment>
               );
             })}
             <div
@@ -1188,9 +1234,43 @@ export function ScopeDropdown() {
               <Icon name="plus" size={12} style={{ color: "var(--accent-ink)", flexShrink: 0 }} />
               <span style={{ flex: 1, minWidth: 0, fontSize: 13 }}>Connect sandbox</span>
             </button>
+            {isElectron() && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  setAddSshHostOpen(true);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "7px 8px",
+                  borderRadius: 6,
+                  border: "none",
+                  cursor: "pointer",
+                  background: "transparent",
+                  color: "var(--text)",
+                }}
+              >
+                <Icon name="plus" size={12} style={{ color: "var(--accent-ink)", flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 0, fontSize: 13 }}>Add SSH host</span>
+              </button>
+            )}
           </CardFrame>
         )}
       </div>
+
+      <AddSshHostDialog
+        open={addSshHostOpen}
+        onClose={() => setAddSshHostOpen(false)}
+        onAdded={(sandboxId) => {
+          void qc.invalidateQueries({ queryKey: queryKeys.sandboxes });
+          void pick(sandboxId);
+        }}
+      />
 
       {connectSandbox.dialogs}
 

@@ -137,7 +137,8 @@ import {
 import { terminalSurfaceIdForProject, useTerminalActions } from "~/lib/terminal-store";
 import type { Project, Task } from "~/db/schema";
 import { normalizePtySize } from "~/shared/pty-size";
-import { sandboxWorkspacePath, workspaceSlug } from "~/shared/sandbox-workspace";
+import { workspaceSlug } from "~/shared/sandbox-workspace";
+import { sandboxContainerRoot } from "~/lib/project-fs";
 import { AGENT_REGISTRY } from "~/shared/agents";
 import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 import { toast } from "sonner";
@@ -776,8 +777,14 @@ export function TerminalPane({
       const useSandbox = !!electron && (await isDockerSandboxRuntime(electron));
       if (cancelled || !containerRef.current) return;
       const ptyApi = electron ? (useSandbox ? electron.remotePty : electron.pty) : null;
-      const sandboxPathName = project.path.split("/").filter(Boolean).pop() ?? project.name;
-      const sandboxCwd = sandboxWorkspacePath(sandboxPathName);
+      // Split on either separator: a Windows project path never split at all,
+      // so its whole drive path became the "name".
+      const sandboxPathName = project.path.split(/[\\/]/).filter(Boolean).pop() ?? project.name;
+      // Uses the active scope's own root. `/workspace` exists only inside a
+      // Mission Control VM, so a session on an SSH host was started in a
+      // directory that machine has never had. Derived from the same name the
+      // clone slug below uses, so the two always agree.
+      const sandboxCwd = sandboxContainerRoot(project.path);
 
       // A grid mounts every pane in one commit; building all their xterm
       // surfaces in one task blocks the route transition's first paint. Take

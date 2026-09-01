@@ -1,5 +1,6 @@
 import type { AgentCliUpdateRun } from "~/shared/agent-cli-update";
 import type { GitStatus, GitDiff } from "~/shared/git-status";
+import type { SshProbeOutcome, SshProvisionResult } from "~/shared/ssh-provision";
 
 export const FILE_READ_ERRORS = ["invalid-path", "not-found", "binary", "too-large"] as const;
 export const FILE_WRITE_ERRORS = [
@@ -403,8 +404,12 @@ export type ElectronBridge = {
     command: string,
     opts?: { verifyVersion?: boolean; fresh?: boolean },
   ) => Promise<CliCheckResult>;
-  /** Run the managed CLI's update command in the main process (input is only an agent id). */
-  cliRunUpdate: (agent: PtySpawnAgent) => Promise<AgentCliUpdateRun>;
+  /**
+   * Run the managed CLI's update command in the main process (input is only an
+   * agent id). Pass a sandbox id to update that host's own installation
+   * instead of this machine's; omit it for the local one.
+   */
+  cliRunUpdate: (agent: PtySpawnAgent, sandboxId?: string | null) => Promise<AgentCliUpdateRun>;
   pty: {
     spawn: (opts: PtySpawnOptions) => Promise<{ ptyId: string }>;
     write: (ptyId: string, data: string) => Promise<boolean>;
@@ -474,6 +479,8 @@ export type ElectronBridge = {
     // Phase 2: lifecycle is per-sandbox (sandboxId; omitted = the active scope).
     getState: (sandboxId?: string) => Promise<SandboxState>;
     getSettings: () => Promise<SandboxSettingsView>;
+    /** Directory the active scope keeps its projects under; null when local. */
+    getRemoteRoot: (sandboxId?: string) => Promise<string | null>;
     updateSettings: (patch: SandboxSettingsPatch) => Promise<SandboxSettingsView>;
     up: (sandboxId?: string) => Promise<{ ok: true } | { ok: false; error: string }>;
     /** Tear down and restart with a forced default-image rebuild (update flow). */
@@ -505,6 +512,28 @@ export type ElectronBridge = {
     detectRemote: (projectPath: string) => Promise<string | null>;
     onStateChange: (cb: (e: { sandboxId: string; state: SandboxState }) => void) => () => void;
     onLog: (cb: (line: string) => void) => () => void;
+  };
+  sshHosts: {
+    /**
+     * Host aliases from the user's SSH config, in file order. Mission Control
+     * keeps no host list of its own — adding a machine means editing that file.
+     */
+    list: () => Promise<string[]>;
+    /**
+     * Ask a host what it already has and what Mission Control would install.
+     * Read-only: nothing is written to the host. The alias must be one `list`
+     * returned.
+     */
+    probe: (alias: string) => Promise<SshProbeOutcome>;
+    /**
+     * Install whatever the host is missing and register the runtime with the
+     * user's own service manager. Returns the material for the scope row; the
+     * caller records it. Progress arrives on `onProvisionProgress`.
+     */
+    provision: (alias: string) => Promise<SshProvisionResult>;
+    onProvisionProgress: (
+      cb: (e: { alias: string; step: string; index: number; total: number }) => void,
+    ) => () => void;
   };
   remoteVm: {
     deploy: (input: RemoteVmDeployInput) => Promise<RemoteVmDeployResult>;

@@ -46,6 +46,25 @@ describe("sandbox-manager clone compatibility helpers", () => {
     expect(gitAuthCloneFailureHint("generate", new Error("network failed"))).toBeNull();
   });
 
+  it("points an SSH host at its own credentials, not a Mission Control panel", () => {
+    // The host is the user's own machine and already holds their keys. Telling
+    // them to copy keys onto it, or to let Mission Control generate a second
+    // one, is advice for a VM Mission Control built - not for this.
+    const err = new Error("git clone failed: git@github.com: Permission denied (publickey).");
+
+    const hint = gitAuthCloneFailureHint("none", err, "ssh-host");
+
+    expect(hint).toContain("its own SSH credentials");
+    expect(hint).not.toContain("no Git authentication");
+    expect(hint).not.toContain("configure panel");
+  });
+
+  it("keeps the VM guidance for a VM", () => {
+    const err = new Error("git clone failed: git@github.com: Permission denied (publickey).");
+
+    expect(gitAuthCloneFailureHint("none", err, "remote-vm")).toContain("no Git authentication");
+  });
+
   it("detects old agents that silently drop the credential setup RPC", () => {
     expect(isAgentCredsSetupUnsupportedError(new Error("agent rpc creds.setup timed out"))).toBe(true);
     expect(isAgentCredsSetupUnsupportedError(new Error("Sandbox agent did not write Claude Code credentials."))).toBe(

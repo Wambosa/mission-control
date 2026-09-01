@@ -4,7 +4,13 @@ import { randomBytes } from "node:crypto";
 import Database from "better-sqlite3";
 import { resolveElectronBetterSqlite3NativeBinding } from "./better-sqlite3-native-binding";
 import type { SandboxConfig } from "./sandbox-types";
-import { normalizeRemoteAgentUrl, type SandboxRemoteConfig } from "../src/shared/sandbox";
+import {
+  isSandboxKind,
+  normalizeRemoteAgentUrl,
+  parseSshHostConfig,
+  type SandboxKind,
+  type SandboxRemoteConfig,
+} from "../src/shared/sandbox";
 
 // Electron-main read access to the `sandboxes` table (owned by the server via
 // Drizzle, but the container lifecycle lives in the main process). Mirrors how
@@ -70,6 +76,12 @@ function toGitAuthMode(v: string | null): "none" | "copy-host" | "generate" {
   return v === "copy-host" || v === "generate" ? v : "none";
 }
 
+// A row written by a newer build (or hand-edited) can name a kind this build
+// doesn't know. Fall back to the column default rather than throwing on read.
+function toKind(v: string | null): SandboxKind {
+  return isSandboxKind(v) ? v : "remote-vm";
+}
+
 function toConfig(row: SandboxRow): SandboxConfig {
   const remote = parseJson<SandboxRemoteConfig | null>(row.remote_config, null);
   const remoteAgentUrl =
@@ -80,7 +92,7 @@ function toConfig(row: SandboxRow): SandboxConfig {
       : null;
   return {
     id: row.id,
-    kind: "remote-vm",
+    kind: toKind(row.kind),
     imageTag: row.image_tag,
     dockerfilePath: row.dockerfile_path,
     buildArgs: parseJson(row.build_args, {}),
@@ -95,6 +107,7 @@ function toConfig(row: SandboxRow): SandboxConfig {
     remoteAgentCa: remote && typeof remote.agentCa === "string" ? remote.agentCa : null,
     remoteStatus: remote && typeof remote.status === "string" ? remote.status : null,
     remoteProvider: remote && typeof remote.provider === "string" ? remote.provider : null,
+    sshHost: parseSshHostConfig(remote),
   };
 }
 

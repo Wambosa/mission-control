@@ -1,0 +1,203 @@
+import { randomBytes } from "node:crypto";
+import {
+  SSH_SERVICE_LABEL,
+  SSH_SERVICE_UNIT_NAME,
+  sshServiceDefinition,
+  sshServiceUnitPath,
+  type SshServiceDescription,
+  type SshServiceFile,
+} from "../src/shared/ssh-service-unit";
+import {
+  defaultSshExec,
+  shellQuote,
+  sshShellArgs,
+  sshStepFailure,
+  type SshExec,
+} from "./ssh-exec";
+
+// Writing the rendered service onto a host and handing it to the user's own
+// service manager. Everything here runs as the SSH user: `systemctl --user`
+// and `launchctl` in the user's own domain, never the system's.
+
+/** How well the runtime survives the user logging out. */
+export type SshServiceLingering =
+  /** Linux, lingering on: the runtime survives logout and reboot. */
+  | "enabled"
+  /** Linux, lingering refused: the runtime may stop when the user logs out. */
+  | "unavailable"
+  /** macOS, where a LaunchAgent needs no equivalent. */
+  | "not-applicable";
+
+export type SshServiceInstallResult =
+  | { ok: true; lingering: SshServiceLingering; unitPath: string }
+  | { ok: false; error: string };
+
+/** Marker the install script prints so lingering can be read back. */
+const LINGER_MARKER = "mc:linger=";
+
+/**
+ * The bearer secret for one host's runtime. Mission Control generates it and
+ * keeps it — R5's promise is that the user never pastes an API key, not that
+ * there isn't one.
+ */
+export function generateSshApiKey(): string {
+  return randomBytes(32).toString("hex");
+}
+
+/**
+ * A heredoc with a quoted delimiter, so nothing in a rendered unit is expanded
+ * by the shell on the way in.
+ */
+function writeFileFragment(file: SshServiceFile, index: number): string {
+  const delimiter = `MC_FILE_${index}`;
+  return [
+    `mkdir -p "$(dirname ${shellQuote(file.path)})"`,
+    `cat > ${shellQuote(file.path)} <<'${delimiter}'`,
+    file.contents.replace(/\n$/, ""),
+    delimiter,
+    `chmod ${file.mode} ${shellQuote(file.path)}`,
+  ].join("\n");
+}
+
+/**
+ * Reload and start the LaunchAgent. `bootstrap` is the modern spelling and
+ * `load` the one older macOS understands, so try both before giving up.
+ */
+function launchdFragment(unitPath: string): string {
+  const target = `gui/$(id -u)`;
+  const service = `${target}/${SSH_SERVICE_LABEL}`;
+  return [
+    // Booting out an agent that isn't loaded is not an error worth failing on.
+    `launchctl bootout ${service} >/dev/null 2>&1 || true`,
+    `if ! launchctl bootstrap ${target} ${shellQuote(unitPath)} >/dev/null 2>&1; then`,
+    `  launchctl load -w ${shellQuote(unitPath)}`,
+    `fi`,
+    `launchctl kickstart -k ${service} >/dev/null 2>&1 || true`,
+  ].join("\n");
+}
+
+/**
+ * Hand the unit to the user's systemd. Lingering is what keeps a user manager
+ * alive after logout; some distributions refuse it, and a host that refuses is
+ * still a host worth using — it just stops the runtime when the user logs out.
+ */
+function systemdFragment(): string {
+  return [
+    `systemctl --user daemon-reload`,
+    `systemctl --user enable --now ${SSH_SERVICE_UNIT_NAME}`,
+    `if loginctl enable-linger "$(id -un)" >/dev/null 2>&1; then`,
+    `  echo "${LINGER_MARKER}enabled"`,
+    `else`,
+    `  echo "${LINGER_MARKER}unavailable"`,
+    `fi`,
+  ].join("\n");
+}
+
+/** Write the service onto a host and register it, as one script. */
+export function sshServiceInstallScript(description: SshServiceDescription): string {
+  const definition = sshServiceDefinition(description);
+  return [
+    "set -eu",
+    ...definition.files.map(writeFileFragment),
+    description.platform === "darwin"
+      ? launchdFragment(definition.unitPath)
+      : systemdFragment(),
+    "",
+  ].join("\n");
+}
+
+function readLingering(
+  description: SshServiceDescription,
+  stdout: string,
+): SshServiceLingering {
+  if (description.platform === "darwin") return "not-applicable";
+  return stdout.includes(`${LINGER_MARKER}enabled`) ? "enabled" : "unavailable";
+}
+
+/**
+ * Stop the runtime without unregistering it, so the next connect can start it
+ * again. This is the idle stop and the tear-down-on-disconnect preference;
+ * removing the host entirely is a different, heavier thing.
+ */
+export function sshServiceStopScript(
+  target: Pick<SshServiceDescription, "platform" | "homeDir">,
+): string {
+  return target.platform === "darwin"
+    ? // `bootout` stops the agent and unloads it; `bootstrap` on next connect
+      // brings it back. Nothing is deleted either way.
+      `launchctl bootout gui/$(id -u)/${SSH_SERVICE_LABEL} >/dev/null 2>&1 || true\n`
+    : `systemctl --user stop ${SSH_SERVICE_UNIT_NAME} >/dev/null 2>&1 || true\n`;
+}
+
+/** Ask a host to stop its runtime. Best effort: an unreachable host is stopped. */
+export async function stopSshService(
+  alias: string,
+  target: Pick<SshServiceDescription, "platform" | "homeDir">,
+  exec: SshExec = defaultSshExec,
+): Promise<void> {
+  await exec(sshShellArgs(alias), sshServiceStopScript(target));
+}
+
+/**
+ * Start a runtime the idle stop (or a teardown-on-disconnect) put away. The
+ * unit is still on disk — stopping only unloaded it — so this re-registers and
+ * starts it without rewriting anything or touching the host's key.
+ *
+ * This is the other half of {@link sshServiceStopScript}, whose comment has
+ * always promised that "bootstrap on next connect brings it back". Nothing
+ * called it: connecting opened a tunnel to a port with nothing behind it and
+ * retried the WebSocket forever, which reads as a host that is simply broken.
+ */
+export function sshServiceStartScript(
+  target: Pick<SshServiceDescription, "platform" | "homeDir">,
+): string {
+  const unitPath = sshServiceUnitPath(target);
+  if (target.platform === "darwin") {
+    return `${launchdFragment(unitPath)}\n`;
+  }
+  return [
+    // Nothing is rewritten here, so a daemon-reload is only for a unit the
+    // manager has not seen since it was written.
+    `systemctl --user daemon-reload >/dev/null 2>&1 || true`,
+    `systemctl --user start ${SSH_SERVICE_UNIT_NAME}`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Bring a host's runtime back up. Reports failure rather than throwing: a host
+ * that will not start is a connect that fails with a reason, not a crash.
+ */
+export async function startSshService(
+  alias: string,
+  target: Pick<SshServiceDescription, "platform" | "homeDir">,
+  exec: SshExec = defaultSshExec,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await exec(sshShellArgs(alias), sshServiceStartScript(target));
+  if (result.code !== 0) {
+    return { ok: false, error: sshStepFailure("Starting the Mission Control runtime", result) };
+  }
+  return { ok: true };
+}
+
+/**
+ * Register the runtime with the host user's service manager. One SSH exec:
+ * the files and the registration travel together, so a host is never left with
+ * a written unit nobody loaded.
+ */
+export async function installSshService(
+  alias: string,
+  description: SshServiceDescription,
+  exec: SshExec = defaultSshExec,
+): Promise<SshServiceInstallResult> {
+  const definition = sshServiceDefinition(description);
+  const result = await exec(sshShellArgs(alias), sshServiceInstallScript(description));
+  if (result.code !== 0) {
+    return { ok: false, error: sshStepFailure("Registering the Mission Control service", result) };
+  }
+  return {
+    ok: true,
+    lingering: readLingering(description, result.stdout),
+    unitPath: definition.unitPath,
+  };
+}

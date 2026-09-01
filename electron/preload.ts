@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 import { IPC } from "./ipc-channels";
+// Type-only, so nothing from the renderer bundle is pulled into the preload.
+// Mirroring this shape by hand would only give it somewhere to drift.
+import type { SshProbeOutcome, SshProvisionResult } from "../src/shared/ssh-provision";
 
 /** Subscribe to a main→renderer IPC channel; returns an unsubscribe fn. */
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -185,6 +188,13 @@ const electronAPI = {
     getState: (sandboxId?: string): Promise<SandboxStateBridge> =>
       ipcRenderer.invoke(IPC.sandboxGetState, sandboxId),
     getSettings: (): Promise<SandboxSettingsBridge> => ipcRenderer.invoke(IPC.sandboxGetSettings),
+    /**
+     * Directory on the active scope that its projects live under. `/workspace`
+     * inside a Mission Control VM; the user's own home (or a configured root)
+     * on an SSH host, where no such container path exists.
+     */
+    getRemoteRoot: (sandboxId?: string): Promise<string | null> =>
+      ipcRenderer.invoke(IPC.sandboxGetRemoteRoot, sandboxId),
     updateSettings: (patch: SandboxSettingsPatchBridge): Promise<SandboxSettingsBridge> =>
       ipcRenderer.invoke(IPC.sandboxUpdateSettings, patch),
     up: (sandboxId?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
@@ -226,6 +236,16 @@ const electronAPI = {
     onStateChange: (cb: (e: { sandboxId: string; state: SandboxStateBridge }) => void) =>
       subscribe(IPC.sandboxStateChange, cb),
     onLog: (cb: (line: string) => void) => subscribe(IPC.sandboxLog, cb),
+  },
+  sshHosts: {
+    list: (): Promise<string[]> => ipcRenderer.invoke(IPC.sshHostsList),
+    probe: (alias: string): Promise<SshProbeOutcome> =>
+      ipcRenderer.invoke(IPC.sshHostsProbe, alias),
+    provision: (alias: string): Promise<SshProvisionResult> =>
+      ipcRenderer.invoke(IPC.sshHostsProvision, alias),
+    onProvisionProgress: (
+      cb: (e: { alias: string; step: string; index: number; total: number }) => void,
+    ) => subscribe(IPC.sshHostsProvisionProgress, cb),
   },
   remoteVm: {
     deploy: (input: RemoteVmDeployInputBridge): Promise<RemoteVmDeployResultBridge> =>
@@ -421,8 +441,8 @@ const electronAPI = {
       }
   > =>
     ipcRenderer.invoke(IPC.cliCheck, command, opts),
-  cliRunUpdate: (agent: string): Promise<
-    | { ok: true; agent: string; command: string; version: string | null }
+  cliRunUpdate: (agent: string, sandboxId?: string | null): Promise<
+    | { ok: true; agent: string; command: string | null; version: string | null }
     | {
         ok: false;
         agent: string;
@@ -432,7 +452,7 @@ const electronAPI = {
         output?: string;
       }
   > =>
-    ipcRenderer.invoke(IPC.cliRunUpdate, agent),
+    ipcRenderer.invoke(IPC.cliRunUpdate, agent, sandboxId ?? null),
   pty: {
     spawn: (opts: {
       taskId: string;

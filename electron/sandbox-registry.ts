@@ -11,7 +11,15 @@ import {
   connectBudgetMs,
   connectTimeoutMessage,
   isFailFastConnectError,
+  type ConnectFailureKind,
 } from "./sandbox-connect-errors";
+import {
+  isFailFastSshFailure,
+  type SshTunnelCallbacks,
+  type SshTunnelHandle,
+  type SshTunnelResult,
+} from "./ssh-transport";
+import { sshDisconnectAction, sshIdleDecision } from "./ssh-idle-policy";
 
 // Phase 2 core: one remote agent connection per sandbox, all running
 // concurrently. This module owns the per-sandbox state machine + the staleness
@@ -39,12 +47,32 @@ export type RegistryDeps = {
   emitState: (sandboxId: string, state: SandboxState) => void;
   /** Override connect retry budget (tests). */
   connectBudgetMs?: (kind: SandboxConfig["kind"]) => number;
+  /**
+   * Forward the host's runtime port back to a loopback port here. Called only
+   * for `ssh-host` sandboxes, whose agent URL exists only while the forward does.
+   */
+  openSshTunnel: (config: SandboxConfig, cb: SshTunnelCallbacks) => Promise<SshTunnelResult>;
+  /**
+   * Sessions on this host right now, running or waiting at a prompt. Only an
+   * `ssh-host` asks. Absent means the idle stop cannot run, so it does not.
+   */
+  countSshSessions?: (config: SandboxConfig) => number;
+  /** Stop an `ssh-host`'s runtime on the far side. */
+  stopSshRuntime?: (config: SandboxConfig) => Promise<void>;
 };
 
 const REMOTE_CONFIG_ERROR = "Remote sandbox is missing an agent URL or API key.";
 const REMOTE_PAUSED_ERROR = "Remote VM is paused. Resume the VM before connecting.";
+const SSH_RECORD_ERROR = "This SSH host is missing its host record. Remove it and add it again.";
+const SSH_UNPROVISIONED_ERROR = "This SSH host has not been provisioned yet.";
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 15_000;
+/**
+ * How often an SSH host is asked whether it has gone idle. Well under the
+ * shortest window a user would set, so the stop lands close to the deadline
+ * without polling the session store constantly.
+ */
+const IDLE_CHECK_MS = 30_000;
 
 export class SandboxInstance {
   readonly id: string;
@@ -65,6 +93,13 @@ export class SandboxInstance {
   private connectStartedAt: number | null = null;
   private lastAgentUrl: string | null = null;
   private lastToken: string | null = null;
+  // Only an `ssh-host` has one. Its agent URL lives and dies with the forward,
+  // so a reconnect reopens the tunnel rather than reusing a stale port.
+  private tunnel: SshTunnelHandle | null = null;
+  // The idle stop is a property of the runtime on the host, so it is watched
+  // for as long as this instance is connected to one.
+  private idleTimer: ReturnType<typeof setInterval> | null = null;
+  private idleSince: number | null = null;
 
   constructor(config: SandboxConfig, deps: RegistryDeps) {
     this.id = config.id;
@@ -111,6 +146,7 @@ export class SandboxInstance {
     if (this.manualStop || epoch !== this.opEpoch || this._state.status === "error") return;
     this.clearReconnect();
     this.closeAgent();
+    this.closeTunnel();
     this.set({ status: "error", message });
   }
 
@@ -118,6 +154,22 @@ export class SandboxInstance {
     if (!this.isConnectBudgetExceeded()) return false;
     this.failConnect(connectTimeoutMessage(this.config.kind, this.budgetMs()), epoch);
     return true;
+  }
+
+  private get isSshHost(): boolean {
+    return this.config.kind === "ssh-host";
+  }
+
+  /** The token to authenticate with, or why this sandbox cannot start at all. */
+  private startPreflight(): { ok: true; token: string } | { ok: false; error: string } {
+    const token = this.config.pairingToken;
+    if (this.isSshHost) {
+      if (!this.config.sshHost) return { ok: false, error: SSH_RECORD_ERROR };
+      if (!token) return { ok: false, error: SSH_UNPROVISIONED_ERROR };
+      return { ok: true, token };
+    }
+    if (!this.config.remoteAgentUrl || !token) return { ok: false, error: REMOTE_CONFIG_ERROR };
+    return { ok: true, token };
   }
 
   async start(): Promise<OpResult> {
@@ -130,21 +182,22 @@ export class SandboxInstance {
         this.set({ status: "stopped", dockerAvailable: true });
         return { ok: false, error: REMOTE_PAUSED_ERROR };
       }
-      if (!this.config.remoteAgentUrl || !this.config.pairingToken) {
-        this.set({ status: "error", message: REMOTE_CONFIG_ERROR });
-        return { ok: false, error: REMOTE_CONFIG_ERROR };
+      const preflight = this.startPreflight();
+      if (!preflight.ok) {
+        this.set({ status: "error", message: preflight.error });
+        return preflight;
       }
-      this.set({ status: "starting", step: "connecting to remote agent", since: Date.now() });
-      const agentUrl = this.config.remoteAgentUrl;
-      const token = this.config.pairingToken;
+      const step = this.isSshHost ? "opening SSH connection" : "connecting to remote agent";
+      this.set({ status: "starting", step, since: Date.now() });
       // A stop / destroy / newer start landed while we set up — don't clobber
       // that newer state or start connecting.
       if (this.isStale(epoch)) return { ok: true };
       this.beginConnectAttempt();
       this.set({ status: "running", since: this.connectStartedAt ?? Date.now() });
-      this.lastAgentUrl = agentUrl;
-      this.lastToken = token;
-      this.connect(agentUrl, token, epoch);
+      // An SSH host has no persisted URL — the forward supplies one per attempt.
+      this.lastAgentUrl = this.isSshHost ? null : this.config.remoteAgentUrl;
+      this.lastToken = preflight.token;
+      this.connect(preflight.token, epoch);
       return { ok: true };
     } finally {
       this.opInFlight = false;
@@ -155,14 +208,77 @@ export class SandboxInstance {
     return epoch !== this.opEpoch || this.manualStop;
   }
 
-  private connect(agentUrl: string, token: string, epoch: number): void {
+  /**
+   * The loopback URL an SSH host's forward exposes, opening the forward when
+   * there isn't a live one. Null means the attempt already failed and said so.
+   */
+  private async resolveTunnelUrl(epoch: number): Promise<string | null> {
+    if (this.tunnel && !this.tunnel.isClosed) return this.tunnel.agentUrl;
+    this.closeTunnel();
+
+    let opened: SshTunnelHandle | null = null;
+    const callbacks: SshTunnelCallbacks = {
+      onExit: (failure) => {
+        if (opened && this.tunnel === opened) this.tunnel = null;
+        if (!failure) return;
+        // A forward that dies takes the agent with it, so ssh's own refusal is
+        // the useful message — not the WebSocket's hang-up a moment later.
+        if (isFailFastSshFailure(failure.kind)) this.failConnect(failure.message, epoch);
+        else this.scheduleReconnect(epoch);
+      },
+    };
+
+    const result = await this.deps.openSshTunnel(this.config, callbacks);
+    if (!result.ok) {
+      this.failConnect(result.error, epoch);
+      return null;
+    }
+    opened = result.tunnel;
+    // ssh can die inside the await; a stop can land there too.
+    if (this.isStale(epoch) || result.tunnel.isClosed) {
+      result.tunnel.close();
+      return null;
+    }
+    this.tunnel = result.tunnel;
+    return result.tunnel.agentUrl;
+  }
+
+  /**
+   * A refused connection normally means a wrong URL and is worth giving up on.
+   * Against an SSH host the URL is our own forward, so a refusal only means the
+   * runtime on the far side has not started listening yet — keep retrying.
+   */
+  private isFailFastAgentError(kind: ConnectFailureKind): boolean {
+    if (this.isSshHost && kind === "host") return false;
+    return isFailFastConnectError(kind);
+  }
+
+  private connect(token: string, epoch: number): void {
     if (this.failConnectIfBudgetExceeded(epoch)) return;
+    // A remote VM's URL is already known, so its connect stays synchronous.
+    // Only an SSH host has to open a forward first.
+    if (this.isSshHost) {
+      void this.connectOverSsh(token, epoch);
+      return;
+    }
+    if (this.lastAgentUrl) this.openAgent(this.lastAgentUrl, token, epoch);
+  }
+
+  private async connectOverSsh(token: string, epoch: number): Promise<void> {
+    const agentUrl = await this.resolveTunnelUrl(epoch);
+    if (agentUrl === null || this.isStale(epoch)) return;
+    this.lastAgentUrl = agentUrl;
+    this.openAgent(agentUrl, token, epoch);
+  }
+
+  private openAgent(agentUrl: string, token: string, epoch: number): void {
     this.closeAgent();
     const handle = this.deps.connectAgent(this.config, agentUrl, token, {
       onReady: (version, agents) => {
         if (this.agent !== handle || this.manualStop || epoch !== this.opEpoch) return;
         this.reconnectAttempts = 0;
         this.connectStartedAt = null;
+        this.startIdleWatch();
         if (isSandboxAgentVersionCurrent(version)) {
           this.set({ status: "connected", version, agents });
         } else {
@@ -197,7 +313,7 @@ export class SandboxInstance {
           return;
         }
         const failure = classifyConnectError(err);
-        if (isFailFastConnectError(failure.kind)) {
+        if (this.isFailFastAgentError(failure.kind)) {
           this.failConnect(failure.message, epoch);
         }
       },
@@ -209,14 +325,14 @@ export class SandboxInstance {
     if (this.reconnectTimer || this.manualStop || epoch !== this.opEpoch || this._state.status === "error") {
       return;
     }
-    if (!this.lastAgentUrl || !this.lastToken) return;
+    if (!this.lastToken || (!this.isSshHost && !this.lastAgentUrl)) return;
     if (this.failConnectIfBudgetExceeded(epoch)) return;
     const delay = Math.min(RECONNECT_BASE_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_MS);
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.manualStop || epoch !== this.opEpoch) return;
-      this.connect(this.lastAgentUrl!, this.lastToken!, epoch);
+      this.connect(this.lastToken!, epoch);
     }, delay);
   }
 
@@ -233,14 +349,102 @@ export class SandboxInstance {
     old?.close();
   }
 
+  /** Tear the forward down so no `ssh` outlives the sandbox that opened it. */
+  private closeTunnel(): void {
+    const old = this.tunnel;
+    this.tunnel = null;
+    old?.close();
+  }
+
+  // ── The idle stop ────────────────────────────────────────────────────────
+
+  /**
+   * Watch a connected SSH host for going idle. Nothing to watch without a way
+   * to count sessions or a way to stop the runtime, so the timer never starts
+   * in that case rather than ticking to no purpose.
+   */
+  private startIdleWatch(): void {
+    if (this.idleTimer || !this.isSshHost) return;
+    if (!this.deps.countSshSessions || !this.deps.stopSshRuntime) return;
+    this.idleSince = Date.now();
+    this.idleTimer = setInterval(() => this.checkIdle(), IDLE_CHECK_MS);
+    // Node keeps the process alive for a pending interval; an idle check is
+    // never a reason for the app not to exit.
+    this.idleTimer.unref?.();
+  }
+
+  private stopIdleWatch(): void {
+    if (this.idleTimer) clearInterval(this.idleTimer);
+    this.idleTimer = null;
+    this.idleSince = null;
+  }
+
+  private checkIdle(): void {
+    const host = this.config.sshHost;
+    if (!host || !this.hasAgent) return;
+
+    const sessionCount = this.deps.countSshSessions?.(this.config) ?? 0;
+    // Any session at all restarts the clock, so the window always measures
+    // time since the host last had work — not time since it connected.
+    if (sessionCount > 0) {
+      this.idleSince = Date.now();
+      return;
+    }
+    if (this.idleSince == null) this.idleSince = Date.now();
+
+    const decision = sshIdleDecision({
+      sessionCount,
+      idleWindowMinutes: host.idleWindowMinutes,
+      idleSinceMs: Date.now() - this.idleSince,
+    });
+    if (decision.action !== "stop") return;
+
+    this.stopIdleWatch();
+    void this.stopRuntimeThenSelf();
+  }
+
+  /**
+   * Stop the runtime on the host, then this instance. A runtime that refuses
+   * to stop is not a reason to keep a connection the user is not using, so the
+   * local stop happens either way.
+   */
+  private async stopRuntimeThenSelf(): Promise<void> {
+    await this.stopRemoteRuntime();
+    await this.stop();
+  }
+
+  /** Ask the far side to stop, swallowing a host that cannot be reached. */
+  private async stopRemoteRuntime(): Promise<void> {
+    if (!this.isSshHost || !this.deps.stopSshRuntime) return;
+    try {
+      await this.deps.stopSshRuntime(this.config);
+    } catch {
+      /* an unreachable host has already stopped serving us */
+    }
+  }
+
+  /**
+   * What a disconnect means for the runtime on the far side. Persistence is
+   * the default; only a host the user set to tear down stops here.
+   */
+  private stopRuntimeIfTearDown(): void {
+    const host = this.config.sshHost;
+    if (!this.isSshHost || !host) return;
+    if (sshDisconnectAction(host.onDisconnect).action !== "stop") return;
+    void this.stopRemoteRuntime();
+  }
+
   async stop(): Promise<OpResult> {
     if (this.opInFlight) return { ok: false, error: "A sandbox operation is already in progress." };
     this.opInFlight = true;
     this.opEpoch += 1;
     this.manualStop = true;
     this.clearReconnect();
+    this.stopIdleWatch();
     try {
+      this.stopRuntimeIfTearDown();
       this.closeAgent();
+      this.closeTunnel();
       this.connectStartedAt = null;
       this.set({ status: "stopped", dockerAvailable: true });
       return { ok: true };
@@ -261,12 +465,12 @@ export class SandboxInstance {
     if (this._state.status !== "running" && this._state.status !== "error") {
       return Promise.resolve({ ok: false, error: "Sandbox is not waiting to connect." });
     }
-    if (!this.lastAgentUrl || !this.lastToken) return this.start();
+    if (!this.lastToken || (!this.isSshHost && !this.lastAgentUrl)) return this.start();
     this.manualStop = false;
     this.clearReconnect();
     this.beginConnectAttempt();
     this.set({ status: "running", since: this.connectStartedAt ?? Date.now() });
-    this.connect(this.lastAgentUrl, this.lastToken, this.opEpoch);
+    this.connect(this.lastToken, this.opEpoch);
     return Promise.resolve({ ok: true });
   }
 
@@ -275,16 +479,24 @@ export class SandboxInstance {
     this.opEpoch += 1;
     this.manualStop = true;
     this.clearReconnect();
+    this.stopIdleWatch();
     this.closeAgent();
+    this.closeTunnel();
     return { ok: true };
   }
 
-  /** Detach (app quit). */
+  /**
+   * Detach (app quit). Deliberately not a teardown: quitting Mission Control
+   * is what R14 promises sessions survive, and the runtime's own idle stop
+   * handles a host nobody comes back to.
+   */
   dispose(): void {
     this.opEpoch += 1;
     this.manualStop = true;
     this.clearReconnect();
+    this.stopIdleWatch();
     this.closeAgent();
+    this.closeTunnel();
   }
 }
 

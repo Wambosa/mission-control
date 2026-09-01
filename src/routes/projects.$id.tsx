@@ -9,7 +9,6 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "~/components/ui/Dropdow
 import { Icon } from "~/components/ui/Icon";
 import { GridViewToggleIcon } from "~/components/ui/GridViewToggleIcon";
 import { Z_INDEX } from "~/lib/z-index";
-import { openExternal } from "~/lib/open-external";
 import { ProjectIcon } from "~/components/ui/ProjectIcon";
 import { EmptyState } from "~/components/ui/EmptyState";
 import { TaskColumn } from "~/components/views/TaskColumn";
@@ -31,8 +30,6 @@ import { FileFinderDialog } from "~/components/views/FileFinderDialog";
 const FileEditorDialog = lazy(() =>
   import("~/components/views/FileEditorDialog").then((m) => ({ default: m.FileEditorDialog })),
 );
-import { CustomScriptsDialog } from "~/components/views/CustomScriptsDialog";
-import { CustomScriptsButton } from "~/components/views/CustomScriptsButton";
 import { GridLayoutButton } from "~/components/views/GridLayoutButton";
 import { SessionGrid } from "~/components/views/SessionGrid";
 import { archiveOpenSession, invalidateSessionQueries } from "~/lib/archive-session";
@@ -41,8 +38,6 @@ import { consumeProjectOnboardIntent, type ProjectOnboardIntent } from "~/lib/pr
 import { sandboxUsableForProject } from "~/lib/project-scoped-sandboxes";
 import { useHideableMenu } from "~/lib/hideable-elements";
 import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
-import { ScriptArgsModal } from "~/components/views/ScriptArgsModal";
-import { WorktreeSetupCommandDialog } from "~/components/views/WorktreeSetupCommandDialog";
 import { NewAgentButton } from "~/components/views/NewAgentButton";
 import { CursorGlow } from "~/components/ui/CursorGlow";
 import { HotkeyTooltip, StaticHotkeyTooltip } from "~/components/ui/Tooltip";
@@ -106,11 +101,8 @@ import {
 } from "~/lib/task-display-order";
 import {
   DEFAULT_BRANCH,
-  parseCustomScripts,
-  serializeCustomScripts,
   STATUS_DISPLAY_ORDER,
   TASK_STATUS_META,
-  type CustomScript,
 } from "~/shared/domain";
 import { getPinnedProjectStatusDots } from "~/components/views/project-bar-status-dots";
 import { agentSupportsSkipPermissions } from "~/shared/agents";
@@ -131,8 +123,6 @@ import { GitDiffModal } from "~/components/views/GitDiffView/GitDiffModal";
 import { RecallModal } from "~/components/views/RecallModal";
 import { BranchTypeahead } from "~/components/views/BranchTypeahead";
 import { HeaderActions } from "~/components/ui/HeaderActionsSlot";
-import { InstallDiagramSkillMenuItem } from "~/components/views/InstallDiagramSkillMenuItem";
-import { InstallDiagramSkillModal } from "~/components/views/InstallDiagramSkillModal";
 import { SandboxProvisioningState } from "~/components/views/SandboxProvisioningState";
 import {
   isSandboxProvisioning,
@@ -154,7 +144,7 @@ import {
   readPendingSessionOpen,
   type PendingSessionOpen,
 } from "~/lib/session-notification-store";
-import type { Group, Project, Task, TaskStatus } from "~/db/schema";
+import type { Group, Task, TaskStatus } from "~/db/schema";
 import type { ProjectPathStatus } from "~/shared/projects";
 import type { WorktreeInfo } from "~/shared/worktrees";
 import {
@@ -175,7 +165,6 @@ import {
 import {
   ARCHIVE_ACTIVE_SESSION_EVENT,
   DUPLICATE_ACTIVE_SESSION_EVENT,
-  OPEN_SCOPE_SWITCHER_EVENT,
   pickByPriority,
   STATUS_META,
   type ArchiveActiveSessionEventDetail,
@@ -609,9 +598,6 @@ function ProjectPage() {
   }, []);
   const [showRecall, setShowRecall] = useState(false);
   const [recallInitialFilter, setRecallInitialFilter] = useState<"all" | "recent">("all");
-  const [showCustomScriptsConfig, setShowCustomScriptsConfig] = useState(false);
-  const [showWorktreeSetupConfig, setShowWorktreeSetupConfig] = useState(false);
-  const [showInstallDiagramSkill, setShowInstallDiagramSkill] = useState(false);
   const [confirmDeleteWorktree, setConfirmDeleteWorktree] = useState(false);
   const [worktreeDeleteConfirmName, setWorktreeDeleteConfirmName] = useState("");
   const [creatingWorktree, setCreatingWorktree] = useState(false);
@@ -626,10 +612,6 @@ function ProjectPage() {
   useEffect(() => {
     setProjectPathActionError(null);
   }, [projectPathCheck.state, projectPathIssue?.path]);
-  const customScripts = useMemo(
-    () => parseCustomScripts(project?.customScripts ?? null),
-    [project?.customScripts]
-  );
   const cliAvailability = useCliAvailability();
   const selectedWorktreeChangeCount = selectedWorktree && !selectedWorktree.isMain
     ? gitStatus?.changedCount
@@ -802,39 +784,7 @@ function ProjectPage() {
       enterGridView();
     }
   }, [terminals, enterGridView, terminalProject, tasks]);
-  const {
-    setProject: setActiveUserTerminalProject,
-    createTerminal,
-    setPanelOpen,
-  } = useUserTerminals();
-
-  // Script awaiting argument values before it can run (null when none pending).
-  const [argsScript, setArgsScript] = useState<CustomScript | null>(null);
-
-  const executeScript = useCallback(
-    async (script: CustomScript, command: string) => {
-      try {
-        await createTerminal({ name: script.name, startCommand: command });
-        setPanelOpen(true);
-      } catch {
-        toast.error(`Failed to run ${script.name}`);
-      }
-    },
-    [createTerminal, setPanelOpen]
-  );
-
-  const runScript = useCallback(
-    (script: CustomScript) => {
-      if (!projectPathReady) return;
-      // Scripts with declared args open a fill-in modal first; the rest run as-is.
-      if (script.args && script.args.length > 0) {
-        setArgsScript(script);
-        return;
-      }
-      void executeScript(script, script.command);
-    },
-    [projectPathReady, executeScript]
-  );
+  const { setProject: setActiveUserTerminalProject, createTerminal } = useUserTerminals();
 
   useEffect(() => {
     if (terminalProject) setActiveUserTerminalProject(terminalProject);
@@ -1177,19 +1127,6 @@ function ProjectPage() {
       await invalidateWorktrees();
       if (selectedWorktreeKeyRef.current === selectionAtCreate) {
         selectWorktree(result.worktree.id);
-      }
-      if (result.setupCommand) {
-        const setupProject = {
-          ...project,
-          path: result.worktree.path,
-          activeWorktreeId: result.worktree.id,
-          activeRuntimeScopeId,
-        };
-        await createTerminal({
-          project: setupProject,
-          name: `Setup: ${result.worktree.name}`,
-          startCommand: result.setupCommand,
-        });
       }
       toast.success(`Created worktree ${result.worktree.name}`);
     } catch (e: unknown) {
@@ -1691,8 +1628,6 @@ function ProjectPage() {
     confirmDeleteWorktree ||
     fileFinderOpen ||
     openFileRel !== null ||
-    showWorktreeSetupConfig ||
-    showInstallDiagramSkill ||
     confirmDeleteArchived ||
     !!projectPathIssue ||
     projectPathCheck.state === "error" ||
@@ -2669,113 +2604,6 @@ function ProjectPage() {
                     Find file in project
                   </DropdownMenuItem>
                 </HotkeyTooltip>
-                {(settings?.recallEnabled ?? false) && (
-                  <DropdownMenuItem
-                    icon="sparkles"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      setRecallInitialFilter("all");
-                      setShowRecall(true);
-                    }}
-                    title="Recall — curated project memory fed to new sessions"
-                  >
-                    Recall
-                  </DropdownMenuItem>
-                )}
-                {project.githubUrl ? (
-                  <DropdownMenuItem
-                    icon="github"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      openExternal(project.githubUrl!);
-                    }}
-                  >
-                    Open GitHub
-                  </DropdownMenuItem>
-                ) : null}
-                <DropdownMenuSeparator />
-                <HotkeyTooltip action="git.diff">
-                  <DropdownMenuItem
-                    icon="git-branch"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      onToggleDiffView();
-                    }}
-                    disabled={projectPathBlocked}
-                    title={
-                      gitStatus && gitStatus.changedCount > 0
-                        ? `${gitStatus.changedCount} changed file${gitStatus.changedCount === 1 ? "" : "s"}`
-                        : gitStatus
-                          ? "Review Changes"
-                          : "Checking changes…"
-                    }
-                  >
-                    Review Changes
-                    {gitStatus && gitStatus.changedCount > 0 && (
-                      <span style={{ color: "var(--text-dim)" }}>
-                        {" · "}
-                        {gitStatus.changedCount} changed
-                      </span>
-                    )}
-                  </DropdownMenuItem>
-                </HotkeyTooltip>
-                {worktreesEnabled ? (
-                  <DropdownMenuItem
-                    icon="terminal"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      setShowWorktreeSetupConfig(true);
-                    }}
-                  >
-                    Worktree init
-                  </DropdownMenuItem>
-                ) : null}
-                {sandboxState?.enabled ? (
-                  <DropdownMenuItem
-                    icon="globe"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      // The header scope chip hides while Local is active, so
-                      // this is the way into the sandbox switcher/manager.
-                      window.dispatchEvent(new Event(OPEN_SCOPE_SWITCHER_EVENT));
-                    }}
-                    title="Switch scope or create a sandbox for this project"
-                  >
-                    Manage sandboxes
-                  </DropdownMenuItem>
-                ) : null}
-                <DropdownMenuSeparator />
-                <InstallDiagramSkillMenuItem
-                  onSelect={() => {
-                    setOverflowOpen(false);
-                    setShowInstallDiagramSkill(true);
-                  }}
-                />
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  icon="terminal"
-                  onClick={() => {
-                    setOverflowOpen(false);
-                    setShowCustomScriptsConfig(true);
-                  }}
-                >
-                  Custom scripts
-                </DropdownMenuItem>
-                {showGrid && gridScopeSessionCount > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      icon="archive"
-                      onClick={() => {
-                        setOverflowOpen(false);
-                        setConfirmArchiveAll(true);
-                      }}
-                      title="Archive all open sessions in this grid"
-                    >
-                      Archive all sessions
-                    </DropdownMenuItem>
-                  </>
-                )}
                 <DropdownMenuSeparator />
                 <HotkeyTooltip action="project.edit">
                   <DropdownMenuItem
@@ -2854,11 +2682,6 @@ function ProjectPage() {
             );
           })()}
           {hideableMenu}
-          <CustomScriptsButton
-            scripts={customScripts}
-            onRun={runScript}
-            disabled={!projectPathUsable}
-          />
           {showSessionScopeToggle && (
             <SessionScopeToggle
               view={sessionView}
@@ -3392,12 +3215,6 @@ function ProjectPage() {
         </Suspense>
       )}
 
-      <InstallDiagramSkillModal
-        open={showInstallDiagramSkill}
-        onClose={() => setShowInstallDiagramSkill(false)}
-        projectPath={selectedWorktreePath || project.path}
-      />
-
       <RemoveProjectConfirmDialog
         open={confirmRemove}
         onClose={() => setConfirmRemove(false)}
@@ -3594,55 +3411,6 @@ function ProjectPage() {
           </div>
         </Modal>
       )}
-
-      <ScriptArgsModal
-        open={argsScript !== null}
-        script={argsScript}
-        onCancel={() => setArgsScript(null)}
-        onRun={(resolvedCommand) => {
-          const script = argsScript;
-          setArgsScript(null);
-          if (script) void executeScript(script, resolvedCommand);
-        }}
-      />
-
-      <CustomScriptsDialog
-        open={showCustomScriptsConfig}
-        project={project}
-        onClose={() => setShowCustomScriptsConfig(false)}
-        onSave={(next) => {
-          const projectKey = queryKeys.project(project.id);
-          const previousProject = queryClient.getQueryData<Project>(projectKey);
-          const serialized = serializeCustomScripts(next);
-          queryClient.setQueryData<Project>(projectKey, (prev) =>
-            prev ? { ...prev, customScripts: serialized, updatedAt: Date.now() } : prev,
-          );
-          void (async () => {
-            try {
-              const { project: updated } = await api.updateProject(project.id, {
-                customScripts: next,
-              });
-              queryClient.setQueryData(projectKey, updated);
-              void invalidateProjects();
-            } catch (error) {
-              queryClient.setQueryData(projectKey, previousProject);
-              toast.error(
-                error instanceof Error ? error.message : "Could not save custom scripts",
-              );
-            }
-          })();
-        }}
-      />
-
-      <WorktreeSetupCommandDialog
-        open={showWorktreeSetupConfig}
-        project={project}
-        onClose={() => setShowWorktreeSetupConfig(false)}
-        onSave={async (command) => {
-          await api.updateProject(project.id, { worktreeSetupCommand: command });
-          await refresh();
-        }}
-      />
 
       <ConfirmDialog
         open={confirmDeleteArchived}

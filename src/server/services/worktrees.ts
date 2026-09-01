@@ -410,7 +410,6 @@ export function resolveProjectWorktreeCwd(projectId: string, worktreeId?: string
 
 export async function createWorktree(projectId: string): Promise<{
   worktree: WorktreeInfo;
-  setupCommand: string | null;
 }> {
   const project = findProjectById(projectId);
   if (!project) throw new Error("project not found");
@@ -453,10 +452,7 @@ export async function createWorktree(projectId: string): Promise<{
     }
     events.emit("worktree:created", { id: row.id, projectId });
     events.emit("project:updated", { id: projectId });
-    return {
-      worktree: toInfo(row, projectRoot),
-      setupCommand: project.worktreeSetupCommand?.trim() || null,
-    };
+    return { worktree: toInfo(row, projectRoot) };
   }
   throw lastError ?? new Error("could not generate a unique worktree name");
 }

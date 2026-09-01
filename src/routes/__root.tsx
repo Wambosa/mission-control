@@ -46,7 +46,9 @@ import { GroupsDialogProvider } from "~/lib/groups-dialog-store";
 import { ACTIVE_GROUP_ALL, ACTIVE_GROUP_UNGROUPED, useActiveGroup } from "~/lib/active-group";
 import { GroupSwitcher } from "~/components/views/GroupSwitcher";
 import { PromptSearchProvider } from "~/lib/prompt-search-store";
-import { HeaderToolsCluster } from "~/components/views/HeaderToolsCluster";
+import { PromptSearchButton } from "~/components/views/PromptSearchButton";
+import { useHideableMenu } from "~/lib/hideable-elements";
+import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
 import { projectIdFromPath } from "~/lib/project-id-from-path";
 import {
   HeaderActionsProvider,
@@ -382,6 +384,8 @@ function Shell() {
   // blurred/hidden (see src/lib/window-idle.ts).
   useWindowIdleController();
   const { data: settings } = useSettings();
+  const headerButtons = settings?.headerButtons ?? DEFAULT_HEADER_BUTTON_VISIBILITY;
+  const { hideElementContextMenu, hideableMenu } = useHideableMenu();
   const { data: projects } = useScopedProjects();
   const { activeGroup, setActiveGroup, groups } = useActiveGroup();
   // While the active sandbox's remote VM is resuming, the workspace isn't usable
@@ -898,10 +902,14 @@ function Shell() {
             <>
               <UpdateAvailableButton />
               <ProviderUsageIndicator />
-              {/* Prompt search collapses behind "…" so the rail stays at
-               * status + settings; grid view moved into the project header
-               * beside the session controls it acts on. */}
-              <HeaderToolsCluster />
+              {/* Prompt search sits in the bar itself; grid view moved into
+               * the project header beside the session controls it acts on. */}
+              {headerButtons.promptSearch && (
+                <PromptSearchButton
+                  onContextMenu={hideElementContextMenu("header-button:promptSearch")}
+                />
+              )}
+              {hideableMenu}
               <SessionNotificationsButton
                 notifications={appNotifications}
                 onClearNotification={clearAppNotificationItem}

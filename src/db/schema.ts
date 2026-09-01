@@ -3,14 +3,10 @@ import { relations } from "drizzle-orm";
 import {
   DEFAULT_BRANCH,
   DEFAULT_TASK_STATUS,
-  CUSTOM_SCRIPTS_MAX,
   TASK_AGENTS,
   TASK_STATUSES,
-  parseCustomScripts,
   isActiveStatus,
   isTerminalStatus,
-  type LaunchCommand,
-  type CustomScript,
   type TaskAgent,
   type TaskStatus,
 } from "~/shared/domain";
@@ -90,8 +86,6 @@ export const projects = sqliteTable(
     pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
     pinnedOrder: integer("pinned_order"),
     branch: text("branch").notNull().default(DEFAULT_BRANCH),
-    customScripts: text("custom_scripts"),
-    worktreeSetupCommand: text("worktree_setup_command"),
     rememberAgentSettings: integer("remember_agent_settings", { mode: "boolean" })
       .notNull()
       .default(false),
@@ -549,11 +543,9 @@ export type NewGraphFile = typeof graphFiles.$inferInsert;
 export {
   DEFAULT_BRANCH,
   DEFAULT_TASK_STATUS,
-  CUSTOM_SCRIPTS_MAX,
   TASK_AGENTS,
   TASK_STATUSES,
-  parseCustomScripts,
   isActiveStatus,
   isTerminalStatus,
 };
-export type { LaunchCommand, CustomScript, TaskAgent, TaskStatus };
+export type { TaskAgent, TaskStatus };

@@ -440,10 +440,9 @@ export const api = {
   listWorktrees: (projectId: string) =>
     req<{ worktrees: WorktreeInfo[] }>(`/api/projects/${projectId}/worktrees`),
   createWorktree: (projectId: string) =>
-    req<{ worktree: WorktreeInfo; setupCommand: string | null }>(
-      `/api/projects/${projectId}/worktrees`,
-      { method: "POST" },
-    ),
+    req<{ worktree: WorktreeInfo }>(`/api/projects/${projectId}/worktrees`, {
+      method: "POST",
+    }),
   deleteWorktree: async (
     projectId: string,
     worktreeId: string,

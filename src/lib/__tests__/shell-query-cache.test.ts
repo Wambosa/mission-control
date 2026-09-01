@@ -46,8 +46,6 @@ function makeProject(overrides: Partial<ProjectWithCounts> = {}): ProjectWithCou
     pinned: true,
     pinnedOrder: 0,
     branch: "main",
-    customScripts: null,
-    worktreeSetupCommand: null,
     rememberAgentSettings: false,
     savedAgent: null,
     savedSkipPermissions: false,

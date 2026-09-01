@@ -3,14 +3,12 @@ import * as path from "node:path";
 import { getSqlite } from "~/db/client";
 import {
   DEFAULT_BRANCH,
-  CUSTOM_SCRIPTS_MAX,
   TASK_STATUSES,
   isActiveStatus,
   isTaskStatus,
-  normalizeScriptArgs,
 } from "~/shared/domain";
 import { normalizeRepoRemote } from "~/shared/repo-key";
-import type { CustomScript, TaskStatus } from "~/shared/domain";
+import type { TaskStatus } from "~/shared/domain";
 import type { Project, Task } from "~/db/schema";
 import type { ProjectPathStatus, ProjectWithCounts } from "~/shared/projects";
 import { events } from "../events";
@@ -330,8 +328,6 @@ export function createProject(input: {
     pinned: !!input.pinned,
     pinnedOrder: input.pinned ? nextPinnedOrder(findAllProjects()) : null,
     branch,
-    customScripts: null,
-    worktreeSetupCommand: null,
     rememberAgentSettings,
     savedAgent,
     savedSkipPermissions: false,
@@ -359,26 +355,18 @@ export function updateProject(
       | "pinned"
       | "pinnedOrder"
       | "branch"
-      | "worktreeSetupCommand"
       | "rememberAgentSettings"
       | "savedAgent"
       | "savedSkipPermissions"
       | "savedBareSession"
     >
-  > & { customScripts?: CustomScript[] | null }
+  >
 ): Project | null {
   const existing = findProjectById(id);
   if (!existing) return null;
-  const { customScripts, ...rest } = patch;
+  const rest = patch;
   const nextPath =
     rest.path !== undefined ? validateWorkingDirectory(rest.path) : undefined;
-  if (
-    rest.worktreeSetupCommand !== undefined &&
-    rest.worktreeSetupCommand !== null &&
-    rest.worktreeSetupCommand.length > 500
-  ) {
-    throw new Error("worktreeSetupCommand cannot exceed 500 characters");
-  }
   const updated = {
     ...existing,
     ...rest,
@@ -398,37 +386,11 @@ export function updateProject(
           branch: rest.branch ?? detectBranch(nextPath),
         }
       : {}),
-    ...(rest.worktreeSetupCommand !== undefined
-      ? { worktreeSetupCommand: rest.worktreeSetupCommand?.trim() || null }
-      : {}),
-    ...(customScripts !== undefined
-      ? { customScripts: serializeCustomScripts(customScripts) }
-      : {}),
     updatedAt: Date.now(),
   };
   updateProjectRow(id, updated);
   events.emit("project:updated", { id });
   return updated;
-}
-
-function serializeCustomScripts(input: CustomScript[] | null): string | null {
-  if (!input) return null;
-  if (!Array.isArray(input)) throw new ValidationError("customScripts must be an array");
-  if (input.length > CUSTOM_SCRIPTS_MAX) {
-    throw new ValidationError(`customScripts cannot exceed ${CUSTOM_SCRIPTS_MAX} entries`);
-  }
-  const cleaned = input.map((c) => {
-    const id = String(c?.id ?? "").trim();
-    const name = String(c?.name ?? "").trim();
-    const command = String(c?.command ?? "").trim();
-    if (!id) throw new ValidationError("customScripts: id is required");
-    if (!name) throw new ValidationError("customScripts: name is required");
-    if (!command) throw new ValidationError("customScripts: command is required");
-    // Preserve the normalized arg list alongside the command.
-    const args = normalizeScriptArgs(c?.args);
-    return args ? { id, name, command, args } : { id, name, command };
-  });
-  return cleaned.length === 0 ? null : JSON.stringify(cleaned);
 }
 
 export function togglePin(id: string): Project | null {

@@ -39,8 +39,8 @@ function defaultSandboxName(project: Project | null): string {
   return project ? `${project.name} sandbox` : "Project sandbox";
 }
 
-function defaultInitCommand(project: Project | null): string {
-  return project?.worktreeSetupCommand?.trim() || "npm i";
+function defaultInitCommand(): string {
+  return "npm i";
 }
 
 export function ProjectSandboxDialog({
@@ -75,7 +75,7 @@ export function ProjectSandboxDialog({
     setName(defaultSandboxName(project));
     setBaseBranch(project?.branch?.trim() || DEFAULT_BRANCH);
     setBootCommand("");
-    setInitCommand(defaultInitCommand(project));
+    setInitCommand(defaultInitCommand());
     setCopyEnvFiles(true);
     setImageStrategy("golden");
   }, [open, project?.id]);

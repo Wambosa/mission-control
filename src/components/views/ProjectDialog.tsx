@@ -154,7 +154,6 @@ export function ProjectDialog({
     groupId: string | null;
     imagePath?: string | null;
     pendingImage?: { sourcePath: string; extension: string } | null;
-    worktreeSetupCommand?: string | null;
     // Create-only onboarding fields (undefined when editing an existing project).
     savedAgent?: TaskAgent | null;
     rememberAgentSettings?: boolean;
@@ -182,7 +181,6 @@ export function ProjectDialog({
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [icon, setIcon] = useState("");
   const [iconColor, setIconColor] = useState<string>(ICON_COLORS[0]);
-  const [worktreeSetupCommand, setWorktreeSetupCommand] = useState("");
   // Optional at create time: null means "just create the project", a selection
   // means "create it and start a session with that agent".
   const [agent, setAgent] = useState<TaskAgent | null>(null);
@@ -269,7 +267,6 @@ export function ProjectDialog({
       setCreatingGroup(false);
       setIcon(seededIcon);
       setIconColor(seededIconColor);
-      setWorktreeSetupCommand(project?.worktreeSetupCommand || "");
       setGridView(project?.defaultGridView ?? false);
       setImagePath(project?.imagePath ?? null);
       setPendingImage(null);
@@ -470,7 +467,7 @@ export function ProjectDialog({
         groupId: effectiveGroupId,
         ...(project ? { imagePath } : { pendingImage }),
         ...(project
-          ? { worktreeSetupCommand: worktreeSetupCommand.trim() || null }
+          ? {}
           : {
               savedAgent: agent,
               rememberAgentSettings: agent !== null,
@@ -1228,17 +1225,6 @@ export function ProjectDialog({
     </div>
   );
 
-  const worktreeField = project ? (
-    <TextField
-      mono
-      label="New worktree setup command"
-      value={worktreeSetupCommand}
-      onChange={(value) => setWorktreeSetupCommand(value.slice(0, 500))}
-      placeholder="pnpm i"
-      hint="Optional. Runs once inside each newly created worktree."
-    />
-  ) : null;
-
   return (
     <Modal
       open={open}
@@ -1346,7 +1332,6 @@ export function ProjectDialog({
           {identityRow}
           {dirField}
           {groupField}
-          {worktreeField}
           <div ref={errorRef}>
             <FormErrorBox error={error} />
           </div>

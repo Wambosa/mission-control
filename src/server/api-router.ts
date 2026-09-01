@@ -18,7 +18,6 @@ import * as userTerminalsController from "./controllers/user-terminals.controlle
 import * as homeTerminalsController from "./controllers/home-terminals.controller";
 import * as settingsController from "./controllers/settings.controller";
 import * as keybindingsController from "./controllers/keybindings.controller";
-import * as skillsController from "./controllers/skills.controller";
 import * as hooksController from "./controllers/hooks.controller";
 import * as promptsController from "./controllers/prompts.controller";
 import * as projectMemoryController from "./controllers/project-memory.controller";
@@ -413,14 +412,6 @@ async function dispatch(
   }
   if (pathname === "/api/ai-runtime/models" && method === "GET") {
     return aiRuntimeModelsController.list(url);
-  }
-
-  // Diagram skill (local bundled install)
-  if (pathname === "/api/skills/install/diagram/installed" && method === "GET") {
-    return skillsController.diagramInstalled(url);
-  }
-  if (pathname === "/api/skills/install/diagram" && method === "POST") {
-    return skillsController.installDiagram(request);
   }
 
   // Keybindings

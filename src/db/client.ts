@@ -395,8 +395,6 @@ function ensureSchema(sqlite: Database.Database) {
       pinned INTEGER NOT NULL DEFAULT 0,
       pinned_order INTEGER,
       branch TEXT NOT NULL DEFAULT '${DEFAULT_BRANCH}',
-      custom_scripts TEXT,
-      worktree_setup_command TEXT,
       remember_agent_settings INTEGER NOT NULL DEFAULT 0,
       saved_agent TEXT,
       saved_skip_permissions INTEGER NOT NULL DEFAULT 0,
@@ -676,12 +674,6 @@ function ensureSchema(sqlite: Database.Database) {
   // Manual group ordering. Legacy rows keep NULL until the user reorders (they
   // sort last by created_at meanwhile) — see groups.repo findAllGroups.
   ensureColumn(sqlite, "groups", "sort_order", "INTEGER");
-
-  // Per-project custom scripts (JSON array of {id,name,command}). Tolerate a
-  // pre-existing column: a fresh bootstrap marks migrations applied-only, so
-  // 0014 never runs on a brand-new DB — the inline DDL above covers that, and
-  // this guard covers any schema-divergent build. See 0014_custom_scripts.sql.
-  ensureColumn(sqlite, "projects", "custom_scripts", "TEXT");
 
   // Keep pre-release sandbox tables moving forward even if they were created by
   // an earlier branch before all remote/local config columns existed.

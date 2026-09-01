@@ -76,8 +76,6 @@ function makeProject(id: string, sandboxId: string | null) {
     pinned: false,
     pinnedOrder: null,
     branch: "main",
-    customScripts: null,
-    worktreeSetupCommand: null,
     rememberAgentSettings: false,
     savedAgent: null,
     savedSkipPermissions: false,

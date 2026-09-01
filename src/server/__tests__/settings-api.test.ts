@@ -691,7 +691,6 @@ describe("settings API", () => {
       gitDiffChangedFilesView: null,
       gitDiffChangedFilesWidth: null,
       projectsDashboardView: null,
-      selectedWorktreeByProject: null,
     });
   });
 
@@ -788,7 +787,6 @@ describe("settings API", () => {
   });
 
   it("persists durable UI preferences", async () => {
-    const selectedWorktreeByProject = { "project-1": "worktree-2" };
     const update = await handleApiRequest(
       authedRequest("http://localhost/api/settings", {
         method: "POST",
@@ -797,7 +795,6 @@ describe("settings API", () => {
           gitDiffChangedFilesView: "tree",
           gitDiffChangedFilesWidth: 420,
           projectsDashboardView: "table",
-          selectedWorktreeByProject,
         }),
       }),
     );
@@ -810,14 +807,20 @@ describe("settings API", () => {
       gitDiffChangedFilesView: "tree",
       gitDiffChangedFilesWidth: 420,
       projectsDashboardView: "table",
-      selectedWorktreeByProject,
     });
     expect(await jsonBody(read!)).toMatchObject({
       gitDiffChangedFilesView: "tree",
       gitDiffChangedFilesWidth: 420,
       projectsDashboardView: "table",
-      selectedWorktreeByProject,
     });
+  });
+
+  // The worktree selector is gone, so the interface no longer keeps a chosen
+  // worktree per project. A stale value from an older build is inert: the
+  // settings response simply does not carry the field.
+  it("no longer reports a selected worktree per project", async () => {
+    const read = await handleApiRequest(authedRequest("http://localhost/api/settings"));
+    expect(await jsonBody(read!)).not.toHaveProperty("selectedWorktreeByProject");
   });
 
   it("defaults to the painted theme style", async () => {

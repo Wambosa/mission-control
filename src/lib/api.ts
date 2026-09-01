@@ -21,7 +21,6 @@ import type {
 import type {
   GitDiffChangedFilesView,
   ProjectsDashboardView,
-  SelectedWorktreeByProject,
 } from "~/shared/ui-preferences";
 import type { TerminalZoomLevel } from "~/shared/terminal-zoom";
 import type {
@@ -105,7 +104,6 @@ export type AppSettings = {
   automaticUpdateInstallOnQuitEnabled: boolean;
   /** Git worktrees per project (always on). */
   worktreesEnabled: boolean;
-  /** Legacy compatibility field; push-to-talk is always enabled on desktop. */
   /** Legacy compatibility field; native Claude Code question popups are always enabled. */
   questionOverlayEnabled: boolean;
   gitDiffChangedFilesView: GitDiffChangedFilesView | null;
@@ -119,7 +117,6 @@ export type AppSettings = {
   activeProjectGroup: string | null;
   /** Collapsed dashboard section keys — group ids plus "pinned"/"ungrouped". */
   collapsedProjectGroups: string[] | null;
-  selectedWorktreeByProject: SelectedWorktreeByProject | null;
   /** Default terminal text zoom (-2 … +2). Per-pane overrides live in localStorage. */
   terminalZoomLevel: TerminalZoomLevel;
   /** Terminal font face; `null` = the active theme's bundled face. */
@@ -414,33 +411,9 @@ export const api = {
 
   listWorktrees: (projectId: string) =>
     req<{ worktrees: WorktreeInfo[] }>(`/api/projects/${projectId}/worktrees`),
-  createWorktree: (projectId: string) =>
-    req<{ worktree: WorktreeInfo }>(`/api/projects/${projectId}/worktrees`, {
-      method: "POST",
-    }),
-  deleteWorktree: async (
-    projectId: string,
-    worktreeId: string,
-    opts: { force?: boolean; stashChanges?: boolean } = {},
-  ) => {
-    const params = new URLSearchParams();
-    if (opts.force) params.set("force", "true");
-    if (opts.stashChanges) params.set("stashChanges", "true");
-    const queryString = params.toString();
-    const query = queryString ? `?${queryString}` : "";
-    await req<void>(
-      `/api/projects/${projectId}/worktrees/${encodeURIComponent(worktreeId)}${query}`,
-      {
-        method: "DELETE",
-        body: JSON.stringify(opts),
-      },
-    );
-    pruneStoredSessionFinishNotifications({
-      type: "worktree",
-      projectId,
-      worktreeId,
-    });
-  },
+  // Creating and deleting worktrees is the agent's job now — the interface
+  // offers no control for it, so the client keeps no wrapper. The HTTP routes
+  // stay: they are the API, not the interface.
 
   // Recall — project memory.
   listMemory: (projectId: string, opts: { includeArchived?: boolean } = {}) =>
@@ -678,7 +651,6 @@ export const api = {
         | "projectsDashboardView"
         | "activeProjectGroup"
         | "collapsedProjectGroups"
-        | "selectedWorktreeByProject"
         | "terminalZoomLevel"
         | "terminalFontFamily"
         | "terminalFontWeight"

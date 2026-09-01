@@ -11,6 +11,14 @@ import { createProjectSandbox } from "~/lib/project-sandbox-create";
 import { useUserTerminals } from "~/lib/user-terminal-store";
 import type { Project } from "~/db/schema";
 
+/**
+ * Create and provision a managed AWS sandbox for a project.
+ *
+ * Nothing mounts this: managed creation was hidden before this fork's
+ * interface work, in favor of connecting a sandbox the operator provisioned
+ * themselves, and the note saying so lived in the scope switcher that has
+ * since been retired. Mount it to bring the managed create flow back.
+ */
 export function useProjectSandboxFlow(project: Project | null) {
   const router = useRouter();
   const queryClient = useQueryClient();

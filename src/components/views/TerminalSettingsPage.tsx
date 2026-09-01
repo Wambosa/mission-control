@@ -185,7 +185,6 @@ export function TerminalSettingsPage() {
     projectsDashboardView: settings?.projectsDashboardView ?? null,
     activeProjectGroup: settings?.activeProjectGroup ?? null,
     collapsedProjectGroups: settings?.collapsedProjectGroups ?? null,
-    selectedWorktreeByProject: settings?.selectedWorktreeByProject ?? null,
     terminalZoomLevel: level,
     terminalFontFamily: fontFamily,
     terminalFontWeight: fontWeight,

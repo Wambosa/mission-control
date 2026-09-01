@@ -30,7 +30,6 @@ import {
   normalizeGitDiffChangedFilesView,
   normalizeGitDiffChangedFilesWidth,
   normalizeProjectsDashboardView,
-  normalizeSelectedWorktreeByProject,
 } from "~/shared/ui-preferences";
 import { safeJsonParse } from "~/shared/safe-json";
 import {
@@ -103,7 +102,6 @@ const ANNOTATION_AGENT_SETTING_KEY = "annotation_agent";
 const ANNOTATION_MODEL_SETTING_KEY = "annotation_model";
 const GIT_DIFF_CHANGED_FILES_VIEW_KEY = "git_diff_changed_files_view";
 const GIT_DIFF_CHANGED_FILES_WIDTH_KEY = "git_diff_changed_files_width";
-const SELECTED_WORKTREE_BY_PROJECT_KEY = "selected_worktree_by_project";
 const PROJECTS_DASHBOARD_VIEW_KEY = "projects_dashboard_view";
 const ACTIVE_PROJECT_GROUP_KEY = "active_project_group";
 const COLLAPSED_PROJECT_GROUPS_KEY = "collapsed_project_groups";
@@ -194,7 +192,6 @@ const updateSettingsBody = z
     // live group list and falls back to "all".
     activeProjectGroup: z.string().trim().min(1).max(ACTIVE_PROJECT_GROUP_MAX_LENGTH).nullable(),
     collapsedProjectGroups: z.array(z.string().trim().min(1).max(ACTIVE_PROJECT_GROUP_MAX_LENGTH)).max(500).nullable(),
-    selectedWorktreeByProject: z.record(z.string(), z.string()).nullable(),
     terminalZoomLevel: z.number().int().min(TERMINAL_ZOOM_MIN).max(TERMINAL_ZOOM_MAX),
     terminalFontFamily: z
       .string()
@@ -344,11 +341,6 @@ function getCollapsedProjectGroupsSetting() {
   );
 }
 
-function getSelectedWorktreeByProjectSetting() {
-  const raw = getSetting(SELECTED_WORKTREE_BY_PROJECT_KEY);
-  return normalizeSelectedWorktreeByProject(safeJsonParse<unknown>(raw, null));
-}
-
 function getTerminalZoomLevelSetting() {
   return normalizeTerminalZoomLevel(getSetting(TERMINAL_ZOOM_LEVEL_KEY)) ?? DEFAULT_TERMINAL_ZOOM_LEVEL;
 }
@@ -470,7 +462,6 @@ function settingsPayload() {
     projectsDashboardView: getProjectsDashboardViewSetting(),
     activeProjectGroup: getActiveProjectGroupSetting(),
     collapsedProjectGroups: getCollapsedProjectGroupsSetting(),
-    selectedWorktreeByProject: getSelectedWorktreeByProjectSetting(),
     terminalZoomLevel: getTerminalZoomLevelSetting(),
     terminalFontFamily: getTerminalFontFamilySetting(),
     terminalFontWeight: getTerminalFontWeightSetting(),
@@ -656,16 +647,6 @@ export async function update(request: Request): Promise<Response> {
       deleteSetting(COLLAPSED_PROJECT_GROUPS_KEY);
     } else {
       setSetting(COLLAPSED_PROJECT_GROUPS_KEY, JSON.stringify(body.collapsedProjectGroups));
-    }
-  }
-  if (body.selectedWorktreeByProject !== undefined) {
-    if (body.selectedWorktreeByProject === null) {
-      deleteSetting(SELECTED_WORKTREE_BY_PROJECT_KEY);
-    } else {
-      setSetting(
-        SELECTED_WORKTREE_BY_PROJECT_KEY,
-        JSON.stringify(body.selectedWorktreeByProject),
-      );
     }
   }
   if (body.terminalZoomLevel !== undefined) {

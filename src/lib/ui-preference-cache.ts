@@ -4,20 +4,17 @@ import {
   normalizeFileFinderView,
   normalizeGitDiffChangedFilesView,
   normalizeProjectsDashboardView,
-  normalizeSelectedWorktreeByProject,
   type ActiveProjectGroup,
   type CollapsedProjectGroups,
   type FileFinderView,
   type GitDiffChangedFilesView,
   type ProjectsDashboardView,
-  type SelectedWorktreeByProject,
 } from "~/shared/ui-preferences";
 
 export const GIT_DIFF_CHANGED_FILES_VIEW_STORAGE_KEY = "mc:gitDiffChangedFilesView";
 export const GIT_DIFF_CHANGED_FILES_WIDTH_STORAGE_KEY = "mc:gitDiffChangedFilesWidth";
 export const PROJECTS_DASHBOARD_VIEW_STORAGE_KEY = "mc:projectsDashboardView";
 export const FILE_FINDER_VIEW_STORAGE_KEY = "mc:fileFinderView";
-export const SELECTED_WORKTREE_BY_PROJECT_STORAGE_KEY = "mc.selectedWorktreeByProject";
 export const ACTIVE_PROJECT_GROUP_STORAGE_KEY = "mc:activeProjectGroup";
 export const COLLAPSED_PROJECT_GROUPS_STORAGE_KEY = "mc:collapsedProjectGroups";
 
@@ -97,26 +94,3 @@ export function writeCachedCollapsedProjectGroups(collapsed: CollapsedProjectGro
   }
 }
 
-export function readCachedSelectedWorktreeByProject(): SelectedWorktreeByProject | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(SELECTED_WORKTREE_BY_PROJECT_STORAGE_KEY);
-    return raw ? normalizeSelectedWorktreeByProject(JSON.parse(raw)) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function writeCachedSelectedWorktreeByProject(
-  selectedWorktreeByProject: SelectedWorktreeByProject,
-): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      SELECTED_WORKTREE_BY_PROJECT_STORAGE_KEY,
-      JSON.stringify(selectedWorktreeByProject),
-    );
-  } catch {
-    /* localStorage unavailable */
-  }
-}

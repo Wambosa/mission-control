@@ -119,7 +119,6 @@ export function GeneralSettingsPage() {
     projectsDashboardView: settings?.projectsDashboardView ?? null,
     activeProjectGroup: settings?.activeProjectGroup ?? null,
     collapsedProjectGroups: settings?.collapsedProjectGroups ?? null,
-    selectedWorktreeByProject: settings?.selectedWorktreeByProject ?? null,
     terminalZoomLevel: settings?.terminalZoomLevel ?? DEFAULT_TERMINAL_ZOOM_LEVEL,
     terminalFontFamily: settings?.terminalFontFamily ?? null,
     terminalFontWeight: settings?.terminalFontWeight ?? DEFAULT_TERMINAL_FONT_WEIGHT,

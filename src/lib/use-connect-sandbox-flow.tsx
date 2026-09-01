@@ -15,7 +15,14 @@ import { queryKeys } from "~/queries";
 // no need for the 3-minute provisioning budget the AWS create flow uses.
 const MANUAL_CONNECT_TIMEOUT_MS = 30_000;
 
-/** Register an externally-provisioned remote sandbox and connect to it. */
+/**
+ * Register an externally-provisioned remote sandbox and connect to it.
+ *
+ * Nothing mounts this today: the header scope switcher was its only entry
+ * point and retired with the global scope. Kept, like useProjectSandboxFlow
+ * beside it, because the managed remote-VM concept is deliberately untouched —
+ * restoring an entry point is a mount, not a rebuild.
+ */
 export function useConnectSandboxFlow() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);

@@ -121,13 +121,11 @@ export const isTaskStatus = (value: unknown): value is TaskStatus =>
 export const isActiveStatus = (s: TaskStatus) => TASK_STATUS_META[s].countsAsActive;
 export const isTerminalStatus = (s: TaskStatus) => TASK_STATUS_META[s].isTerminal;
 
-export const LAUNCH_COMMANDS_MAX = 5;
 export type LaunchCommand = { id: string; name: string; command: string };
 
-// Custom scripts extend launch commands with optional run-time arguments: each
+// Custom scripts extend a named command with optional run-time arguments: each
 // arg is a `$NAME` placeholder in the command that the user fills in via a modal
-// before the script runs. They run individually on demand (header split button)
-// and have no launch/stop lifecycle, where launch commands run as a managed group.
+// before the script runs. They run individually on demand (header split button).
 export const CUSTOM_SCRIPTS_MAX = 5;
 // Generous upper bound so a malformed/abusive payload can't store an unbounded
 // arg list; "as many as they want" in practice means "as many as fit here".
@@ -154,10 +152,6 @@ function parseCommandList(raw: string | null | undefined, max: number): LaunchCo
         typeof c.command === "string"
     )
     .slice(0, max);
-}
-
-export function parseLaunchCommands(raw: string | null | undefined): LaunchCommand[] {
-  return parseCommandList(raw, LAUNCH_COMMANDS_MAX);
 }
 
 /**

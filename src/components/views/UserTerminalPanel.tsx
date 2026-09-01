@@ -51,7 +51,6 @@ export function UserTerminalPanel() {
     hiddenIds,
     toggleHidden,
     renameTerminal,
-    updateLaunchUrl,
     setPtyId,
   } = useUserTerminals();
 
@@ -549,7 +548,6 @@ export function UserTerminalPanel() {
                     onFocus={() => focusTerminal(s.terminal.id)}
                     onPtyReady={(ptyId) => setPtyId(s.terminal.id, ptyId)}
                     onPtyExit={() => setPtyId(s.terminal.id, null)}
-                    onLaunchUrlDetected={updateLaunchUrl}
                     onHide={() => toggleHidden(s.terminal.id)}
                     onDelete={() => void killTerminal(s.terminal.id)}
                     onRename={(name) => void renameTerminal(s.terminal.id, name)}

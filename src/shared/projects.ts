@@ -25,19 +25,14 @@ export type ProjectPathStatus =
 
 export type ProjectActivityState =
   | "offline"
-  | "launch-running"
   | "agent-running"
   | "needs-input"
   | "interrupted";
 
-export function getProjectActivity(
-  project: ProjectWithCounts,
-  launchRunningProjectIds: ReadonlySet<string>
-): ProjectActivityState {
+export function getProjectActivity(project: ProjectWithCounts): ProjectActivityState {
   if (project.taskCounts.interrupted > 0) return "interrupted";
   if (project.taskCounts["needs-input"] > 0) return "needs-input";
   if (project.taskCounts.running > 0) return "agent-running";
-  if (launchRunningProjectIds.has(project.id)) return "launch-running";
   return "offline";
 }
 

@@ -26,9 +26,7 @@ function makeProject(
     pinned: false,
     pinnedOrder: null,
     branch: "main",
-    launchCommands: null,
     customScripts: null,
-    launchUrl: null,
     worktreeSetupCommand: null,
     rememberAgentSettings: false,
     savedAgent: null,
@@ -100,7 +98,7 @@ const projects = [
 describe("sortProjects", () => {
   it("sorts by name ascending", () => {
     const sort: ProjectSortState = { column: "name", direction: "asc" };
-    expect(sortProjects(projects, groups, sort, new Set()).map((p) => p.name)).toEqual([
+    expect(sortProjects(projects, groups, sort).map((p) => p.name)).toEqual([
       "Alpha",
       "Bravo",
       "Zulu",
@@ -109,13 +107,13 @@ describe("sortProjects", () => {
 
   it("sorts by last edit descending by default helper", () => {
     expect(
-      sortProjects(projects, groups, DEFAULT_PROJECT_SORT, new Set()).map((p) => p.id),
+      sortProjects(projects, groups, DEFAULT_PROJECT_SORT).map((p) => p.id),
     ).toEqual(["p-zulu", "p-bravo", "p-alpha"]);
   });
 
   it("sorts by group name", () => {
     const sort: ProjectSortState = { column: "group", direction: "asc" };
-    expect(sortProjects(projects, groups, sort, new Set()).map((p) => p.name)).toEqual([
+    expect(sortProjects(projects, groups, sort).map((p) => p.name)).toEqual([
       "Alpha",
       "Zulu",
       "Bravo",
@@ -124,17 +122,16 @@ describe("sortProjects", () => {
 
   it("sorts by running task count", () => {
     const sort: ProjectSortState = { column: "running", direction: "desc" };
-    expect(sortProjects(projects, groups, sort, new Set()).map((p) => p.name)).toEqual([
+    expect(sortProjects(projects, groups, sort).map((p) => p.name)).toEqual([
       "Zulu",
       "Bravo",
       "Alpha",
     ]);
   });
 
-  it("sorts by status using launch-running when no tasks are active", () => {
+  it("sorts by status, ranking needs-input above running above offline", () => {
     const sort: ProjectSortState = { column: "status", direction: "desc" };
-    const launchRunningProjectIds = new Set(["p-alpha"]);
-    expect(sortProjects(projects, groups, sort, launchRunningProjectIds).map((p) => p.name)).toEqual([
+    expect(sortProjects(projects, groups, sort).map((p) => p.name)).toEqual([
       "Bravo",
       "Zulu",
       "Alpha",
@@ -147,7 +144,7 @@ describe("sortProjects", () => {
       makeProject({ id: "p-pinned", name: "Pinned", pinned: true }),
     ];
     const sort: ProjectSortState = { column: "pinned", direction: "desc" };
-    expect(sortProjects(pinnedProjects, groups, sort, new Set()).map((p) => p.name)).toEqual([
+    expect(sortProjects(pinnedProjects, groups, sort).map((p) => p.name)).toEqual([
       "Pinned",
       "Unpinned",
     ]);

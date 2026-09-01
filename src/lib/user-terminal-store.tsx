@@ -10,10 +10,6 @@ import {
 } from "react";
 import { api } from "./api";
 import { getElectron } from "./electron";
-import {
-  hasRunningLaunchForProject as projectHasRunningLaunch,
-  runningLaunchScopeKeysForProject,
-} from "./project-launch-running";
 import { prefetchTerminalModules } from "./prefetch-terminal-modules";
 import {
   discardUserTerminalWarmSlot,
@@ -69,14 +65,6 @@ type Ctx = {
   sessionsByScope: Record<string, Session[]>;
   runningProjectIds: Set<string>;
   runningWorktreeIds: Set<string>;
-  hasRunningLaunchForProject: (
-    projectId: string,
-    launchCommandsRaw: string | null | undefined
-  ) => boolean;
-  runningLaunchWorktreeIdsForProject: (
-    projectId: string,
-    launchCommandsRaw: string | null | undefined
-  ) => Set<string>;
   focusedId: string | null;
   focusTerminal: (id: string) => void;
   createTerminal: (opts?: {
@@ -84,18 +72,9 @@ type Ctx = {
     startCommand?: string | null;
     project?: ScopedProject;
     cwd?: string | null;
-    /**
-     * Whether the new terminal should grab focus on open. Defaults to true.
-     * The run/launch flow passes false so opening the launch terminals doesn't
-     * steal keyboard focus (which would break follow-up hotkeys like the
-     * open-browser shortcut a user presses right after running the project).
-     */
+    /** Whether the new terminal should grab focus on open. Defaults to true. */
     focusOnCreate?: boolean;
   }) => Promise<UserTerminal | null>;
-  killTerminalsByStartCommand: (
-    commands: string[],
-    opts?: { ports?: number[] }
-  ) => Promise<void>;
   /** Permanently close every user terminal for a project (kills PTYs). */
   closeForProject: (projectId: string) => Promise<void>;
   /** Permanently close dashboard home terminals for a sandbox/local scope. */
@@ -104,7 +83,6 @@ type Ctx = {
   hiddenIds: Set<string>;
   toggleHidden: (id: string) => void;
   renameTerminal: (id: string, name: string) => Promise<void>;
-  updateLaunchUrl: (url: string) => Promise<void>;
   setPtyId: (terminalId: string, ptyId: string | null) => void;
   cycleNext: () => void;
   cyclePrev: () => void;
@@ -582,23 +560,6 @@ export function UserTerminalProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const updateLaunchUrl = useCallback(
-    async (url: string) => {
-      if (!project) return;
-      const normalized = url.replace(/\[::1\]/, "localhost");
-      if (project.launchUrl === normalized) return;
-      setProjectState((prev) =>
-        prev?.id === project.id ? { ...prev, launchUrl: normalized, updatedAt: Date.now() } : prev
-      );
-      try {
-        await api.updateProjectLaunchUrl(project.id, normalized);
-      } catch {
-        /* swallow */
-      }
-    },
-    [project]
-  );
-
   const setPtyId = useCallback((terminalId: string, ptyId: string | null) => {
     setSessionsByProject((prev) => {
       let next = prev;
@@ -619,28 +580,6 @@ export function UserTerminalProvider({ children }: { children: ReactNode }) {
       return changed ? next : prev;
     });
   }, []);
-
-  const killTerminalsByStartCommand = useCallback(
-    async (commands: string[], opts?: { ports?: number[] }) => {
-      if (!project) return;
-      const electron = getElectron();
-      const list = sessionsByProject[scopeKeyForProject(project)] ?? [];
-      const wanted = new Set(commands.map((c) => c.trim()).filter(Boolean));
-      if (wanted.size === 0) return;
-      const targets = list.filter(
-        (s) => s.terminal.startCommand && wanted.has(s.terminal.startCommand.trim())
-      );
-      await Promise.all(targets.map((s) => killTerminal(s.terminal.id)));
-      await electron?.pty
-        .killLaunchProcesses({
-          cwd: project.path,
-          commands: [...wanted],
-          ports: opts?.ports ?? [],
-        })
-        .catch(() => undefined);
-    },
-    [project, sessionsByProject, killTerminal]
-  );
 
   const focusTerminal = useCallback(
     (id: string) => {
@@ -669,17 +608,6 @@ export function UserTerminalProvider({ children }: { children: ReactNode }) {
   const cycleNext = useCallback(() => cycle(1), [cycle]);
   const cyclePrev = useCallback(() => cycle(-1), [cycle]);
 
-  const hasRunningLaunchForProject = useCallback(
-    (projectId: string, launchCommandsRaw: string | null | undefined) =>
-      projectHasRunningLaunch(projectId, launchCommandsRaw, sessionsByProject),
-    [sessionsByProject]
-  );
-  const runningLaunchWorktreeIdsForProject = useCallback(
-    (projectId: string, launchCommandsRaw: string | null | undefined) =>
-      runningLaunchScopeKeysForProject(projectId, launchCommandsRaw, sessionsByProject),
-    [sessionsByProject]
-  );
-
   const value = useMemo<Ctx>(
     () => ({
       project,
@@ -694,8 +622,6 @@ export function UserTerminalProvider({ children }: { children: ReactNode }) {
       sessionsByScope: sessionsByProject,
       runningProjectIds,
       runningWorktreeIds,
-      hasRunningLaunchForProject,
-      runningLaunchWorktreeIdsForProject,
       focusedId,
       focusTerminal,
       createTerminal,
@@ -704,9 +630,7 @@ export function UserTerminalProvider({ children }: { children: ReactNode }) {
       killTerminal,
       hiddenIds,
       toggleHidden,
-      killTerminalsByStartCommand,
       renameTerminal,
-      updateLaunchUrl,
       setPtyId,
       cycleNext,
       cyclePrev,
@@ -723,8 +647,6 @@ export function UserTerminalProvider({ children }: { children: ReactNode }) {
       sessionsByProject,
       runningProjectIds,
       runningWorktreeIds,
-      hasRunningLaunchForProject,
-      runningLaunchWorktreeIdsForProject,
       focusedId,
       focusTerminal,
       createTerminal,
@@ -733,9 +655,7 @@ export function UserTerminalProvider({ children }: { children: ReactNode }) {
       killTerminal,
       hiddenIds,
       toggleHidden,
-      killTerminalsByStartCommand,
       renameTerminal,
-      updateLaunchUrl,
       setPtyId,
       cycleNext,
       cyclePrev,

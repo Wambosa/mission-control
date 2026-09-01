@@ -8,14 +8,12 @@ import { useGroups, useSandboxes, useScopedProjects, useSettings, queryKeys } fr
 import type { ProjectWithCounts } from "~/shared/projects";
 import type { Group } from "~/db/schema";
 import { ProjectIcon } from "~/components/ui/ProjectIcon";
-import { Icon } from "~/components/ui/Icon";
 import { CardFrame } from "~/components/ui/CardFrame";
 import { ContextMenuPopover } from "~/components/ui/ContextMenuPopover";
 import { DropdownMenuItem } from "~/components/ui/DropdownMenuItem";
 import { ProjectDialog } from "~/components/views/ProjectDialog";
 import { useServerEvents } from "~/lib/use-events";
 import { useDebouncedCallback } from "~/lib/use-debounced-callback";
-import { useUserTerminals } from "~/lib/user-terminal-store";
 import { useBinding } from "~/lib/keybindings/store";
 import { formatBinding } from "~/lib/keybindings/format";
 import { PINNED_SLOT_COUNT } from "~/lib/keybindings/match";
@@ -70,7 +68,6 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
   const { data: sandboxState } = useSandboxes();
   const { data: groups = [] } = useGroups();
   const { data: settings } = useSettings();
-  const { hasRunningLaunchForProject } = useUserTerminals();
   const minimal = settings?.minimalTheme ?? false;
   const invalidateProjects = useCallback(
     () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
@@ -1040,10 +1037,9 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
           ? pinnedSlotBinding(projectNumber)
           : `${pinnedSlotBinding(groupNumber)} ${projectNumber}`;
         const runningCount = project.taskCounts.running;
-        const launchRunning = hasRunningLaunchForProject(project.id, project.launchCommands);
         const logoShouldFlash = shouldFlashPinnedProjectLogo({
           cliRunningCount: runningCount,
-          terminalOpen: launchRunning,
+          terminalOpen: false,
         });
         const finishedCount = project.taskCounts.finished;
         const statusDots = getPinnedProjectStatusDots(project.taskCounts);
@@ -1057,7 +1053,6 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
           runningCount > 0
             ? `${runningCount} ${runningCount === 1 ? "session" : "sessions"} running`
             : null;
-        const launchLabel = launchRunning ? "launch running" : null;
         const finishedLabel =
           finishedCount > 0
             ? `${finishedCount} ${finishedCount === 1 ? "session" : "sessions"} finished`
@@ -1066,7 +1061,6 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
           hotkey ? `${project.name} (${chordHint})` : project.name,
           project.pinned ? "Drag or press Shift+Arrow Up/Down to reorder pinned projects" : null,
           needsInputLabel,
-          launchLabel,
           runningLabel,
           finishedLabel,
         ]
@@ -1226,30 +1220,6 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
               >
                 <ProjectIcon project={project} size={ICON_SIZE} />
               </span>
-              {launchRunning && (
-                <span
-                  aria-hidden
-                  style={{
-                    position: "absolute",
-                    top: -4,
-                    right: needsInputCount > 0 ? 12 : -4,
-                    minWidth: 14,
-                    height: 14,
-                    padding: "0 2px",
-                    borderRadius: HOTKEY_BADGE_RADIUS,
-                    background: "var(--surface-3, var(--surface-2))",
-                    border: "1px solid var(--border)",
-                    color: "var(--accent-ink)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    pointerEvents: "none",
-                    zIndex: 4,
-                  }}
-                >
-                  <Icon name="play" size={8} />
-                </span>
-              )}
               {needsInputCount > 0 && (
                 <span
                   className="mc-needs-input-badge"

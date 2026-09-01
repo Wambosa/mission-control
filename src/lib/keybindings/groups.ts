@@ -39,8 +39,6 @@ export const KEYBINDING_GROUPS: KeybindingGroup[] = [
     label: "Project management",
     description: "Run projects, switch between them, and work with files.",
     actions: [
-      "project.runToggle",
-      "project.openBrowser",
       "project.picker",
       "project.add",
       "project.edit",

@@ -33,8 +33,8 @@ export function listUserTerminals(
   scopeId: string | null = LOCAL_SCOPE_ID,
 ): UserTerminal[] {
   const normalizedScopeId = normalizeProjectScopeId(projectId, scopeId);
-  // Ephemeral terminals (those with a startCommand) are seeded into the UI
-  // by the project's launchCommands and are not meant to persist across reloads.
+  // Ephemeral terminals (those with a startCommand) run a one-off command and
+  // are not meant to persist across reloads.
   deleteEphemeralUserTerminalsByProject(projectId, normalizedScopeId);
   return findVisibleUserTerminalsByProject(projectId, normalizedScopeId);
 }

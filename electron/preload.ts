@@ -475,8 +475,6 @@ const electronAPI = {
     resize: (ptyId: string, cols: number, rows: number) =>
       ipcRenderer.invoke(IPC.ptyResize, { ptyId, cols, rows }),
     kill: (ptyId: string) => ipcRenderer.invoke(IPC.ptyKill, { ptyId }),
-    killLaunchProcesses: (opts: { cwd: string; commands: string[]; ports?: number[] }) =>
-      ipcRenderer.invoke(IPC.ptyKillLaunchProcesses, opts),
     killUnderPath: (cwd: string) =>
       ipcRenderer.invoke(IPC.ptyKillUnderPath, { cwd }) as Promise<{ ptyCount: number }>,
     onData: (cb: (msg: { ptyId: string; data: string; seq: number }) => void) =>

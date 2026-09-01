@@ -26,7 +26,6 @@ import {
   shellArgsForCommand,
 } from "./shell-env";
 import { loadProjectRoots } from "./project-roots";
-import { MAX_TCP_PORT } from "../src/shared/tcp-port";
 import { shortId } from "../src/shared/short-id";
 import {
   resolveSpawnPlan,
@@ -108,11 +107,8 @@ const SCAN_TAIL_MAX = 256;
 /** How long after a keystroke a PTY still counts as interactive. */
 const PTY_INTERACTIVE_WINDOW_MS = 10_000;
 
-const LSOF_PROBE_TIMEOUT_MS = 2_000;
-// Time we'll wait for SIGTERM to take before escalating to SIGKILL (port-kill)
-// or before giving up the wait (pty kill). Same grace for both: 1.5s.
+// How long we wait for SIGTERM to take before giving up the wait on a pty kill.
 const SIGTERM_GRACE_MS = 1_500;
-const PORT_KILL_POLL_INTERVAL_MS = 100;
 const PTY_EXIT_POLL_INTERVAL_MS = 50;
 const TASKKILL_TIMEOUT_MS = 5_000;
 const LOG_VALUE_MAX_LENGTH = 160;
@@ -186,18 +182,6 @@ async function postSyntheticHook(p: Pty, event: string, extra?: Record<string, u
 const ptys = new Map<string, Pty>();
 const RING_LIMIT_BYTES = 1_000_000;
 
-type PortKillResult = {
-  port: number;
-  pids: number[];
-  killed: number[];
-  errors: string[];
-};
-
-type LaunchPortKillTarget = {
-  port: number;
-  protected: boolean;
-};
-
 let nodePty: typeof import("node-pty") | null = null;
 function loadNodePty() {
   if (!nodePty) {
@@ -238,10 +222,6 @@ function send(getWin: () => BrowserWindow | null, channel: string, payload: any)
   const win = getWin();
   if (!win || win.isDestroyed()) return;
   win.webContents.send(channel, payload);
-}
-
-function normalizedCommand(command: string): string {
-  return command.trim();
 }
 
 function sleep(ms: number): Promise<void> {
@@ -338,79 +318,6 @@ export function disposePty(proc: import("node-pty").IPty | null | undefined): vo
   killProcessTreeWindows(pid);
 }
 
-function pidsListeningOnPort(port: number): number[] {
-  if (!Number.isInteger(port) || port <= 0 || port > MAX_TCP_PORT) return [];
-  if (os.platform() === "win32") return [];
-
-  const result = spawnSync("lsof", ["-nP", `-tiTCP:${port}`, "-sTCP:LISTEN"], {
-    encoding: "utf8",
-    timeout: LSOF_PROBE_TIMEOUT_MS,
-  });
-  if (result.error || result.status !== 0) return [];
-
-  const pids = (result.stdout || "")
-    .split(/\s+/)
-    .map((raw) => Number(raw))
-    .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
-  return [...new Set(pids)];
-}
-
-async function killPidsListeningOnPort(port: number): Promise<PortKillResult> {
-  const pids = pidsListeningOnPort(port);
-  const killed: number[] = [];
-  const errors: string[] = [];
-
-  for (const pid of pids) {
-    try {
-      process.kill(pid, "SIGTERM");
-      killed.push(pid);
-    } catch (err: any) {
-      errors.push(`pid ${pid}: ${err?.message ?? String(err)}`);
-    }
-  }
-
-  if (killed.length > 0) {
-    const deadline = Date.now() + SIGTERM_GRACE_MS;
-    while (Date.now() < deadline && pidsListeningOnPort(port).some((pid) => killed.includes(pid))) {
-      await sleep(PORT_KILL_POLL_INTERVAL_MS);
-    }
-    for (const pid of pidsListeningOnPort(port).filter((pid) => killed.includes(pid))) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        /* already exited or not permitted */
-      }
-    }
-  }
-
-  return { port, pids, killed, errors };
-}
-
-function normalizePorts(ports: Iterable<number | null | undefined>): number[] {
-  return [
-    ...new Set(
-      [...ports].filter(
-        (port): port is number =>
-          typeof port === "number" &&
-          Number.isInteger(port) &&
-          port > 0 &&
-          port <= MAX_TCP_PORT
-      )
-    ),
-  ];
-}
-
-export function planLaunchPortKillTargets(
-  ports: Iterable<number | null | undefined>,
-  protectedPorts: Iterable<number | null | undefined>,
-): LaunchPortKillTarget[] {
-  const protectedSet = new Set(normalizePorts(protectedPorts));
-  return normalizePorts(ports).map((port) => ({
-    port,
-    protected: protectedSet.has(port),
-  }));
-}
-
 async function killPty(p: Pty): Promise<boolean> {
   let exited = false;
   try {
@@ -447,7 +354,6 @@ export function registerPtyHandlers(
   ipcMain: IpcMain,
   getWin: () => BrowserWindow | null,
   getHookEnv: () => PtyHookEnv | null,
-  getProtectedPorts: () => Iterable<number | null | undefined> = () => [],
 ) {
   ensureClaudeShiftEnterBinding();
   // The interrupt/hook scans run on the coalesced batch: the rolling scan tail
@@ -748,36 +654,6 @@ export function registerPtyHandlers(
     ptys.delete(ptyId);
     return true;
   }, ipcMain);
-
-  safeHandle(
-    IPC.ptyKillLaunchProcesses,
-    async (
-      _evt,
-      opts: { cwd: string; commands: string[]; ports?: number[] }
-    ): Promise<{ ptyCount: number; ports: PortKillResult[] }> => {
-      const wanted = new Set((opts.commands ?? []).map(normalizedCommand).filter(Boolean));
-      const targets = [...ptys.values()].filter(
-        (p) => p.cwd === opts.cwd && wanted.has(normalizedCommand(p.command))
-      );
-      await Promise.all(targets.map((p) => killPty(p)));
-
-      const ports = planLaunchPortKillTargets(opts.ports ?? [], getProtectedPorts());
-      const portResults = await Promise.all(
-        ports.map((target) =>
-          target.protected
-            ? {
-                port: target.port,
-                pids: [],
-                killed: [],
-                errors: ["skipped protected Mission Control runtime port"],
-              }
-            : killPidsListeningOnPort(target.port)
-        )
-      );
-      return { ptyCount: targets.length, ports: portResults };
-    },
-    ipcMain,
-  );
 
   safeHandle(
     IPC.ptyKillUnderPath,

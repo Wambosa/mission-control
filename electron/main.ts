@@ -2024,9 +2024,6 @@ registerPtyHandlers(
       apiUrl,
       token: getOrCreateApiToken(missionControlUserDataDir),
     };
-  },
-  () => {
-    return runtimePort ? [runtimePort] : [];
   }
 );
 registerFileHandlers(ipcMain, () => win);

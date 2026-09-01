@@ -38,7 +38,6 @@ export const IPC = {
   ptyWrite: "pty:write",
   ptyResize: "pty:resize",
   ptyKill: "pty:kill",
-  ptyKillLaunchProcesses: "pty:killLaunchProcesses",
   ptyKillUnderPath: "pty:killUnderPath",
   ptyReplay: "pty:replay",
   ptyFindByTask: "pty:findByTask",

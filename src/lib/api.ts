@@ -376,11 +376,6 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  updateProjectLaunchUrl: (id: string, launchUrl: string | null) =>
-    req<{ project: Project }>(`/api/projects/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ launchUrl }),
-    }),
   togglePin: (id: string) =>
     req<{ project: Project }>(`/api/projects/${id}`, {
       method: "PATCH",

@@ -17,7 +17,6 @@ import type { TaskStatus } from "~/shared/domain";
 import { useServerEvents } from "~/lib/use-events";
 import { useDebouncedCallback } from "~/lib/use-debounced-callback";
 import { isEditableTarget, useHotkey } from "~/lib/use-hotkey";
-import { useUserTerminals } from "~/lib/user-terminal-store";
 import { queryKeys, useGroups, useProjects, useScopedProjects } from "~/queries";
 import { getProjectActivity, isProjectActive, type ProjectWithCounts } from "~/shared/projects";
 import { useSuspendAppDragRegion } from "~/lib/use-dismissable-menu";
@@ -65,7 +64,6 @@ function ActivityCounts({ project, size = 6 }: { project: ProjectWithCounts; siz
 export function ProjectPicker({ projectId, disabled = false }: { projectId?: string; disabled?: boolean }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { hasRunningLaunchForProject } = useUserTerminals();
   const [open, setOpen] = useState(false);
   useSuspendAppDragRegion(open);
   const { data: allProjects } = useProjects();
@@ -102,16 +100,6 @@ export function ProjectPicker({ projectId, disabled = false }: { projectId?: str
     }
     return projectPickerSections(filtered, groups);
   }, [activeGroup, filtered, groups, groupScoped, projects, searching]);
-  const launchRunningProjectIds = useMemo(
-    () =>
-      new Set(
-        (allProjects ?? [])
-          .filter((project) => hasRunningLaunchForProject(project.id, project.launchCommands))
-          .map((project) => project.id),
-      ),
-    [allProjects, hasRunningLaunchForProject],
-  );
-
   // Flat list of selectable items, in render order — drives keyboard nav indexing.
   const flatItems = useMemo(() => sections.flatMap((s) => s.projects), [sections]);
   // When browsing a group, the footer is part of the same keyboard sequence as
@@ -381,7 +369,7 @@ export function ProjectPicker({ projectId, disabled = false }: { projectId?: str
                           }}
                         >
                           <ProjectIcon project={p} size={18} />
-                          <ProjectRunningDot running={isProjectActive(getProjectActivity(p, launchRunningProjectIds))} size={7} />
+                          <ProjectRunningDot running={isProjectActive(getProjectActivity(p))} size={7} />
                           <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {p.name}
                           </span>

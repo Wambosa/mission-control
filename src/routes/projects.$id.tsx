@@ -1,6 +1,6 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Btn } from "~/components/ui/Btn";
@@ -31,7 +31,6 @@ import { FileFinderDialog } from "~/components/views/FileFinderDialog";
 const FileEditorDialog = lazy(() =>
   import("~/components/views/FileEditorDialog").then((m) => ({ default: m.FileEditorDialog })),
 );
-import { LaunchCommandsDialog } from "~/components/views/LaunchCommandsDialog";
 import { CustomScriptsDialog } from "~/components/views/CustomScriptsDialog";
 import { CustomScriptsButton } from "~/components/views/CustomScriptsButton";
 import { GridLayoutButton } from "~/components/views/GridLayoutButton";
@@ -100,10 +99,8 @@ import { DEFAULT_SYNC_PROMPT } from "~/shared/sync-defaults";
 import type { AiModelId } from "~/shared/ai-runtime-defaults";
 import {
   VOICE_NEW_AGENT_EVENT,
-  VOICE_OPEN_BROWSER_EVENT,
   VOICE_OPEN_DIFF_EVENT,
   VOICE_REMEMBER_EVENT,
-  VOICE_RUN_PROJECT_EVENT,
   VOICE_RUN_SCRIPT_EVENT,
   type VoiceNewAgentDetail,
   type VoiceRememberDetail,
@@ -120,7 +117,6 @@ import {
 import {
   DEFAULT_BRANCH,
   type TaskAgent,
-  parseLaunchCommands,
   parseCustomScripts,
   serializeCustomScripts,
   STATUS_DISPLAY_ORDER,
@@ -128,7 +124,6 @@ import {
   type CustomScript,
 } from "~/shared/domain";
 import { getPinnedProjectStatusDots } from "~/components/views/project-bar-status-dots";
-import { hasRunningLaunchSessions } from "~/lib/project-launch-running";
 import { agentSupportsSkipPermissions } from "~/shared/agents";
 import {
   queryKeys,
@@ -256,18 +251,6 @@ function isCurrentPathIssue(
 ): boolean {
   if (status.scope === "project") return selectedWorktreeId === null;
   return status.worktreeId === selectedWorktreeId;
-}
-
-function launchUrlPort(raw: string | null): number[] {
-  if (!raw) return [];
-  try {
-    const url = new URL(raw);
-    if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname)) return [];
-    const port = Number(url.port);
-    return Number.isInteger(port) && port > 0 ? [port] : [];
-  } catch {
-    return [];
-  }
 }
 
 function firstDisplayedTask<T extends { status: TaskStatus }>(tasks: T[]): T | undefined {
@@ -635,20 +618,16 @@ function ProjectPage() {
     setFileFinderResetKey((v) => v + 1);
     setFileFinderOpen(true);
   }, []);
-  const [showLaunchConfig, setShowLaunchConfig] = useState(false);
   const [showRecall, setShowRecall] = useState(false);
   const [recallInitialFilter, setRecallInitialFilter] = useState<"all" | "recent">("all");
   const [showCustomScriptsConfig, setShowCustomScriptsConfig] = useState(false);
   const [showWorktreeSetupConfig, setShowWorktreeSetupConfig] = useState(false);
   const [showInstallDiagramSkill, setShowInstallDiagramSkill] = useState(false);
-  const [showLaunchEmpty, setShowLaunchEmpty] = useState(false);
   const [confirmDeleteWorktree, setConfirmDeleteWorktree] = useState(false);
   const [worktreeDeleteConfirmName, setWorktreeDeleteConfirmName] = useState("");
   const [creatingWorktree, setCreatingWorktree] = useState(false);
   const creatingWorktreeRef = useRef(false);
   const [deletingWorktree, setDeletingWorktree] = useState(false);
-  const [launching, setLaunching] = useState(false);
-  const [stopping, setStopping] = useState(false);
   const [pinning, setPinning] = useState(false);
   const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
   const [repairingProjectPath, setRepairingProjectPath] = useState(false);
@@ -658,15 +637,9 @@ function ProjectPage() {
   useEffect(() => {
     setProjectPathActionError(null);
   }, [projectPathCheck.state, projectPathIssue?.path]);
-  const launchCommands = parseLaunchCommands(project?.launchCommands ?? null);
   const customScripts = useMemo(
     () => parseCustomScripts(project?.customScripts ?? null),
     [project?.customScripts]
-  );
-  const launchCommandSet = useMemo(
-    () =>
-      new Set(launchCommands.map((c) => c.command.trim()).filter(Boolean)),
-    [launchCommands]
   );
   const cliAvailability = useCliAvailability();
   const selectedWorktreeChangeCount = selectedWorktree && !selectedWorktree.isMain
@@ -843,79 +816,8 @@ function ProjectPage() {
   const {
     setProject: setActiveUserTerminalProject,
     createTerminal,
-    killTerminalsByStartCommand,
     setPanelOpen,
-    sessions: userTerminalSessions,
-    runningLaunchWorktreeIdsForProject,
   } = useUserTerminals();
-  const launchRunningWorktreeIds = useMemo(
-    () => runningLaunchWorktreeIdsForProject(project?.id ?? id, project?.launchCommands ?? null),
-    [id, project?.id, project?.launchCommands, runningLaunchWorktreeIdsForProject]
-  );
-  const hasRunningLaunch = hasRunningLaunchSessions(userTerminalSessions, launchCommandSet);
-  const runningWorktreeKey = worktreesEnabled
-    ? [...launchRunningWorktreeIds].find((key) => key.startsWith(`${project?.id ?? id}:`))
-    : undefined;
-  const runningBlocksSelectedWorktree =
-    worktreesEnabled && !!runningWorktreeKey && runningWorktreeKey !== selectedScopeKey;
-  const launchPorts = useMemo(
-    () => launchUrlPort(project?.launchUrl ?? null),
-    [project?.launchUrl]
-  );
-
-  const stopLaunch = useCallback(async () => {
-    setOverflowOpen(false);
-    if (launchCommands.length === 0) return;
-    setStopping(true);
-    try {
-      await killTerminalsByStartCommand(launchCommands.map((c) => c.command), {
-        ports: launchPorts,
-      });
-    } finally {
-      setStopping(false);
-    }
-  }, [launchCommands, launchPorts, killTerminalsByStartCommand]);
-
-  const runLaunch = useCallback(async () => {
-    setOverflowOpen(false);
-    if (!projectPathReady) return;
-    if (runningBlocksSelectedWorktree) {
-      const runningId = runningWorktreeKey?.split(":")[1] || MAIN_WORKTREE_ID;
-      const runningName =
-        worktrees.find((w) => w.id === runningId)?.name ?? runningId;
-      toast.error(`Switch to ${runningName} and stop it before launching another worktree.`);
-      return;
-    }
-    if (launchCommands.length === 0) {
-      setShowLaunchEmpty(true);
-      return;
-    }
-    setLaunching(true);
-    try {
-      await killTerminalsByStartCommand(launchCommands.map((c) => c.command), {
-        ports: launchPorts,
-      });
-      for (const c of launchCommands) {
-        // Don't steal keyboard focus: users commonly run (Cmd+.) then
-        // immediately hit another hotkey (e.g. open browser), and a focused
-        // terminal would swallow those keystrokes.
-        await createTerminal({ name: c.name, startCommand: c.command, focusOnCreate: false });
-      }
-      setPanelOpen(true);
-    } finally {
-      setLaunching(false);
-    }
-  }, [
-    runningBlocksSelectedWorktree,
-    runningWorktreeKey,
-    worktrees,
-    launchCommands,
-    launchPorts,
-    killTerminalsByStartCommand,
-    createTerminal,
-    setPanelOpen,
-    projectPathReady,
-  ]);
 
   // Script awaiting argument values before it can run (null when none pending).
   const [argsScript, setArgsScript] = useState<CustomScript | null>(null);
@@ -1336,10 +1238,6 @@ function ProjectPage() {
 
   const deleteSelectedWorktree = useCallback(async (mode: DeleteWorktreeMode = "clean") => {
     if (!worktreesEnabled || !project || !selectedWorktree || selectedWorktree.isMain) return;
-    if (launchRunningWorktreeIds.has(selectedScopeKey)) {
-      toast.error("Stop this worktree before deleting it.");
-      return;
-    }
     setDeletingWorktree(true);
     const worktreesKey = queryKeys.worktrees(project.id);
     const previousWorktrees = queryClient.getQueryData<WorktreeInfo[]>(worktreesKey);
@@ -1407,7 +1305,6 @@ function ProjectPage() {
     selectedWorktree,
     selectedWorktreeKey,
     selectedScopeKey,
-    launchRunningWorktreeIds,
     selectWorktree,
     closeDeleteWorktreeDialog,
     invalidateWorktrees,
@@ -1746,35 +1643,6 @@ function ProjectPage() {
   });
 
   useHotkey(
-    "project.runToggle",
-    () => {
-      if (showNewAgent || showEdit || confirmRemove || projectPathIssue || projectPathCheck.state === "error") return;
-      if (hasRunningLaunch) {
-        if (!stopping) void stopLaunch();
-      } else if (!launching) {
-        void runLaunch();
-      }
-    },
-    { ignoreEditable: true },
-  );
-
-  // Open the running project's launch URL in the browser — mirrors the globe
-  // button that appears beside Stop while the project is running.
-  useHotkey(
-    "project.openBrowser",
-    () => {
-      if (showNewAgent || showEdit || confirmRemove || projectPathIssue || projectPathCheck.state === "error") return;
-      if (!hasRunningLaunch) return;
-      if (!project?.launchUrl) {
-        toast.error("No launch URL configured for this project.");
-        return;
-      }
-      void openExternal(project.launchUrl);
-    },
-    { ignoreEditable: true },
-  );
-
-  useHotkey(
     "file.finder",
     () => {
       if (openFileRel || showNewAgent || showEdit || confirmRemove || !projectPathReady) return;
@@ -1859,34 +1727,11 @@ function ProjectPage() {
   ]);
 
   // Command bus: VoiceController (mounted at root) dispatches these for the
-  // active project route to perform. Mirrors the project.runToggle hotkey.
+  // active project route to perform.
   useEffect(() => {
-    const onRun = () => {
-      if (
-        showNewAgent ||
-        showEdit ||
-        confirmRemove ||
-        projectPathIssue ||
-        projectPathCheck.state === "error"
-      ) {
-        return;
-      }
-      if (hasRunningLaunch) {
-        if (!stopping) void stopLaunch();
-      } else if (!launching) {
-        void runLaunch();
-      }
-    };
     const onNewAgent = (e: Event) => {
       const detail = (e as CustomEvent<VoiceNewAgentDetail>).detail;
       startVoiceAgent(detail?.prompt ?? "", detail?.agent);
-    };
-    const onOpenBrowser = () => {
-      if (!project?.launchUrl) {
-        toast.error("No launch URL configured for this project.");
-        return;
-      }
-      void openExternal(project.launchUrl);
     };
     const onRunScript = (e: Event) => {
       const detail = (e as CustomEvent<VoiceRunScriptDetail>).detail;
@@ -1912,16 +1757,12 @@ function ProjectPage() {
           toast.error(err instanceof Error ? err.message : "Could not save that memory"),
         );
     };
-    window.addEventListener(VOICE_RUN_PROJECT_EVENT, onRun);
     window.addEventListener(VOICE_NEW_AGENT_EVENT, onNewAgent as EventListener);
-    window.addEventListener(VOICE_OPEN_BROWSER_EVENT, onOpenBrowser);
     window.addEventListener(VOICE_RUN_SCRIPT_EVENT, onRunScript as EventListener);
     window.addEventListener(VOICE_OPEN_DIFF_EVENT, onOpenDiff);
     window.addEventListener(VOICE_REMEMBER_EVENT, onRemember as EventListener);
     return () => {
-      window.removeEventListener(VOICE_RUN_PROJECT_EVENT, onRun);
       window.removeEventListener(VOICE_NEW_AGENT_EVENT, onNewAgent as EventListener);
-      window.removeEventListener(VOICE_OPEN_BROWSER_EVENT, onOpenBrowser);
       window.removeEventListener(VOICE_RUN_SCRIPT_EVENT, onRunScript as EventListener);
       window.removeEventListener(VOICE_OPEN_DIFF_EVENT, onOpenDiff);
       window.removeEventListener(VOICE_REMEMBER_EVENT, onRemember as EventListener);
@@ -1932,11 +1773,6 @@ function ProjectPage() {
     confirmRemove,
     projectPathIssue,
     projectPathCheck.state,
-    hasRunningLaunch,
-    stopping,
-    launching,
-    stopLaunch,
-    runLaunch,
     startVoiceAgent,
     project,
     customScripts,
@@ -1954,10 +1790,8 @@ function ProjectPage() {
     confirmDeleteWorktree ||
     fileFinderOpen ||
     openFileRel !== null ||
-    showLaunchConfig ||
     showWorktreeSetupConfig ||
     showInstallDiagramSkill ||
-    showLaunchEmpty ||
     confirmDeleteArchived ||
     !!projectPathIssue ||
     projectPathCheck.state === "error" ||
@@ -2723,39 +2557,13 @@ function ProjectPage() {
           flexShrink: 0,
         }}
       />
-      <RunStatusPill
-        running={hasRunningLaunch}
-        launching={launching}
-        stopping={stopping}
-        disabled={projectPathBlocked}
-        disabledLabel="Folder unavailable"
-        launchUrl={project.launchUrl ?? null}
-        onStart={runLaunch}
-        onOpenUrl={() =>
-          project.launchUrl && window.electronAPI?.openExternal(project.launchUrl)
-        }
-        onStop={stopLaunch}
-      />
       {worktreesEnabled && (
         // "New worktree" now lives inside the branch dropdown (below), so the
         // standalone create-worktree button is gone — one fewer control.
         <>
-          {/* Separate Run (launch the app) from the git group (branch /
-           * changes) — two different concerns. */}
-          <span
-            aria-hidden
-            style={{
-              width: 1,
-              height: 18,
-              background: "var(--border)",
-              margin: "0 4px",
-              flexShrink: 0,
-            }}
-          />
           <WorktreeToggleGroup
           worktrees={worktrees}
           selectedId={selectedWorktree?.id ?? MAIN_WORKTREE_ID}
-          runningKeys={launchRunningWorktreeIds}
           projectId={project.id}
           onSelect={selectWorktree}
           onDeleteSelected={() => setConfirmDeleteWorktree(true)}
@@ -2925,20 +2733,6 @@ function ProjectPage() {
                   zIndex: Z_INDEX.popover,
                 }}
               >
-                {hasRunningLaunch ? (
-                  <>
-                    <HotkeyTooltip action="project.runToggle">
-                      <DropdownMenuItem
-                        icon="x"
-                        onClick={stopLaunch}
-                        disabled={stopping}
-                      >
-                        {stopping ? "Stopping…" : "Stop launch"}
-                      </DropdownMenuItem>
-                    </HotkeyTooltip>
-                    <DropdownMenuSeparator />
-                  </>
-                ) : null}
                 <DropdownMenuItem
                   icon={project.pinned ? "pin-fill" : "pin"}
                   onClick={toggleProjectPin}
@@ -3057,15 +2851,6 @@ function ProjectPage() {
                   }}
                 />
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  icon="play"
-                  onClick={() => {
-                    setOverflowOpen(false);
-                    setShowLaunchConfig(true);
-                  }}
-                >
-                  Launch commands
-                </DropdownMenuItem>
                 <DropdownMenuItem
                   icon="terminal"
                   onClick={() => {
@@ -3909,16 +3694,6 @@ function ProjectPage() {
         </Modal>
       )}
 
-      <LaunchCommandsDialog
-        open={showLaunchConfig}
-        project={project}
-        onClose={() => setShowLaunchConfig(false)}
-        onSave={async (next) => {
-          await api.updateProject(project.id, { launchCommands: next });
-          await refresh();
-        }}
-      />
-
       <ScriptArgsModal
         open={argsScript !== null}
         script={argsScript}
@@ -3967,37 +3742,6 @@ function ProjectPage() {
           await refresh();
         }}
       />
-
-      <Modal
-        open={showLaunchEmpty}
-        onClose={() => setShowLaunchEmpty(false)}
-        title="No launch commands"
-        width={420}
-        footer={
-          <>
-            <StaticHotkeyTooltip hotkey="Esc">
-              <Btn variant="ghost" onClick={() => setShowLaunchEmpty(false)}>
-                Close
-              </Btn>
-            </StaticHotkeyTooltip>
-            <Btn
-              variant="primary"
-              icon="settings"
-              onClick={() => {
-                setShowLaunchEmpty(false);
-                setShowLaunchConfig(true);
-              }}
-            >
-              Configure
-            </Btn>
-          </>
-        }
-      >
-        <p style={{ margin: 0, fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5 }}>
-          You haven't configured any launch commands for this project yet. Open the configuration
-          modal to add up to 5 commands that will run when you press Launch.
-        </p>
-      </Modal>
 
       <ConfirmDialog
         open={confirmDeleteArchived}
@@ -4214,15 +3958,12 @@ function SessionScopeToggle({
 }
 
 function WorktreeBadgeDots({
-  launchRunning,
   taskCounts,
 }: {
-  /** A launch command's terminal is running in this worktree. */
-  launchRunning: boolean;
   taskCounts?: WorktreeInfo["taskCounts"];
 }) {
   const statusDots = taskCounts ? getPinnedProjectStatusDots(taskCounts) : [];
-  if (!launchRunning && statusDots.length === 0) return null;
+  if (statusDots.length === 0) return null;
   return (
     <span
       aria-hidden
@@ -4238,17 +3979,6 @@ function WorktreeBadgeDots({
         zIndex: 1,
       }}
     >
-      {launchRunning && (
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            background: "var(--status-running)",
-            boxShadow: "0 0 6px var(--status-running)",
-          }}
-        />
-      )}
       {statusDots.map((status, dot) => (
         <span
           key={`${status}-${dot}`}
@@ -4269,7 +3999,6 @@ function WorktreeBadgeDots({
 function WorktreeToggleGroup({
   worktrees,
   selectedId,
-  runningKeys,
   projectId,
   onSelect,
   onDeleteSelected,
@@ -4290,7 +4019,6 @@ function WorktreeToggleGroup({
 }: {
   worktrees: WorktreeInfo[];
   selectedId: string;
-  runningKeys: ReadonlySet<string>;
   projectId: string;
   onSelect: (id: string) => void;
   onDeleteSelected?: (worktree: WorktreeInfo) => void;
@@ -4320,13 +4048,6 @@ function WorktreeToggleGroup({
     worktrees.find((worktree) => worktree.isMain) ??
     worktrees[0]!;
   const selectedIsMain = selectedWorktree.isMain;
-  const selectedScopeKey = worktreeScopeKey(
-    projectId,
-    selectedIsMain ? null : selectedWorktree.id,
-  );
-  const selectedRunning = [...runningKeys].some(
-    (key) => key === selectedScopeKey || key.startsWith(`${selectedScopeKey}:`),
-  );
   const branchLabel = selectedIsMain ? mainBranchLabel : selectedWorktree.branch;
   // Sync stays main-only: behindCount is the main worktree's upstream delta.
   // The action lives inside the branch dropdown now (with a ↓N badge on the
@@ -4382,10 +4103,7 @@ function WorktreeToggleGroup({
             minWidth: 0,
           }}
         >
-          <WorktreeBadgeDots
-            launchRunning={selectedRunning}
-            taskCounts={selectedWorktree.taskCounts}
-          />
+          <WorktreeBadgeDots taskCounts={selectedWorktree.taskCounts} />
           <BranchTypeahead
             projectId={projectId}
             worktreeId={selectedIsMain ? null : selectedWorktree.id}
@@ -4403,7 +4121,6 @@ function WorktreeToggleGroup({
             selectedWorktreeId={selectedWorktree.id}
             onSelectWorktree={onSelect}
             onDeleteWorktree={onDeleteSelected}
-            runningKeys={runningKeys}
           />
         </div>
       )}
@@ -4499,149 +4216,3 @@ function WorktreeChangeStat({ label, count }: { label: string; count: number }) 
   );
 }
 
-function RunStatusPill({
-  running,
-  launching,
-  stopping,
-  disabled = false,
-  disabledLabel = "Unavailable",
-  launchUrl,
-  onStart,
-  onOpenUrl,
-  onStop,
-}: {
-  running: boolean;
-  launching: boolean;
-  stopping: boolean;
-  disabled?: boolean;
-  disabledLabel?: string;
-  launchUrl: string | null;
-  onStart: () => void;
-  onOpenUrl: () => void;
-  onStop: () => void;
-}) {
-  const busy = launching || stopping;
-  const label = disabled
-    ? disabledLabel
-    : stopping
-    ? "Stopping…"
-    : launching
-      ? "Starting…"
-      : running
-        ? "Running"
-        : "Offline";
-
-  const interactive = !disabled && !busy && !running;
-  const onClick = disabled || busy ? undefined : running ? undefined : onStart;
-
-  const title = disabled
-    ? disabledLabel
-    : busy
-    ? label
-    : running
-      ? "Running"
-      : "Run launch commands";
-
-  const tone = !disabled && (running || launching) ? "active" : "idle";
-  const dotColor = tone === "active" ? "var(--accent)" : "var(--text-faint)";
-  const borderColor = tone === "active" ? "var(--accent-border)" : "var(--border)";
-  const background = tone === "active" ? "var(--accent-faint)" : "var(--surface-0)";
-  const fg = tone === "active" ? "var(--accent)" : "var(--text-dim)";
-
-  const activeFrameIconStyle: CSSProperties = {
-    width: 52,
-    minWidth: 52,
-    paddingInline: 0,
-    fontFamily: "var(--mono)",
-  };
-
-  const showRunningSplit = running && !busy;
-
-  if (showRunningSplit) {
-    return (
-      <div
-        role="group"
-        aria-label="Project launch — running"
-        style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-      >
-        <HotkeyTooltip action="project.runToggle" label="Stop launch commands">
-          <Btn
-            variant="danger"
-            icon="stop"
-            onClick={() => onStop()}
-            aria-label="Stop launch commands"
-            style={activeFrameIconStyle}
-          />
-        </HotkeyTooltip>
-        {launchUrl ? (
-          <HotkeyTooltip action="project.openBrowser" label="Open in browser">
-            <Btn
-              variant="ghost"
-              icon="globe"
-              onClick={onOpenUrl}
-              aria-label={`Open ${launchUrl} in browser`}
-              style={activeFrameIconStyle}
-            />
-          </HotkeyTooltip>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (!running && !busy) {
-    return (
-      <HotkeyTooltip action="project.runToggle" label={title}>
-        <Btn
-          variant="ghost"
-          icon="play"
-          onClick={disabled || busy ? undefined : onStart}
-          disabled={disabled || busy}
-          aria-label={title}
-          style={activeFrameIconStyle}
-        />
-      </HotkeyTooltip>
-    );
-  }
-
-  return (
-    <HotkeyTooltip action="project.runToggle" label={title}>
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={!interactive}
-        aria-label={title}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 8,
-          height: 28,
-          padding: "0 12px",
-          borderRadius: 999,
-          border: `1px solid ${borderColor}`,
-          background,
-          color: fg,
-          fontFamily: "var(--mono)",
-          fontSize: 11.5,
-          fontWeight: 600,
-          cursor: interactive ? "pointer" : "default",
-          opacity: busy ? 0.7 : 1,
-          transition: "background 0.12s, border-color 0.12s, color 0.12s",
-          boxShadow: running ? "0 0 8px var(--accent-glow)" : "none",
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            width: 7,
-            height: 7,
-            borderRadius: "50%",
-            background: dotColor,
-            boxShadow: running ? "0 0 6px var(--accent-glow)" : "none",
-            animation: launching || stopping ? "pulse-border 1.4s ease-in-out infinite" : "none",
-          }}
-        />
-        <span>{label}</span>
-      </button>
-    </HotkeyTooltip>
-  );
-}

@@ -153,7 +153,6 @@ export function BranchTypeahead({
   selectedWorktreeId,
   onSelectWorktree,
   onDeleteWorktree,
-  runningKeys,
 }: {
   projectId: string;
   worktreeId?: string | null;
@@ -171,7 +170,6 @@ export function BranchTypeahead({
   selectedWorktreeId?: string;
   onSelectWorktree?: (id: string) => void;
   onDeleteWorktree?: (worktree: WorktreeInfo) => void;
-  runningKeys?: ReadonlySet<string>;
 }) {
   const branchLabel = branch?.trim() || "…";
   const queryClient = useQueryClient();
@@ -521,12 +519,6 @@ export function BranchTypeahead({
                     const optimistic = isOptimisticWorktree(item);
                     const isSelected = item.id === selectedWorktreeId;
                     const label = worktreeLabel(item);
-                    const scope = worktreeScopeKey(projectId, item.isMain ? null : item.id);
-                    const running = runningKeys
-                      ? [...runningKeys].some(
-                          (key) => key === scope || key.startsWith(`${scope}:`),
-                        )
-                      : false;
                     const statusDots = item.taskCounts
                       ? getPinnedProjectStatusDots(item.taskCounts)
                       : [];
@@ -621,17 +613,6 @@ export function BranchTypeahead({
                               flexShrink: 0,
                             }}
                           >
-                            {running && (
-                              <span
-                                style={{
-                                  width: 6,
-                                  height: 6,
-                                  borderRadius: "50%",
-                                  background: "var(--status-running)",
-                                  boxShadow: "0 0 6px var(--status-running)",
-                                }}
-                              />
-                            )}
                             {statusDots.map((status, dot) => (
                               <span
                                 key={`${status}-${dot}`}

@@ -49,16 +49,6 @@ export type FileWriteResult =
 
 export type InstallDiagramSkillResult = import("~/shared/diagram-skill-install").DiagramSkillInstallResult;
 
-export type LaunchProcessKillResult = {
-  ptyCount: number;
-  ports: Array<{
-    port: number;
-    pids: number[];
-    killed: number[];
-    errors: string[];
-  }>;
-};
-
 export type PtySpawnAgent = "claude-code" | "codex" | "cursor-cli" | "opencode";
 
 export type CliCheckResult =
@@ -414,11 +404,6 @@ export type ElectronBridge = {
     write: (ptyId: string, data: string) => Promise<boolean>;
     resize: (ptyId: string, cols: number, rows: number) => Promise<boolean>;
     kill: (ptyId: string) => Promise<boolean>;
-    killLaunchProcesses: (opts: {
-      cwd: string;
-      commands: string[];
-      ports?: number[];
-    }) => Promise<LaunchProcessKillResult>;
     /** Kill every PTY whose cwd is inside `cwd` (e.g. before deleting a worktree). */
     killUnderPath: (cwd: string) => Promise<{ ptyCount: number }>;
     onData: (cb: (msg: { ptyId: string; data: string; seq: number }) => void) => () => void;

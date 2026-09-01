@@ -31,10 +31,9 @@ export const DEFAULT_PROJECT_SORT: ProjectSortState = {
 
 const ACTIVITY_RANK: Record<ProjectActivityState, number> = {
   offline: 0,
-  "launch-running": 1,
-  "agent-running": 2,
-  "needs-input": 3,
-  interrupted: 4,
+  "agent-running": 1,
+  "needs-input": 2,
+  interrupted: 3,
 };
 
 function compareStrings(a: string, b: string): number {
@@ -61,7 +60,6 @@ export function sortProjects(
   projects: readonly ProjectWithCounts[],
   groups: readonly Group[],
   sort: ProjectSortState,
-  launchRunningProjectIds: ReadonlySet<string>,
 ): ProjectWithCounts[] {
   const groupById = new Map(groups.map((group) => [group.id, group]));
   const direction = sort.direction === "asc" ? 1 : -1;
@@ -80,8 +78,8 @@ export function sortProjects(
         );
         break;
       case "status": {
-        const leftActivity = getProjectActivity(left, launchRunningProjectIds);
-        const rightActivity = getProjectActivity(right, launchRunningProjectIds);
+        const leftActivity = getProjectActivity(left);
+        const rightActivity = getProjectActivity(right);
         result = compareNumbers(ACTIVITY_RANK[leftActivity], ACTIVITY_RANK[rightActivity]);
         if (result === 0) {
           result = compareBooleans(isProjectActive(leftActivity), isProjectActive(rightActivity));

@@ -180,15 +180,16 @@ export function updateTask(
  * every session subscriber for nothing. A blank or missing directory is no
  * signal at all and leaves the stored one alone — the header keeps saying what
  * it last knew rather than blanking (R13).
+ *
+ * Takes the row rather than an id: the hook handler has already loaded it, and
+ * this runs on every event of every open session.
  */
-export function recordAgentCwd(id: string, cwd: string | undefined): Task | null {
+export function recordAgentCwd(existing: Task, cwd: string | undefined): Task {
   const next = cwd?.trim();
-  if (!next) return null;
-  const existing = findTaskById(id);
-  if (!existing || existing.agentCwd === next) return existing;
+  if (!next || existing.agentCwd === next) return existing;
   const updated = { ...existing, agentCwd: next, updatedAt: Date.now() };
-  updateTaskRow(id, updated);
-  events.emit("task:updated", { id, projectId: existing.projectId });
+  updateTaskRow(existing.id, updated);
+  events.emit("task:updated", { id: existing.id, projectId: existing.projectId });
   return updated;
 }
 

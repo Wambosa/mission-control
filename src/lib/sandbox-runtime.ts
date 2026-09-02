@@ -31,7 +31,14 @@ export function cachedSandboxRemoteRoot(sandboxId: string | null | undefined): s
   return sandboxId ? remoteRootByScope.get(sandboxId) ?? null : null;
 }
 
-/** One read of a scope's root, tolerant of an older main process. Cached. */
+/**
+ * One read of a scope's root, tolerant of an older main process.
+ *
+ * Only a real answer is cached. A host that was unreachable, unprovisioned, or
+ * simply slow the first time would otherwise be remembered as rootless for the
+ * rest of the app's run, and every session on it would fall back to a derived
+ * path that machine may never have had.
+ */
 export async function readSandboxRemoteRoot(
   sandboxId: string | null | undefined,
   electron: ElectronBridge | null = getElectron(),
@@ -45,6 +52,6 @@ export async function readSandboxRemoteRoot(
   } catch {
     root = null;
   }
-  remoteRootByScope.set(sandboxId, root);
+  if (root !== null) remoteRootByScope.set(sandboxId, root);
   return root;
 }

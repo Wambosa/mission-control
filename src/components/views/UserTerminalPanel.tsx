@@ -547,6 +547,7 @@ export function UserTerminalPanel() {
                     ptyId={s.ptyId}
                     cwd={s.terminal.cwd || project?.path || ""}
                     sandboxId={terminalScopeId}
+                    remoteDirectory={project?.remoteDirectory ?? null}
                     isHome={homeActive}
                     focused={focusedId === s.terminal.id}
                     onFocus={() => focusTerminal(s.terminal.id)}

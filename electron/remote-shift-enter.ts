@@ -18,7 +18,15 @@ type RemoteFsMethod = "fs.read" | "fs.write";
 export type RemoteFsRpc = (
   method: RemoteFsMethod,
   params: Record<string, unknown>,
+  opts?: { timeoutMs?: number },
 ) => Promise<unknown>;
+
+/**
+ * A session start waits on this, so it gets its own budget rather than the
+ * client's default. Two round trips at the default would let an unresponsive
+ * host hold a terminal closed for a minute over a keybinding.
+ */
+const SHIFT_ENTER_RPC_TIMEOUT_MS = 3_000;
 
 const SHIFT_ENTER_FLAG = "shiftEnterKeyBindingInstalled";
 
@@ -73,16 +81,22 @@ export async function ensureRemoteClaudeShiftEnterBinding(
   if (!homeDir.trim()) return;
   const settingsPath = claudeSettingsPath(homeDir);
   try {
-    const outcome = interpretRead(await rpc("fs.read", { path: settingsPath }));
+    const outcome = interpretRead(
+      await rpc("fs.read", { path: settingsPath }, { timeoutMs: SHIFT_ENTER_RPC_TIMEOUT_MS }),
+    );
     if (outcome.state === "unusable") return;
     const settings = outcome.state === "settings" ? outcome.settings : {};
     if (settings[SHIFT_ENTER_FLAG] === true) return;
     const next = { ...settings, [SHIFT_ENTER_FLAG]: true };
-    await rpc("fs.write", {
-      path: settingsPath,
-      content: `${JSON.stringify(next, null, 2)}\n`,
-      expectedMtimeMs: outcome.state === "settings" ? outcome.mtimeMs : null,
-    });
+    await rpc(
+      "fs.write",
+      {
+        path: settingsPath,
+        content: `${JSON.stringify(next, null, 2)}\n`,
+        expectedMtimeMs: outcome.state === "settings" ? outcome.mtimeMs : null,
+      },
+      { timeoutMs: SHIFT_ENTER_RPC_TIMEOUT_MS },
+    );
   } catch {
     // Best-effort, exactly like the local writer: the operator can still run
     // `/terminal-setup` on the host.

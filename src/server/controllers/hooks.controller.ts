@@ -244,9 +244,14 @@ export async function receive(url: URL, request: Request): Promise<Response> {
 
   // Follow the agent's working directory. Subagent lifecycle events are
   // excluded for the same reason as the transcript path: they describe the
-  // child, not the session the header is labeling.
+  // child, not the session the header is labeling. Fail-soft like its
+  // neighbours: a header label must never cost the hook its status transition.
   if (!isSubagentLifecycleEvent(event)) {
-    recordAgentCwd(taskId, payload.cwd);
+    try {
+      recordAgentCwd(task, payload.cwd);
+    } catch {
+      /* a directory the header could not record is not worth failing a hook */
+    }
   }
 
   // Stash the transcript path (present on most Claude hooks incl. Stop) so the

@@ -233,7 +233,7 @@ export function UserTerminalProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     void (async () => {
       try {
-        const { terminals } = await api.listHomeTerminals(LOCAL_SCOPE_ID);
+        const { terminals } = await api.listHomeTerminals();
         if (cancelled) return;
         setSessionsByProject((prev) => {
           if (prev[key]) return prev; // a createTerminal call beat us to it

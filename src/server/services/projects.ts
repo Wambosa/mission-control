@@ -306,6 +306,14 @@ export function createProject(input: {
   pinned?: boolean;
 }): Project {
   const localPath = validateWorkingDirectory(input.path ?? "");
+  // The same invariant the update path enforces: a project on an SSH host has
+  // to say where it lives there, and creation takes no directory, so binding
+  // one to a host at create time is refused rather than left to a guess.
+  if (input.sandboxId && isSshHostSandbox(input.sandboxId)) {
+    throw new ValidationError(
+      "Create the project first, then choose its SSH host and remote directory together.",
+    );
+  }
 
   const name = input.name?.trim() || path.basename(localPath) || "project";
 

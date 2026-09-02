@@ -385,7 +385,7 @@ async function dispatch(
 
   // Home terminals (project-less dashboard terminals)
   if (pathname === "/api/home/user-terminals") {
-    if (method === "GET") return homeTerminalsController.listAll(request);
+    if (method === "GET") return homeTerminalsController.listAll();
     if (method === "POST") return homeTerminalsController.create(request);
   }
   m = pathname.match(HOME_USER_TERMINAL_PATH);

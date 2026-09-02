@@ -1720,7 +1720,7 @@ export function registerSandboxManager(
         const homeDir = sshHostHomeDir(config);
         if (homeDir) {
           await ensureRemoteClaudeShiftEnterBinding(
-            (method, params) => client.rpc(method, params),
+            (method, params, opts) => client.rpc(method, params, opts),
             homeDir,
           );
         }

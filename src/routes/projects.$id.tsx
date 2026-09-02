@@ -110,7 +110,7 @@ import {
 } from "~/queries";
 import { useActiveGroup } from "~/lib/active-group";
 import { useGitStatus } from "~/queries/git";
-import type { ProjectFsScope } from "~/lib/project-fs";
+import { projectRemoteRoot, type ProjectFsScope } from "~/lib/project-fs";
 import { GitDiffModal } from "~/components/views/GitDiffView/GitDiffModal";
 import { RecallModal } from "~/components/views/RecallModal";
 import { SandboxProvisioningState } from "~/components/views/SandboxProvisioningState";
@@ -347,6 +347,16 @@ function ProjectPage() {
     useGitDiffViewOpen(id);
   const { data: gitStatusData, isError: gitStatusIsError } = useGitStatus(id, null, {
     enabled: projectPathUsable,
+    // The diff view shares this key, so it has to read the same repository:
+    // for a project on another machine that is the one over there, not this
+    // one. Passing different inputs under one key made the chip and the diff
+    // disagree about the same project.
+    sandboxRepoPath: projectRemoteRoot(
+      projectPath || project?.path || "",
+      project?.remoteDirectory ?? null,
+      project?.sandboxId ?? null,
+    ),
+    scope: projectFsScope,
     // The toolbar chip only needs a lazy cadence; file-level surfaces (the
     // open diff view) poll fast via their own observer on the same key.
     fastPoll: showDiffView,

@@ -24,6 +24,17 @@ export function toUserTerminal(row: HomeTerminal): UserTerminal {
   };
 }
 
+// Every dashboard terminal, whatever scope it was opened in. A home terminal
+// has no project and therefore no host; `scope_id` stays as the record of
+// where it ran, the way a session's does, and no longer decides visibility.
+export function findAllHomeTerminals(): HomeTerminal[] {
+  return getDb()
+    .select()
+    .from(homeTerminals)
+    .orderBy(asc(homeTerminals.position), asc(homeTerminals.createdAt))
+    .all();
+}
+
 export function findHomeTerminalsByScope(scopeId: string): HomeTerminal[] {
   return getDb()
     .select()

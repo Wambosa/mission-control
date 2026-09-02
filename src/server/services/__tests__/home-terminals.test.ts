@@ -88,15 +88,16 @@ describe("home-terminals service", () => {
     expect(() => createHomeTerminal({ id: "not a domain id" })).toThrow();
   });
 
-  it("scopes terminals per sandbox", () => {
+  // A dashboard terminal has no project and therefore no host. The scope it
+  // was opened in is still recorded on the row; it no longer hides it, so a
+  // terminal opened under a host that is gone is still reachable.
+  it("lists every home terminal whatever scope it was opened in", () => {
     createHomeTerminal({ scopeId: "sb-a" });
     createHomeTerminal({ scopeId: "sb-a" });
     createHomeTerminal({ scopeId: "sb-b" });
-    expect(listHomeTerminals("sb-a")).toHaveLength(2);
-    expect(listHomeTerminals("sb-b")).toHaveLength(1);
-    expect(listHomeTerminals("local")).toHaveLength(0);
-    // Unscoped list defaults to the local scope.
-    expect(listHomeTerminals()).toHaveLength(0);
+    createHomeTerminal({ scopeId: "local" });
+    expect(listHomeTerminals()).toHaveLength(4);
+    expect(listHomeTerminals().map((t) => t.id).length).toBe(4);
   });
 
   it("numbers default names independently per scope", () => {
@@ -107,12 +108,11 @@ describe("home-terminals service", () => {
     expect(b.name).toBe("Terminal 1");
   });
 
-  it("deleting a terminal in one scope leaves other scopes untouched", () => {
+  it("deleting a terminal leaves the others untouched", () => {
     const a = createHomeTerminal({ scopeId: "sb-a" });
-    createHomeTerminal({ scopeId: "sb-b" });
+    const b = createHomeTerminal({ scopeId: "sb-b" });
     expect(deleteHomeTerminal(a.id)).toBe(true);
-    expect(listHomeTerminals("sb-a")).toHaveLength(0);
-    expect(listHomeTerminals("sb-b")).toHaveLength(1);
+    expect(listHomeTerminals().map((t) => t.id)).toEqual([b.id]);
   });
 
   it("orders by position before createdAt", () => {

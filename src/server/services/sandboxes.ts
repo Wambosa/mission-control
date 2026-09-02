@@ -29,8 +29,9 @@ import { deleteAllProjectImagesFor } from "./project-images";
 import { setBooleanSetting } from "./settings";
 
 // CRUD + scope-selection for sandboxes (isolated execution environments). The
-// container lifecycle is owned by the Electron main; Phase 1 manages only the
-// model + the active-scope/enabled UI state. See docs/multi-sandbox-plan.md.
+// container lifecycle is owned by the Electron main; this layer manages only
+// the model. A project names its own host, so there is no application-wide
+// scope for it to keep.
 
 export type SandboxState = {
   sandboxes: SandboxPublicView[];
@@ -169,8 +170,8 @@ export function connectRemoteSandbox(
       updatedAt: now,
     });
   }
-  // Mirror the deploy CLI: registering a sandbox turns the scope switcher on so
-  // the new row is immediately reachable.
+  // Mirror the deploy CLI: registering a sandbox turns sandbox support on so
+  // the new row is immediately selectable as a project's host.
   setBooleanSetting(SANDBOXES_ENABLED_KEY, true);
   const row = findSandboxById(id);
   // The row was just written; a miss is a server fault, not a bad request.

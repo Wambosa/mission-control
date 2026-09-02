@@ -585,10 +585,7 @@ export const api = {
 
   // Project-less "home" terminals (the dashboard terminals). Returned shaped as
   // UserTerminal (sentinel projectId) so the same terminal store/panel render them.
-  listHomeTerminals: (scopeId: string) =>
-    req<{ terminals: UserTerminal[] }>(
-      `/api/home/user-terminals?scopeId=${encodeURIComponent(scopeId)}`,
-    ),
+  listHomeTerminals: () => req<{ terminals: UserTerminal[] }>("/api/home/user-terminals"),
   createHomeTerminal: (body: {
     id?: string;
     name?: string;

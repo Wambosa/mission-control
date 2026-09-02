@@ -1031,10 +1031,7 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
           ? pinnedSlotBinding(projectNumber)
           : `${pinnedSlotBinding(groupNumber)} ${projectNumber}`;
         const runningCount = project.taskCounts.running;
-        const logoShouldFlash = shouldFlashPinnedProjectLogo({
-          cliRunningCount: runningCount,
-          terminalOpen: false,
-        });
+        const logoShouldFlash = shouldFlashPinnedProjectLogo({ cliRunningCount: runningCount });
         const finishedCount = project.taskCounts.finished;
         const statusDots = getPinnedProjectStatusDots(project.taskCounts);
         const hasStatusDots = statusDots.length > 0;

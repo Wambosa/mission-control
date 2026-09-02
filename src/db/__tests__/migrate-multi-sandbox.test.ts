@@ -73,7 +73,9 @@ describe("migrateMultiSandbox", () => {
     expect(scoped.c).toBe(3); // all existing projects reassigned to Default
 
     expect(get(db, SANDBOXES_ENABLED_KEY)).toBe("true");
-    expect(get(db, ACTIVE_SCOPE_KEY)).toBe(sb.id);
+    // Nothing reads an application-wide scope any more, so the migration
+    // stopped writing one; a project names its own host.
+    expect(get(db, ACTIVE_SCOPE_KEY)).toBeNull();
     expect(get(db, "multiSandbox.migrated")).toBe("true");
   });
 
@@ -89,7 +91,7 @@ describe("migrateMultiSandbox", () => {
       db.prepare("SELECT COUNT(*) AS c FROM projects WHERE sandbox_id IS NULL").get(),
     ).toEqual({ c: 2 });
     expect(get(db, SANDBOXES_ENABLED_KEY)).toBe("false");
-    expect(get(db, ACTIVE_SCOPE_KEY)).toBe("local");
+    expect(get(db, ACTIVE_SCOPE_KEY)).toBeNull();
   });
 
   it("treats enabled-but-host (runtimeMode != docker) as Local", () => {
@@ -101,7 +103,7 @@ describe("migrateMultiSandbox", () => {
     migrateMultiSandbox(db);
 
     expect(db.prepare("SELECT COUNT(*) AS c FROM sandboxes").get()).toEqual({ c: 0 });
-    expect(get(db, ACTIVE_SCOPE_KEY)).toBe("local");
+    expect(get(db, ACTIVE_SCOPE_KEY)).toBeNull();
     expect(get(db, SANDBOXES_ENABLED_KEY)).toBe("true");
   });
 
@@ -112,10 +114,10 @@ describe("migrateMultiSandbox", () => {
     seedProjects(db, 1);
 
     migrateMultiSandbox(db);
-    const firstId = get(db, ACTIVE_SCOPE_KEY);
+    const firstSandbox = db.prepare("SELECT id FROM sandboxes").get() as { id: string };
     migrateMultiSandbox(db);
 
     expect(db.prepare("SELECT COUNT(*) AS c FROM sandboxes").get()).toEqual({ c: 1 });
-    expect(get(db, ACTIVE_SCOPE_KEY)).toBe(firstId);
+    expect(db.prepare("SELECT id FROM sandboxes").get()).toEqual(firstSandbox);
   });
 });

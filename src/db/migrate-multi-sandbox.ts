@@ -1,6 +1,5 @@
 import type Database from "better-sqlite3";
 import { randomBytes } from "node:crypto";
-import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 
 // One-time, idempotent data migration to the multi-sandbox model. Preserves
 // runtime parity: a user who was running the global Docker sandbox keeps their
@@ -64,10 +63,8 @@ export function migrateMultiSandbox(db: Database.Database): void {
       // they all belong to Default. (Local had no per-project concept before.)
       db.prepare("UPDATE projects SET sandbox_id = ? WHERE sandbox_id IS NULL").run(id);
       setSetting(db, SANDBOXES_ENABLED_KEY, "true");
-      setSetting(db, ACTIVE_SCOPE_KEY, id);
     } else {
       setSetting(db, SANDBOXES_ENABLED_KEY, wasEnabled ? "true" : "false");
-      setSetting(db, ACTIVE_SCOPE_KEY, LOCAL_SCOPE_ID);
     }
     setSetting(db, MIGRATED_FLAG, "true");
   });

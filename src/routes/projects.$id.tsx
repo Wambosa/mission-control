@@ -32,7 +32,6 @@ const FileEditorDialog = lazy(() =>
 );
 import { GridLayoutButton } from "~/components/views/GridLayoutButton";
 import { SessionGrid } from "~/components/views/SessionGrid";
-import { archiveOpenSession, invalidateSessionQueries } from "~/lib/archive-session";
 import { enterFocusSession } from "~/lib/focus-session";
 import { consumeProjectOnboardIntent, type ProjectOnboardIntent } from "~/lib/project-onboard-intent";
 import { projectHostLabel } from "~/lib/project-host-label";
@@ -418,8 +417,6 @@ function ProjectPage() {
     [],
   );
   const [confirmDeleteArchived, setConfirmDeleteArchived] = useState(false);
-  const [confirmArchiveAll, setConfirmArchiveAll] = useState(false);
-  const [archivingAll, setArchivingAll] = useState(false);
   // Leave the archived view automatically once it empties (last one restored
   // or deleted) so the toggle never strands the user on a blank list.
   useEffect(() => {
@@ -525,7 +522,7 @@ function ProjectPage() {
     if (!projectPathReady) return;
     toggleDiffView();
   }, [projectPathReady, toggleDiffView]);
-  // How many sessions the current scope's grid shows (drives "Archive all").
+  // How many sessions the current scope's grid shows (drives grid visibility).
   const gridScopeSessionCount = useMemo(
     () =>
       terminals.sessions.filter((s) => scopeKeyForProject(s.project) === selectedScopeKey).length,
@@ -1800,34 +1797,6 @@ function ProjectPage() {
   };
   archiveSessionRef.current = archiveSession;
 
-  // Archive every open session shown in the grid (across all projects). Used by
-  // the grid-view header's "Archive all" action. Plain function (not a hook)
-  // because it lives after this component's early returns.
-  const archiveAllGridSessions = async () => {
-    // Only archive the sessions shown in this project/scope's grid, not every
-    // open session across all projects.
-    const openSessions = terminals.sessions.filter(
-      (s) => scopeKeyForProject(s.project) === selectedScopeKey,
-    );
-    if (openSessions.length === 0) return;
-    const results = await Promise.allSettled(
-      openSessions.map((session) =>
-        archiveOpenSession(session, terminals.close, queryClient, { skipInvalidate: true }),
-      ),
-    );
-    // One deduped invalidation pass instead of a per-session fan-out (the
-    // global projects key alone would otherwise be invalidated N times).
-    await invalidateSessionQueries(queryClient, openSessions);
-    const failed = results.filter((r) => r.status === "rejected").length;
-    if (failed > 0) {
-      toast.error(
-        failed === openSessions.length
-          ? "Could not archive sessions"
-          : `Archived ${openSessions.length - failed} of ${openSessions.length} sessions`,
-      );
-    }
-  };
-
   const restoreSession = (taskId: string) => {
     if (!project) return;
     const task = tasks.find((t) => t.id === taskId);
@@ -2459,26 +2428,6 @@ function ProjectPage() {
                       >
                         View active
                       </Btn>
-                    ) : !showArchived && status === "finished" && tasksByStatus.finished.length > 0 ? (
-                      <Btn
-                        variant="ghost"
-                        icon="archive"
-                        onClick={() => archiveTasks(tasksByStatus.finished)}
-                        title="Archive all finished sessions"
-                      >
-                        Archive all
-                      </Btn>
-                    ) : !showArchived &&
-                      status === "disconnected" &&
-                      tasksByStatus.disconnected.length > 0 ? (
-                      <Btn
-                        variant="ghost"
-                        icon="archive"
-                        onClick={() => archiveTasks(tasksByStatus.disconnected)}
-                        title="Archive all disconnected sessions"
-                      >
-                        Archive all
-                      </Btn>
                     ) : undefined
                   }
                 />
@@ -2732,35 +2681,6 @@ function ProjectPage() {
         </div>
         <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
           {archivedTasks.length} archived session{archivedTasks.length === 1 ? "" : "s"} will be deleted. This cannot be undone. Active sessions are unaffected.
-        </div>
-      </ConfirmDialog>
-
-      <ConfirmDialog
-        open={confirmArchiveAll}
-        onClose={() => setConfirmArchiveAll(false)}
-        onConfirm={async () => {
-          setArchivingAll(true);
-          try {
-            await archiveAllGridSessions();
-          } finally {
-            setArchivingAll(false);
-            setConfirmArchiveAll(false);
-          }
-        }}
-        title="Archive all sessions?"
-        confirmLabel="Archive all"
-        variant="danger"
-        icon="archive"
-        loading={archivingAll}
-        width={460}
-      >
-        <div style={{ fontSize: 13, color: "var(--text)", marginBottom: 8 }}>
-          Archive all {gridScopeSessionCount} open session
-          {gridScopeSessionCount === 1 ? "" : "s"} in &ldquo;{project.name}&rdquo;?
-        </div>
-        <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
-          Any running sessions will be disconnected and their agents stopped. You
-          can restore archived sessions later, but in-progress runs won&rsquo;t resume.
         </div>
       </ConfirmDialog>
       </div>

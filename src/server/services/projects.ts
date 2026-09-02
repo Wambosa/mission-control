@@ -388,7 +388,13 @@ export function updateProject(
   // tree the host may never have had. Emptiness is all that is checked: the
   // directory may not exist yet, and a host round-trip to find out would block
   // a perfectly reasonable save.
-  if (nextSandboxId && !nextRemoteDirectory && isSshHostSandbox(nextSandboxId)) {
+  //
+  // The rule binds the transition, not the stored row. A project bound to a
+  // host before this column existed has no directory yet, and checking the
+  // resulting row would reject every unrelated edit to it — renaming it,
+  // moving it to another group — until someone happened to set one.
+  const bindingChanged = patch.sandboxId !== undefined || patch.remoteDirectory !== undefined;
+  if (bindingChanged && nextSandboxId && !nextRemoteDirectory && isSshHostSandbox(nextSandboxId)) {
     throw new ValidationError("A project on an SSH host needs a remote directory.");
   }
   const updated = {

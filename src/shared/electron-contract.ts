@@ -547,10 +547,26 @@ export type ElectronBridge = {
   };
   remotePty: {
     spawn: (opts: RemotePtySpawnOptions) => Promise<{ ptyId: string }>;
-    write: (ptyId: string, data: string) => Promise<boolean>;
-    resize: (ptyId: string, cols: number, rows: number) => Promise<boolean>;
-    kill: (ptyId: string) => Promise<boolean>;
-    replay: (ptyId: string) => Promise<{ data: string; nextSeq: number }>;
+    /**
+     * Each op takes an optional trailing scope. The main process binds a pty to
+     * its owner at spawn, in memory — so after a restart the binding is gone
+     * while the session's pty id and the agent's process both survive. Naming
+     * the project's scope lets the owner be recovered instead of the session
+     * silently respawning a second agent. Optional so this stays shape-
+     * compatible with the local `pty` API.
+     */
+    write: (ptyId: string, data: string, sandboxId?: string | null) => Promise<boolean>;
+    resize: (
+      ptyId: string,
+      cols: number,
+      rows: number,
+      sandboxId?: string | null,
+    ) => Promise<boolean>;
+    kill: (ptyId: string, sandboxId?: string | null) => Promise<boolean>;
+    replay: (
+      ptyId: string,
+      sandboxId?: string | null,
+    ) => Promise<{ data: string; nextSeq: number }>;
     onData: (cb: (msg: { ptyId: string; data: string; seq: number }) => void) => () => void;
     // exitCode shape matches the local pty.onExit so components can treat the two
     // PTY APIs as one type (the manager coerces undefined → 0).

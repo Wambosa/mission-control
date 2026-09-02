@@ -11,7 +11,8 @@
  *   1. No directory reported yet — fall back to the worktree the session was
  *      created against, so a just-started session is not blank (R13).
  *   2. Inside a known worktree — name it (R13). Worktrees are checked before
- *      the project root because they live inside it.
+ *      the project root because they live inside it, except one rooted at the
+ *      project itself, which is the main checkout wearing a worktree's clothes.
  *   3. The project's own checkout — say nothing. The main checkout is the
  *      unremarkable case and does not earn a badge (R12). A directory under the
  *      worktree container is excluded: a worktree created moments ago is inside
@@ -66,23 +67,33 @@ export function resolveSessionWorktree(input: SessionWorktreeInput): SessionWork
   const worktrees = input.worktrees ?? [];
   const cwd = input.cwd?.trim();
 
+  const rootPath = input.projectRoot ? normalizePath(input.projectRoot) : "";
+
   if (!cwd) {
     const assigned = input.assignedWorktreeId
       ? worktrees.find((worktree) => worktree.id === input.assignedWorktreeId)
       : undefined;
-    return assigned
-      ? { kind: "worktree", worktreeId: assigned.id, name: assigned.name }
-      : { kind: "hidden" };
+    // An assignment pointing at the main checkout is still the main checkout.
+    if (!assigned || (rootPath && normalizePath(assigned.path) === rootPath)) {
+      return { kind: "hidden" };
+    }
+    return { kind: "worktree", worktreeId: assigned.id, name: assigned.name };
   }
 
   const target = normalizePath(cwd);
+  const projectRoot = rootPath;
 
   // Nested worktrees are possible (one adopted inside another's tree), so the
   // deepest containing path wins — it is the one the agent is actually in.
+  // A candidate rooted at the project itself is skipped: the list of worktrees
+  // a project reports leads with a synthetic row standing for the main
+  // checkout, and naming that row would put a label on the one case R12 says
+  // gets none.
   let match: SessionWorktreeRef | null = null;
   let matchLength = -1;
   for (const worktree of worktrees) {
     const root = normalizePath(worktree.path);
+    if (projectRoot && root === projectRoot) continue;
     if (!isWithinOrEqual(target, root)) continue;
     if (root.length > matchLength) {
       match = worktree;
@@ -91,7 +102,6 @@ export function resolveSessionWorktree(input: SessionWorktreeInput): SessionWork
   }
   if (match) return { kind: "worktree", worktreeId: match.id, name: match.name };
 
-  const projectRoot = input.projectRoot ? normalizePath(input.projectRoot) : "";
   const inWorktreeContainer = WORKTREE_CONTAINER_DIRS.some((dir) =>
     isWithinOrEqual(target, `${projectRoot}/${dir}`),
   );

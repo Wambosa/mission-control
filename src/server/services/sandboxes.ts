@@ -319,14 +319,23 @@ export function deleteSandbox(id: string): boolean {
       });
       events.emit("project:updated", { id: projectId });
     }
+    // The project survives, so its history survives with it. A session's
+    // scope_id is the record of where it ran, not a pointer that has to
+    // resolve — the session list stopped filtering by it, and there is no
+    // foreign key to cascade. Deleting the rows here would keep the project
+    // and silently destroy every session ever run on the host.
   } else {
     for (const projectId of findProjectIdsBySandboxId(id)) {
       deleteAllProjectImagesFor(projectId);
       events.emit("project:deleted", { id: projectId });
     }
+    // A managed VM contained its projects, and they go with it, so their
+    // sessions and terminals have nothing left to belong to.
+    deleteTasksByScope(id);
+    deleteUserTerminalsByScope(id);
   }
-  deleteTasksByScope(id);
-  deleteUserTerminalsByScope(id);
+  // Home terminals belong to no project either way: they are shells opened on
+  // the machine itself, and the machine is going.
   deleteHomeTerminalsByScope(id);
 
   return deleteSandboxRow(id) > 0;

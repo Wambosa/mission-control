@@ -585,16 +585,36 @@ function getRegistry(): SandboxRegistry {
   return registry;
 }
 
-function ownerClient(ptyId: string): SandboxAgentClient | null {
+/**
+ * The client that owns a pty.
+ *
+ * `ptyOwner` is in-memory, so it is empty after a restart while the session's
+ * pty id lives on in the renderer's storage and the agent still holds the
+ * process. The caller names the scope it is asking about — a session's host is
+ * a property of its project — so an unknown pty is recoverable rather than
+ * lost, and the recovered owner is remembered for the ops that follow.
+ *
+ * The scope is a fallback, never an override: a pty already bound to a client
+ * stays bound to it, so naming the wrong scope cannot steal one.
+ */
+function ownerClient(ptyId: string, sandboxId?: string | null): SandboxAgentClient | null {
   const owner = ptyOwner.get(ptyId);
-  return owner ? clients.get(owner) ?? null : null;
+  if (owner) return clients.get(owner) ?? null;
+  if (!sandboxId) return null;
+  const client = clients.get(sandboxId);
+  if (!client) return null;
+  ptyOwner.set(ptyId, sandboxId);
+  return client;
 }
 
-/** Route a remote-pty op to the pty's own owner client. A pty is bound to the
- *  scope that spawned it, so there is nothing to fall back to. Returns false
- *  when that client is gone. */
-function withOwnerClient(ptyId: string, fn: (client: SandboxAgentClient) => void): boolean {
-  const client = ownerClient(ptyId);
+/** Route a remote-pty op to the pty's own owner client. Returns false when
+ *  that client is gone and the named scope cannot recover it. */
+function withOwnerClient(
+  ptyId: string,
+  sandboxId: string | null | undefined,
+  fn: (client: SandboxAgentClient) => void,
+): boolean {
+  const client = ownerClient(ptyId, sandboxId);
   if (!client) return false;
   fn(client);
   return true;
@@ -1727,20 +1747,21 @@ export function registerSandboxManager(
     },
     ipcMain,
   );
-  safeHandle(IPC.remotePtyWrite, (_e, ptyId: string, data: string) => {
+  safeHandle(IPC.remotePtyWrite, (_e, ptyId: string, data: string, sandboxId?: string | null) => {
     remotePtyLastInputAt.set(ptyId, Date.now());
-    return withOwnerClient(ptyId, (c) => c.write(ptyId, data));
+    return withOwnerClient(ptyId, sandboxId, (c) => c.write(ptyId, data));
   }, ipcMain);
-  safeHandle(IPC.remotePtyResize, (_e, ptyId: string, cols: number, rows: number) => {
-    return withOwnerClient(ptyId, (c) => c.resize(ptyId, cols, rows));
+  safeHandle(IPC.remotePtyResize, (_e, ptyId: string, cols: number, rows: number, sandboxId?: string | null) => {
+    return withOwnerClient(ptyId, sandboxId, (c) => c.resize(ptyId, cols, rows));
   }, ipcMain);
-  safeHandle(IPC.remotePtyKill, (_e, ptyId: string) => {
+  safeHandle(IPC.remotePtyKill, (_e, ptyId: string, sandboxId?: string | null) => {
+    const killed = withOwnerClient(ptyId, sandboxId, (c) => c.kill(ptyId));
     ptyOwner.delete(ptyId);
     remotePtyLastInputAt.delete(ptyId);
-    return withOwnerClient(ptyId, (c) => c.kill(ptyId));
+    return killed;
   }, ipcMain);
-  safeHandle(IPC.remotePtyReplay, (_e, ptyId: string) => {
-    const current = ownerClient(ptyId);
+  safeHandle(IPC.remotePtyReplay, (_e, ptyId: string, sandboxId?: string | null) => {
+    const current = ownerClient(ptyId, sandboxId);
     if (!current) return { data: "", nextSeq: 0 };
     return new Promise<{ data: string; nextSeq: number }>((resolve) => {
       const prior = pendingReplays.get(ptyId);

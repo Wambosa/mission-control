@@ -76,6 +76,7 @@ export type SandboxSettingsPatchBridge = Partial<{
 }>;
 
 export type RemotePtySpawnOptionsBridge = {
+  sandboxId: string;
   taskId: string;
   /** Absolute in-container path (e.g. /workspace/<slug>). */
   cwd: string;
@@ -270,13 +271,26 @@ const electronAPI = {
   remotePty: {
     spawn: (opts: RemotePtySpawnOptionsBridge): Promise<{ ptyId: string }> =>
       ipcRenderer.invoke(IPC.remotePtySpawn, opts),
-    write: (ptyId: string, data: string): Promise<boolean> =>
-      ipcRenderer.invoke(IPC.remotePtyWrite, ptyId, data),
-    resize: (ptyId: string, cols: number, rows: number): Promise<boolean> =>
-      ipcRenderer.invoke(IPC.remotePtyResize, ptyId, cols, rows),
-    kill: (ptyId: string): Promise<boolean> => ipcRenderer.invoke(IPC.remotePtyKill, ptyId),
-    replay: (ptyId: string): Promise<{ data: string; nextSeq: number }> =>
-      ipcRenderer.invoke(IPC.remotePtyReplay, ptyId),
+    // The trailing scope is optional so this stays shape-compatible with the
+    // local `pty` API the renderer treats as one type. It lets the main process
+    // recover a pty's owner after a restart, when its in-memory map is empty
+    // but the agent still holds the process.
+    write: (ptyId: string, data: string, sandboxId?: string | null): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.remotePtyWrite, ptyId, data, sandboxId ?? null),
+    resize: (
+      ptyId: string,
+      cols: number,
+      rows: number,
+      sandboxId?: string | null,
+    ): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.remotePtyResize, ptyId, cols, rows, sandboxId ?? null),
+    kill: (ptyId: string, sandboxId?: string | null): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.remotePtyKill, ptyId, sandboxId ?? null),
+    replay: (
+      ptyId: string,
+      sandboxId?: string | null,
+    ): Promise<{ data: string; nextSeq: number }> =>
+      ipcRenderer.invoke(IPC.remotePtyReplay, ptyId, sandboxId ?? null),
     onData: (cb: (msg: { ptyId: string; data: string; seq: number }) => void) =>
       subscribe(IPC.remotePtyData, cb),
     onExit: (cb: (msg: { ptyId: string; exitCode: number; signal?: number }) => void) =>

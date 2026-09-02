@@ -50,6 +50,44 @@ describe("resolveSessionWorktree", () => {
     ).toEqual({ kind: "worktree", worktreeId: "wt-2", name: "brisk-otter-07" });
   });
 
+  // The list a project reports leads with a synthetic row standing for the
+  // main checkout: id "main", path = the project root. Naming it would put a
+  // label on the one case R12 says gets none, and every main-checkout session
+  // would read "main".
+  it("does not name the synthetic main row a worktree", () => {
+    const withMain = [{ id: "main", name: "main", path: PROJECT_ROOT }, ...WORKTREES];
+    expect(
+      resolveSessionWorktree({ cwd: PROJECT_ROOT, projectRoot: PROJECT_ROOT, worktrees: withMain }),
+    ).toEqual({ kind: "hidden" });
+    expect(
+      resolveSessionWorktree({
+        cwd: `${PROJECT_ROOT}/src/server`,
+        projectRoot: PROJECT_ROOT,
+        worktrees: withMain,
+      }),
+    ).toEqual({ kind: "hidden" });
+    // A real worktree in the same list still resolves.
+    expect(
+      resolveSessionWorktree({
+        cwd: WORKTREES[0]!.path,
+        projectRoot: PROJECT_ROOT,
+        worktrees: withMain,
+      }),
+    ).toEqual({ kind: "worktree", worktreeId: "wt-1", name: "quiet-falcon-42" });
+  });
+
+  it("shows nothing when the session was assigned the main checkout", () => {
+    const withMain = [{ id: "main", name: "main", path: PROJECT_ROOT }, ...WORKTREES];
+    expect(
+      resolveSessionWorktree({
+        cwd: null,
+        projectRoot: PROJECT_ROOT,
+        worktrees: withMain,
+        assignedWorktreeId: "main",
+      }),
+    ).toEqual({ kind: "hidden" });
+  });
+
   // AE3
   it("shows nothing for the project's own checkout", () => {
     expect(

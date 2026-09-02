@@ -7,6 +7,7 @@ const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mc-host-removal-test-"));
 process.env.MC_USER_DATA_DIR = tmpRoot;
 
 const { createProject, updateProject, getProject } = await import("../services/projects");
+const { createTask, listTasksForProject } = await import("../services/tasks");
 const { deleteSandbox } = await import("../services/sandboxes");
 const { getDb, getSqlite } = await import("~/db/client");
 const { projects, tasks, sandboxes, worktrees } = await import("~/db/schema");
@@ -64,12 +65,36 @@ describe("removing an SSH host", () => {
     expect(getProject(b)?.sandboxId).toBeNull();
   });
 
+  // The project survives, so the work done on it survives too. Deleting the
+  // sessions here would keep the project and silently destroy its history —
+  // the exact disappearance the scope-blind session list exists to prevent.
+  it("keeps the sessions that ran on the host", () => {
+    const host = makeSandbox("sb-host", "ssh-host");
+    const id = makeProject();
+    updateProject(id, { sandboxId: host, remoteDirectory: "/home/deploy/acme" });
+    createTask({ projectId: id, title: "On the host", agent: "claude-code", scopeId: host });
+    createTask({ projectId: id, title: "Local one", agent: "claude-code", scopeId: "local" });
+
+    deleteSandbox(host);
+
+    expect(
+      listTasksForProject(id)
+        .map((task: { title: string }) => task.title)
+        .sort(),
+    ).toEqual(["Local one", "On the host"]);
+  });
+
   it("still takes a managed remote VM's project with it — the VM contains it", () => {
     const vm = makeSandbox("sb-vm", "remote-vm");
     const id = makeProject();
     updateProject(id, { sandboxId: vm });
 
+    createTask({ projectId: id, title: "In the VM", agent: "claude-code", scopeId: vm });
+
     expect(deleteSandbox(vm)).toBe(true);
+    // The project went with the machine that contained it, so its sessions
+    // have nothing left to belong to.
     expect(getProject(id)).toBeNull();
+    expect(getDb().select().from(tasks).all()).toEqual([]);
   });
 });

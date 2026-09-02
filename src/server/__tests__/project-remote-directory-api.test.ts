@@ -112,4 +112,32 @@ describe("project remote directory", () => {
     const res = await patch(id, { sandboxId: vm });
     expect(res?.status).toBe(200);
   });
+
+  // The rule binds the transition, not the stored row. A project bound to a
+  // host before this column existed has no directory yet; checking the
+  // resulting row would reject every unrelated edit to it until someone
+  // happened to set one.
+  it("lets an unrelated edit through on a project bound to a host with no directory", async () => {
+    const id = makeProject();
+    const host = makeSandbox("sb-host", "ssh-host");
+    // The post-migration shape: bound to a host, directory still null.
+    getSqlite()
+      .prepare("UPDATE projects SET sandbox_id = ?, remote_directory = NULL WHERE id = ?")
+      .run(host, id);
+
+    const res = await patch(id, { name: "Renamed while legacy" });
+    expect(res?.status).toBe(200);
+    const body = (await res!.json()) as { project: { name: string; remoteDirectory: string | null } };
+    expect(body.project.name).toBe("Renamed while legacy");
+    expect(body.project.remoteDirectory).toBeNull();
+  });
+
+  it("still refuses to clear the directory while a host is set", async () => {
+    const id = makeProject();
+    const host = makeSandbox("sb-host", "ssh-host");
+    await patch(id, { sandboxId: host, remoteDirectory: "/srv/acme" });
+
+    const res = await patch(id, { remoteDirectory: null });
+    expect(res?.status).toBe(400);
+  });
 });

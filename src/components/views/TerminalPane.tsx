@@ -496,7 +496,7 @@ export function TerminalPane({
     projectRoot: project.sandboxId
       ? projectRemoteRoot(project.path, project.remoteDirectory, project.sandboxId)
       : project.path,
-    worktrees: project.sandboxId ? [] : projectWorktrees ?? [],
+    worktrees: project.sandboxId ? [] : (projectWorktrees ?? []).filter((w) => !w.isMain),
     assignedWorktreeId: liveTask.worktreeId,
   });
   // R14's single refresh: a directory the project does not recognize is most
@@ -1194,7 +1194,10 @@ export function TerminalPane({
         void resizeElectronPtyToSurface(ptyId);
         let replay: PtyReplaySnapshot = { data: "", nextSeq: 0 };
         try {
-          replay = await ptyApi.replay(ptyId);
+          // Name the project's scope: after an app restart the main process no
+          // longer remembers which host owns this pty, and without it the
+          // reattach comes back empty and the session starts a second agent.
+          replay = await ptyApi.replay(ptyId, projectScopeId);
         } finally {
           if (electronReplayPtyId === ptyId) {
             electronReplayPtyId = null;
@@ -1337,7 +1340,14 @@ export function TerminalPane({
           // Clone-on-open: a sandbox project whose repo isn't cloned into the
           // container yet gets a clone offer (remote detected from the host repo)
           // instead of an empty terminal. No remote → fall through (empty dir).
-          if (useSandbox && electron) {
+          //
+          // Only for a managed VM, whose workspace layout Mission Control owns
+          // and whose clone destination it can therefore derive. A project on
+          // an SSH host states its own directory, and the clone RPC takes a
+          // slug rather than a path — it would put the repo somewhere other
+          // than the directory the session is about to open in, and the
+          // session would still start in an empty one. Say so instead.
+          if (useSandbox && electron && !project.remoteDirectory) {
             let repoPresent = true;
             try {
               await electron.remoteGit.status(projectScopeId, sandboxCwd);
@@ -1372,6 +1382,21 @@ export function TerminalPane({
                 }
               }
             }
+          }
+          // A host project whose configured directory is not there cannot be
+          // fixed by a clone this code can place, so it fails with the fact.
+          if (useSandbox && electron && project.remoteDirectory) {
+            try {
+              await electron.remoteGit.status(projectScopeId, sandboxCwd);
+            } catch {
+              if (surface.destroyed) return;
+              setStartError(
+                `${sandboxCwd} was not found on this project's host. Check the remote directory in project settings.`,
+              );
+              setLiveStatus("");
+              return;
+            }
+            if (surface.destroyed) return;
           }
 
           const isResume = isAgentResumeCommand(task.agent, descriptor.startCommand);

@@ -1,12 +1,8 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import { academyUrl } from "~/shared/academy";
-import { isNewerSemver, stripVersionPrefix } from "~/shared/semver";
 
 declare const __MC_VERSION__: string;
 
-const DOWNLOADS_URL = academyUrl("/downloads");
-const MS_PER_HOUR = 60 * 60 * 1000;
-const MS_PER_DAY = 24 * MS_PER_HOUR;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export const CURRENT_MC_VERSION: string =
   typeof __MC_VERSION__ !== "undefined" ? __MC_VERSION__ : "0.0.0";
@@ -17,26 +13,24 @@ type LatestRelease = {
   isUpdateAvailable: boolean;
 };
 
-async function fetchLatest(): Promise<LatestRelease> {
-  const url = academyUrl("/api/mission-control/releases?limit=1");
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error(`mc-releases ${res.status}`);
-  const body = (await res.json()) as { releases?: Array<{ version?: string }> };
-  const raw = body.releases?.[0]?.version ?? null;
-  const remote = raw ? stripVersionPrefix(raw) : null;
-  return {
-    latestVersion: remote,
-    downloadUrl: DOWNLOADS_URL,
-    isUpdateAvailable: !!remote && isNewerSemver(remote, CURRENT_MC_VERSION),
-  };
-}
+// This fork publishes no releases and diverges from upstream deliberately, so
+// upstream's latest version is not a newer version of this build — offering it
+// would hand the operator a one-click path back to the product this forked away
+// from. Answer "nothing to update to" without reaching the network; the update
+// surfaces read this and settle on "you're on the latest version". An empty
+// downloadUrl is what those surfaces already treat as "no manual download".
+const NO_RELEASE_CHANNEL: LatestRelease = {
+  latestVersion: CURRENT_MC_VERSION,
+  downloadUrl: "",
+  isUpdateAvailable: false,
+};
 
 export const latestMissionControlVersionQueryOptions = queryOptions({
   queryKey: ["mission-control", "latest-version"] as const,
-  queryFn: fetchLatest,
-  staleTime: MS_PER_HOUR,
+  queryFn: () => NO_RELEASE_CHANNEL,
+  staleTime: Infinity,
   gcTime: MS_PER_DAY,
-  retry: 1,
+  retry: false,
   refetchOnWindowFocus: false,
 });
 

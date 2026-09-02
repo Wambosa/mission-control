@@ -234,13 +234,6 @@
         "nsis"
       ],
       "artifactName": "${productName}-${version}-Setup.${ext}"
-    },
-    "publish": [
-      {
-        "provider": "generic",
-        "url": "https://agentsystem.dev/downloads/mission-control/auto-update",
-        "channel": "latest"
-      }
-    ]
+    }
   }
 }

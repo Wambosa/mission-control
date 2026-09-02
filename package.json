@@ -234,6 +234,7 @@
         "nsis"
       ],
       "artifactName": "${productName}-${version}-Setup.${ext}"
-    }
+    },
+    "publish": null
   }
 }

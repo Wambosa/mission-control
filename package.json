@@ -220,7 +220,8 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "notarize": true
+      "identity": "-",
+      "notarize": false
     },
     "linux": {
       "icon": "build/icon.png",

@@ -1,6 +1,14 @@
 import type { TaskStatus } from "./domain";
 
 export const MAIN_WORKTREE_ID = "main";
+
+/**
+ * Directories the app keeps worktrees in, newest spelling first. `.worktrees`
+ * (plural) is what older releases used; rows created back then still point
+ * there. Shared so the server's containment check and the session's worktree
+ * label agree on what counts as "a worktree of this project".
+ */
+export const WORKTREE_CONTAINER_DIRS = [".worktree", ".worktrees"] as const;
 export const WORKTREE_NAME_RE = /^[a-z0-9]+-[a-z0-9]+-[a-z0-9]+$/;
 
 export type WorktreeTaskCounts = Record<TaskStatus, number>;

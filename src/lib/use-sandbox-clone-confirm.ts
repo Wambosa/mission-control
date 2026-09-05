@@ -15,12 +15,15 @@ export function useSandboxCloneConfirm({
   setCloning,
   setStartError,
   setRetryNonce,
+  sandboxId,
 }: {
   cloneOffer: CloneOffer;
   setCloneOffer: (offer: CloneOffer) => void;
   setCloning: (cloning: boolean) => void;
   setStartError: (error: string | null) => void;
   setRetryNonce: (updater: (n: number) => number) => void;
+  /** The machine to clone into — the owning project's scope. */
+  sandboxId: string | null;
 }) {
   return useCallback(async () => {
     const electron = getElectron();
@@ -28,7 +31,7 @@ export function useSandboxCloneConfirm({
     setCloning(true);
     setStartError(null);
     try {
-      await electron.remoteGit.clone(cloneOffer.remote, cloneOffer.slug);
+      await electron.remoteGit.clone(sandboxId, cloneOffer.remote, cloneOffer.slug);
       setCloneOffer(null);
       setRetryNonce((n) => n + 1); // re-run: repo now present → the agent spawns
     } catch (e) {
@@ -36,5 +39,5 @@ export function useSandboxCloneConfirm({
     } finally {
       setCloning(false);
     }
-  }, [cloneOffer, setCloneOffer, setCloning, setStartError, setRetryNonce]);
+  }, [cloneOffer, sandboxId, setCloneOffer, setCloning, setStartError, setRetryNonce]);
 }

@@ -3,7 +3,6 @@ import type { PetPersonality } from "~/shared/pet";
 import {
   calendarTriggers,
   classifyPromptSnippet,
-  comboTrigger,
   createRateLimiter,
   mentionsPetName,
   parsePetCommand,
@@ -91,7 +90,7 @@ describe("createRateLimiter", () => {
     }
     t += 1_000;
     expect(limiter.allow("needs-input", "task-x")).toBe(true); // critical
-    expect(limiter.allow("ship-failure")).toBe(true); // critical
+    expect(limiter.allow("error-streak")).toBe(true); // critical
     expect(limiter.allow("petting")).toBe(true); // exempt
     expect(limiter.allow("level-up")).toBe(true); // exempt
   });
@@ -137,13 +136,13 @@ describe("pickLine", () => {
       const seen = new Map<string, number>();
       const rand = mulberrylite();
       for (let i = 0; i < 400; i++) {
-        const line = pickLine("ship-failure", personality, ctx, rand)!;
+        const line = pickLine("tool-test-fail", personality, ctx, rand)!;
         seen.set(line, (seen.get(line) ?? 0) + 1);
       }
       return seen;
     };
-    const snarkLine = "Push rejected. The remote said no. Loudly.";
-    const zenLine = "Didn't land. Check the log, breathe, retry.";
+    const snarkLine = "Tests failed. The suite has opinions.";
+    const zenLine = "Some tests went red. They'll come back around.";
     expect(samples(snarky).get(snarkLine)! > samples(zenful).get(snarkLine)!).toBe(true);
     expect(samples(zenful).get(zenLine)! > samples(snarky).get(zenLine)!).toBe(true);
   });
@@ -209,29 +208,6 @@ describe("pickLine", () => {
     }
     // Two boosted lines in a ~13-line pack: well above a no-boost share.
     expect(hits).toBeGreaterThan(30);
-  });
-});
-
-describe("comboTrigger", () => {
-  it("upgrades ship triggers when the clock agrees", () => {
-    // 2026-07-17 is a Friday; 07-18 a Saturday; 07-14 a Tuesday.
-    const fridayNoon = new Date(2026, 6, 17, 12);
-    expect(comboTrigger("ship-pushing", fridayNoon)).toBe("friday-push");
-    expect(comboTrigger("ship-committing", fridayNoon)).toBeNull();
-    const lateNight = new Date(2026, 6, 15, 23, 30);
-    expect(comboTrigger("ship-committing", lateNight)).toBe("night-commit");
-    expect(comboTrigger("ship-failure", lateNight)).toBe("night-failure");
-    expect(comboTrigger("ship-committing", new Date(2026, 6, 18, 12))).toBe("weekend-commit");
-    expect(comboTrigger("ship-pushing", new Date(2026, 6, 14, 12))).toBeNull();
-  });
-
-  it("night outranks the weekend for a 2am saturday commit", () => {
-    expect(comboTrigger("ship-committing", new Date(2026, 6, 18, 2))).toBe("night-commit");
-  });
-
-  it("leaves non-ship triggers alone", () => {
-    expect(comboTrigger("session-finished", new Date(2026, 6, 17, 23))).toBeNull();
-    expect(comboTrigger("error-streak", new Date(2026, 6, 17, 23))).toBeNull();
   });
 });
 

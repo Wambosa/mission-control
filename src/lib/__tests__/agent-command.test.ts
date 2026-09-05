@@ -29,6 +29,7 @@ const baseTask = {
   claudeSessionId: "00000000-0000-4000-8000-000000000000",
   claudeSkipPermissions: false,
   claudeBareSession: false,
+  agentCwd: null,
   createdAt: 1,
   updatedAt: 1,
 } satisfies Omit<Task, "agent">;

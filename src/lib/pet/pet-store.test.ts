@@ -15,10 +15,8 @@ import {
   petSetAggregates,
   petSetEnabled,
   petSetHomeSide,
-  petSetShipping,
   petSetSpecies,
   petSetStatsOpen,
-  petShipResult,
   petStroke,
   petTossed,
   petUserActivity,
@@ -30,11 +28,28 @@ import { PET_MAX_LEVEL } from "~/shared/pet";
 
 const NOW = 10_000_000;
 
+/** +3 XP with the grant landing before the line — the shape the XP-grind
+ *  tests below rely on. */
+function learnMemory(): void {
+  petIngestServerEvent({ type: "memory:learned" } as never);
+}
+
+// A failure only registers when the interrupted aggregate RISES, and that
+// count is module-level. Suites reset it to zero before counting their own.
+let interruptedCount = 0;
+function resetInterruptions(): void {
+  interruptedCount = 0;
+  petSetAggregates({ running: 0, needsInput: 0, interrupted: 0 });
+}
+function interrupt(): void {
+  interruptedCount += 1;
+  petSetAggregates({ running: 0, needsInput: 0, interrupted: interruptedCount });
+}
+
 function inputs(overrides: Partial<PetInputs> = {}): PetInputs {
   return {
     runningCount: 0,
     needsInputCount: 0,
-    shippingActive: false,
     startleUntil: 0,
     celebrateUntil: 0,
     singUntil: 0,
@@ -55,7 +70,6 @@ describe("resolvePetMood priority", () => {
     const result = resolvePetMood(
       inputs({
         needsInputCount: 1,
-        shippingActive: true,
         startleUntil: NOW + 1000,
         celebrateUntil: NOW + 1000,
         runningCount: 5,
@@ -65,21 +79,17 @@ describe("resolvePetMood priority", () => {
     expect(result.mood).toBe("alert");
   });
 
-  it("startled beats shipping, which beats celebrating, which beats working", () => {
+  it("startled beats celebrating, which beats working", () => {
     const base = {
-      shippingActive: true,
       startleUntil: NOW + 1000,
       celebrateUntil: NOW + 1000,
       runningCount: 2,
     };
     expect(resolvePetMood(inputs(base), NOW).mood).toBe("startled");
-    expect(resolvePetMood(inputs({ ...base, startleUntil: 0 }), NOW).mood).toBe("shipping");
-    expect(
-      resolvePetMood(inputs({ ...base, startleUntil: 0, shippingActive: false }), NOW).mood,
-    ).toBe("celebrating");
+    expect(resolvePetMood(inputs({ ...base, startleUntil: 0 }), NOW).mood).toBe("celebrating");
     expect(
       resolvePetMood(
-        inputs({ ...base, startleUntil: 0, shippingActive: false, celebrateUntil: 0 }),
+        inputs({ ...base, startleUntil: 0, celebrateUntil: 0 }),
         NOW,
       ).mood,
     ).toBe("working");
@@ -93,7 +103,7 @@ describe("resolvePetMood priority", () => {
 
   it("a commanded serenade sings over ambient work but yields to nap/startle/alert", () => {
     // "Pixel, sing" mid-session: agents still running, but the serenade shows.
-    const singing = { singUntil: NOW + 6_000, runningCount: 2, shippingActive: true };
+    const singing = { singUntil: NOW + 6_000, runningCount: 2, celebrateUntil: NOW + 1_000 };
     expect(resolvePetMood(inputs(singing), NOW).mood).toBe("singing");
     // Deliberate but not urgent — a real interrupt still wins.
     expect(resolvePetMood(inputs({ ...singing, needsInputCount: 1 }), NOW).mood).toBe("alert");
@@ -104,7 +114,9 @@ describe("resolvePetMood priority", () => {
       "sleeping",
     );
     // Once the song is over it resolves normally again.
-    expect(resolvePetMood(inputs({ ...singing, singUntil: NOW - 1 }), NOW).mood).toBe("shipping");
+    expect(resolvePetMood(inputs({ ...singing, singUntil: NOW - 1 }), NOW).mood).toBe(
+      "celebrating",
+    );
   });
 
   it("working intensity scales with running count", () => {
@@ -127,7 +139,6 @@ describe("resolvePetMood priority", () => {
       runningCount: 2,
       celebrateUntil: NOW + 5_000,
       lastKeyAt: NOW,
-      shippingActive: true,
     };
     expect(resolvePetMood(inputs(napping), NOW).mood).toBe("sleeping");
     // Only a blocked session or a startle interrupts the nap.
@@ -136,7 +147,9 @@ describe("resolvePetMood priority", () => {
       "startled",
     );
     // An expired nap resolves normally again.
-    expect(resolvePetMood(inputs({ ...napping, napUntil: NOW - 1 }), NOW).mood).toBe("shipping");
+    expect(resolvePetMood(inputs({ ...napping, napUntil: NOW - 1 }), NOW).mood).toBe(
+      "celebrating",
+    );
   });
 
   it("sleeps after 5 minutes without activity or 60s hidden", () => {
@@ -686,31 +699,32 @@ describe("failure streaks and recovery", () => {
     petHydrate(null);
     petSetEnabled(true, true, false);
     vi.advanceTimersByTime(30_000);
+    resetInterruptions();
 
-    petShipResult("failure");
+    interrupt();
     let snap = getPetSnapshot();
-    expect(PET_LINES["ship-failure"].map((l) => l.text)).toContain(snap.bubble!.text);
+    expect(PET_LINES.interrupted.map((l) => l.text)).toContain(snap.bubble!.text);
 
     vi.advanceTimersByTime(40_000);
-    petShipResult("failure");
+    interrupt();
     vi.advanceTimersByTime(40_000);
-    petShipResult("failure");
+    interrupt();
     snap = getPetSnapshot();
     expect(snap.bubble).not.toBeNull();
     expect(PET_LINES["error-streak"].map((l) => l.text)).toContain(snap.bubble!.text);
 
     // The win after the rough patch reads as a recovery typed by what kept
-    // failing (ships), not a routine push.
+    // failing (interruptions), not a routine finish.
     vi.advanceTimersByTime(40_000);
-    petShipResult("push-success");
+    petIngestServerEvent({ type: "session:finished", id: "streak-win" } as never);
     snap = getPetSnapshot();
-    expect(PET_LINES["comeback-ship"].map((l) => l.text)).toContain(snap.bubble!.text);
+    expect(PET_LINES["comeback-interrupted"].map((l) => l.text)).toContain(snap.bubble!.text);
 
     // Streak reset: a lone failure is back to the per-failure line.
     vi.advanceTimersByTime(40_000);
-    petShipResult("failure");
+    interrupt();
     snap = getPetSnapshot();
-    expect(PET_LINES["ship-failure"].map((l) => l.text)).toContain(snap.bubble!.text);
+    expect(PET_LINES.interrupted.map((l) => l.text)).toContain(snap.bubble!.text);
   });
 });
 
@@ -725,13 +739,13 @@ describe("session milestones", () => {
   });
 
   it("the fifth finished session gets a milestone line", () => {
-    // Relies on no earlier suite in this file ingesting session:finished — the
-    // module-level counter must sit at 0 when this test starts.
+    // The module-level counter carries across suites: the comeback test above
+    // spends the first finish, so four more here land on the milestone.
     petHydrate(null);
     petSetEnabled(true, true, false);
     vi.advanceTimersByTime(30_000);
 
-    for (let i = 1; i <= 4; i++) {
+    for (let i = 1; i <= 3; i++) {
       petIngestServerEvent({ type: "session:finished", id: `s${i}` } as never);
       vi.advanceTimersByTime(60_000);
     }
@@ -806,28 +820,29 @@ describe("error streak escalation", () => {
     petSetEnabled(true, true, false);
     vi.advanceTimersByTime(30_000);
     const texts = (trigger: keyof typeof PET_LINES) => PET_LINES[trigger].map((l) => l.text);
+    resetInterruptions();
 
     for (let i = 1; i <= 5; i++) {
       if (i > 1) vi.advanceTimersByTime(130_000);
-      petShipResult("failure");
+      interrupt();
     }
     expect(texts("error-streak-5")).toContain(getPetSnapshot().bubble!.text);
 
     for (let i = 6; i <= 10; i++) {
       vi.advanceTimersByTime(130_000);
-      petShipResult("failure");
+      interrupt();
     }
     expect(texts("error-streak-10")).toContain(getPetSnapshot().bubble!.text);
 
     for (let i = 11; i <= 20; i++) {
       vi.advanceTimersByTime(130_000);
-      petShipResult("failure");
+      interrupt();
     }
     expect(texts("error-streak-20")).toContain(getPetSnapshot().bubble!.text);
 
     // The void tier keeps answering further failures (cooldown permitting).
     vi.advanceTimersByTime(130_000);
-    petShipResult("failure");
+    interrupt();
     expect(texts("error-streak-20")).toContain(getPetSnapshot().bubble!.text);
   });
 });
@@ -848,51 +863,17 @@ describe("typed comebacks", () => {
     vi.advanceTimersByTime(30_000);
 
     // Clear the losing streak the escalation suite left behind.
-    petShipResult("push-success");
+    petIngestServerEvent({ type: "session:finished", id: "cb0" } as never);
+    resetInterruptions();
     vi.advanceTimersByTime(70_000);
 
-    petSetAggregates({ running: 0, needsInput: 0, interrupted: 1 });
+    interrupt();
     vi.advanceTimersByTime(70_000);
-    petSetAggregates({ running: 0, needsInput: 0, interrupted: 2 });
+    interrupt();
     vi.advanceTimersByTime(70_000);
     petIngestServerEvent({ type: "session:finished", id: "cb1" } as never);
     const snap = getPetSnapshot();
     expect(PET_LINES["comeback-interrupted"].map((l) => l.text)).toContain(snap.bubble!.text);
-  });
-});
-
-describe("context combos", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    // 2026-07-17 is a Friday.
-    vi.setSystemTime(new Date(2026, 6, 17, 14, 0, 0));
-  });
-  afterEach(() => {
-    petSetEnabled(false, true, false);
-    vi.useRealTimers();
-  });
-
-  it("a friday push speaks the friday-push line", () => {
-    petHydrate(null);
-    petSetEnabled(true, true, false);
-    vi.advanceTimersByTime(30_000);
-
-    petSetShipping(true, "pushing");
-    const snap = getPetSnapshot();
-    expect(PET_LINES["friday-push"].map((l) => l.text)).toContain(snap.bubble!.text);
-    petSetShipping(false, null);
-  });
-
-  it("a late-night commit speaks the night-commit line", () => {
-    vi.setSystemTime(new Date(2026, 6, 17, 23, 30, 0));
-    petHydrate(null);
-    petSetEnabled(true, true, false);
-    vi.advanceTimersByTime(30_000);
-
-    petSetShipping(true, "committing");
-    const snap = getPetSnapshot();
-    expect(PET_LINES["night-commit"].map((l) => l.text)).toContain(snap.bubble!.text);
-    petSetShipping(false, null);
   });
 });
 
@@ -957,18 +938,15 @@ describe("work awareness + direct interactions", () => {
     });
   });
 
-  it("ship outcomes update ships/failures and track the worst streak", () => {
+  it("an interruption updates failures and tracks the worst streak", () => {
     vi.advanceTimersByTime(60_000);
+    resetInterruptions();
     const before = getPetPersistentState()!;
-    petShipResult("failure");
-    const mid = getPetPersistentState()!;
-    expect(mid.stats.failures).toBe(before.stats.failures + 1);
-    expect(mid.weekly.failures).toBe(before.weekly.failures + 1);
-    expect(mid.stats.worstStreak).toBeGreaterThanOrEqual(1);
-    petShipResult("push-success");
+    interrupt();
     const after = getPetPersistentState()!;
-    expect(after.stats.ships).toBe(mid.stats.ships + 1);
-    expect(after.weekly.ships).toBe(mid.weekly.ships + 1);
+    expect(after.stats.failures).toBe(before.stats.failures + 1);
+    expect(after.weekly.failures).toBe(before.weekly.failures + 1);
+    expect(after.stats.worstStreak).toBeGreaterThanOrEqual(1);
   });
 
   it("a dance command by name dances instead of the plain name answer", () => {
@@ -1079,10 +1057,10 @@ describe("level progression: evolve + molt", () => {
     vi.useRealTimers();
   });
 
-  /** PR-created grants (+15) with the bubble aged out between each. */
+  /** Memory-learned grants (+3) with the bubble aged out between each. */
   function grindTo(targetXp: number): void {
-    while (getPetPersistentState()!.xp + 15 < targetXp) {
-      petShipResult("pr-created");
+    while (getPetPersistentState()!.xp + 3 < targetXp) {
+      learnMemory();
       vi.advanceTimersByTime(30_000);
     }
   }
@@ -1121,9 +1099,9 @@ describe("level progression: evolve + molt", () => {
     const target = thresholds.find((t) => t.xp > getPetPersistentState()!.xp);
     expect(target).toBeDefined();
     grindTo(target!.xp);
-    // The crossing grant: grantXp runs before the pr-created line, so the
+    // The crossing grant: grantXp runs before the memory-learned line, so the
     // evolve announcement wins the bubble.
-    petShipResult("pr-created");
+    learnMemory();
     const state = getPetPersistentState()!;
     expect(state.level).toBe(target!.level);
     expect(packTexts("evolve")).toContain(getPetSnapshot().bubble!.text);
@@ -1132,7 +1110,7 @@ describe("level progression: evolve + molt", () => {
   it("molting at the cap resets xp/level, keeps the life lived, and unlocks ember", () => {
     vi.advanceTimersByTime(60_000 * 10);
     grindTo(3_000);
-    petShipResult("pr-created");
+    learnMemory();
     vi.advanceTimersByTime(30_000);
     const before = getPetPersistentState()!;
     expect(before.level).toBe(PET_MAX_LEVEL);
@@ -1254,9 +1232,9 @@ describe("molt announcement preempts a visible bubble", () => {
     petSetEnabled(true, true, false);
     vi.advanceTimersByTime(700_000);
 
-    // Reach the cap, aging each PR bubble out along the way.
+    // Reach the cap, aging each memory bubble out along the way.
     while (getPetPersistentState()!.xp < 3_000) {
-      petShipResult("pr-created");
+      learnMemory();
       vi.advanceTimersByTime(30_000);
     }
     expect(getPetPersistentState()!.level).toBe(PET_MAX_LEVEL);

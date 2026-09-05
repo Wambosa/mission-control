@@ -10,20 +10,12 @@ vi.mock("~/lib/api", () => ({
 import { api } from "~/lib/api";
 import { fetchGitStatus, fetchGitDiff } from "../project-git";
 
-function stub(
-  runtimeMode: "host" | "docker",
-  remoteGit: Record<string, unknown>,
-  enabled = true,
-) {
+const LOCAL = { sandboxId: null, remoteDirectory: null };
+const ON_HOST = { sandboxId: "sb-1", remoteDirectory: "/home/deploy/acme" };
+
+function stub(remoteGit: Record<string, unknown>) {
   (globalThis as { window?: unknown }).window = {
-    electronAPI: {
-      sandbox: {
-        getState: vi
-          .fn()
-          .mockResolvedValue({ status: enabled && runtimeMode === "docker" ? "connected" : "disabled" }),
-      },
-      remoteGit,
-    },
+    electronAPI: { sandbox: {}, remoteGit },
   };
 }
 
@@ -34,52 +26,52 @@ afterEach(() => {
 
 describe("fetchGitStatus routing", () => {
   it("uses the HTTP API when no sandboxRepoPath is given", async () => {
-    stub("docker", { status: vi.fn() });
-    const r = await fetchGitStatus("p1", null);
+    stub({ status: vi.fn() });
+    const r = await fetchGitStatus("p1", null, undefined, ON_HOST);
     expect(api.getGitStatus).toHaveBeenCalledWith("p1", null);
     expect(r).toEqual({ branch: "host" });
   });
 
-  it("uses the HTTP API under host runtime even with a sandboxRepoPath", async () => {
+  it("uses the HTTP API for a Local project even with a repo path", async () => {
     const remoteGit = { status: vi.fn() };
-    stub("host", remoteGit);
-    await fetchGitStatus("p1", null, "/workspace/acme");
+    stub(remoteGit);
+    await fetchGitStatus("p1", null, "/home/deploy/acme", LOCAL);
     expect(api.getGitStatus).toHaveBeenCalled();
     expect(remoteGit.status).not.toHaveBeenCalled();
   });
 
-  it("uses remoteGit under docker runtime + sandboxRepoPath, backfilling behindCount", async () => {
+  it("reads a remote project's status on its own scope, backfilling behindCount", async () => {
     // The sandbox agent's git RPC doesn't compute behindCount; the router
     // normalizes the missing field to null so the GitStatus type matches runtime.
     const remoteGit = { status: vi.fn().mockResolvedValue({ branch: "sbx" }) };
-    stub("docker", remoteGit);
-    const r = await fetchGitStatus("p1", null, "/workspace/acme");
-    expect(remoteGit.status).toHaveBeenCalledWith("/workspace/acme");
+    stub(remoteGit);
+    const r = await fetchGitStatus("p1", null, "/home/deploy/acme", ON_HOST);
+    expect(remoteGit.status).toHaveBeenCalledWith("sb-1", "/home/deploy/acme");
     expect(r).toEqual({ branch: "sbx", behindCount: null });
     expect(api.getGitStatus).not.toHaveBeenCalled();
   });
 
-  it("uses the HTTP API when docker runtime is configured but sandbox is disabled", async () => {
+  it("defaults to the HTTP API when no scope is supplied at all", async () => {
     const remoteGit = { status: vi.fn() };
-    stub("docker", remoteGit, false);
-    await fetchGitStatus("p1", null, "/workspace/acme");
+    stub(remoteGit);
+    await fetchGitStatus("p1", null, "/home/deploy/acme");
     expect(api.getGitStatus).toHaveBeenCalledWith("p1", null);
     expect(remoteGit.status).not.toHaveBeenCalled();
   });
 });
 
 describe("fetchGitDiff routing", () => {
-  it("uses remoteGit.diff under docker + sandboxRepoPath", async () => {
+  it("reads a remote project's diff on its own scope", async () => {
     const remoteGit = { diff: vi.fn().mockResolvedValue({ kind: "text", patch: "x", truncated: false }) };
-    stub("docker", remoteGit);
-    await fetchGitDiff("p1", "a.ts", false, null, "/workspace/acme");
-    expect(remoteGit.diff).toHaveBeenCalledWith("/workspace/acme", "a.ts", false);
+    stub(remoteGit);
+    await fetchGitDiff("p1", "a.ts", false, null, "/home/deploy/acme", ON_HOST);
+    expect(remoteGit.diff).toHaveBeenCalledWith("sb-1", "/home/deploy/acme", "a.ts", false);
     expect(api.getGitDiff).not.toHaveBeenCalled();
   });
 
-  it("falls back to the HTTP API without a sandboxRepoPath", async () => {
-    stub("docker", { diff: vi.fn() });
-    await fetchGitDiff("p1", "a.ts", false, null);
+  it("falls back to the HTTP API without a repo path", async () => {
+    stub({ diff: vi.fn() });
+    await fetchGitDiff("p1", "a.ts", false, null, undefined, ON_HOST);
     expect(api.getGitDiff).toHaveBeenCalledWith("p1", "a.ts", false, null);
   });
 });

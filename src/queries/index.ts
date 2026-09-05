@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import { api, setApiToken } from "~/lib/api";
 import { syncDefaultRuntimeDefaults } from "~/lib/default-model-store";
@@ -9,7 +8,7 @@ import {
   readCachedSandboxes,
   readCachedSettings,
 } from "~/lib/shell-query-cache";
-import { filterProjectsByScope, LOCAL_SCOPE_ID } from "~/shared/sandbox";
+import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 import { MAIN_WORKTREE_ID } from "~/shared/worktrees";
 
 export const queryKeys = {
@@ -17,16 +16,9 @@ export const queryKeys = {
   project: (id: string) => ["projects", id] as const,
   sandboxes: ["sandboxes"] as const,
   groups: ["groups"] as const,
-  tasks: (projectId: string, worktreeId?: string | null, scopeId?: string | null) =>
-    [
-      "projects",
-      projectId,
-      "worktrees",
-      worktreeId || MAIN_WORKTREE_ID,
-      "scopes",
-      scopeId || LOCAL_SCOPE_ID,
-      "tasks",
-    ] as const,
+  // A project's sessions are one list, whatever worktree each agent stands in.
+  tasks: (projectId: string, scopeId?: string | null) =>
+    ["projects", projectId, "scopes", scopeId || LOCAL_SCOPE_ID, "tasks"] as const,
   worktrees: (projectId: string) => ["projects", projectId, "worktrees"] as const,
   settings: ["settings"] as const,
   apiToken: ["api-token"] as const,
@@ -53,7 +45,6 @@ export const queryKeys = {
   archivedMemory: (projectId: string) => ["projects", projectId, "memory", "archived"] as const,
   memorySearch: (projectId: string, query: string) =>
     ["projects", projectId, "memory", "search", query] as const,
-  scratchPads: (projectId: string) => ["projects", projectId, "scratch-pads"] as const,
   graphStatus: (projectId: string) => ["projects", projectId, "graph", "status"] as const,
   graphSummary: (projectId: string) => ["projects", projectId, "graph", "summary"] as const,
 };
@@ -89,14 +80,10 @@ export const groupsQueryOptions = () =>
     placeholderData: readCachedGroups,
   });
 
-export const tasksQueryOptions = (
-  projectId: string,
-  worktreeId?: string | null,
-  scopeId?: string | null,
-) =>
+export const tasksQueryOptions = (projectId: string, scopeId?: string | null) =>
   queryOptions({
-    queryKey: queryKeys.tasks(projectId, worktreeId, scopeId),
-    queryFn: async () => (await api.listTasks(projectId, worktreeId, scopeId)).tasks,
+    queryKey: queryKeys.tasks(projectId, scopeId),
+    queryFn: async () => (await api.listTasks(projectId, scopeId)).tasks,
   });
 
 export const worktreesQueryOptions = (projectId: string) =>
@@ -142,17 +129,6 @@ export const memorySearchQueryOptions = (projectId: string, query: string) =>
 
 export const useMemorySearch = (projectId: string, query: string) =>
   useQuery(memorySearchQueryOptions(projectId, query));
-
-// Scratch pads — the top-bar dropdown's list for the current project, newest
-// first. Mutations call api.* imperatively and invalidate this key.
-export const scratchPadsQueryOptions = (projectId: string) =>
-  queryOptions({
-    queryKey: queryKeys.scratchPads(projectId),
-    queryFn: async () => (await api.listScratchPads(projectId)).scratchPads,
-  });
-
-export const useScratchPads = (projectId: string | null) =>
-  useQuery({ ...scratchPadsQueryOptions(projectId ?? ""), enabled: projectId !== null });
 
 // Recall — code graph status (drives the panel's Code Graph section). Invalidate
 // on `graph:indexed` and refresh from `graph:index-progress` SSE (see the panel).
@@ -315,20 +291,10 @@ export const promptSearchQueryOptions = (query: string, enabled: boolean) =>
 
 export const useProjects = () => useQuery(projectsQueryOptions());
 
-/** Projects visible in the active sandbox scope (Local or one sandbox). */
-export const useScopedProjects = () => {
-  const query = useProjects();
-  const { data: sandboxState } = useSandboxes();
-  const data = useMemo(() => {
-    if (query.data === undefined) return undefined;
-    return filterProjectsByScope(query.data, sandboxState);
-  }, [query.data, sandboxState]);
-  return { ...query, data };
-};
 export const useProject = (id: string) => useQuery(projectQueryOptions(id));
 export const useGroups = () => useQuery(groupsQueryOptions());
-export const useTasks = (projectId: string, worktreeId?: string | null, scopeId?: string | null) =>
-  useQuery(tasksQueryOptions(projectId, worktreeId, scopeId));
+export const useTasks = (projectId: string, scopeId?: string | null) =>
+  useQuery(tasksQueryOptions(projectId, scopeId));
 /**
  * Per-row task subscription. Structural sharing keeps an unchanged row's
  * identity stable across list refetches, so a consumer (e.g. a terminal pane
@@ -336,12 +302,11 @@ export const useTasks = (projectId: string, worktreeId?: string | null, scopeId?
  */
 export const useTask = (
   projectId: string,
-  worktreeId: string | null | undefined,
   scopeId: string | null | undefined,
   taskId: string,
 ) =>
   useQuery({
-    ...tasksQueryOptions(projectId, worktreeId, scopeId),
+    ...tasksQueryOptions(projectId, scopeId),
     select: (tasks) => tasks.find((t) => t.id === taskId),
   });
 export const useWorktrees = (projectId: string) => useQuery(worktreesQueryOptions(projectId));

@@ -5,7 +5,7 @@ import {
   readCachedActiveProjectGroup,
   writeCachedActiveProjectGroup,
 } from "~/lib/ui-preference-cache";
-import { queryKeys, useGroups, useScopedProjects, useSettings } from "~/queries";
+import { queryKeys, useGroups, useProjects, useSettings } from "~/queries";
 import {
   ACTIVE_GROUP_ALL,
   ACTIVE_GROUP_UNGROUPED,
@@ -103,7 +103,7 @@ export function useActiveGroup(): {
  * list the dashboard, left rail, and project picker should render.
  */
 export function useGroupScopedProjects() {
-  const query = useScopedProjects();
+  const query = useProjects();
   const { activeGroup, setActiveGroup, groups } = useActiveGroup();
   const data = useMemo(() => {
     if (query.data === undefined) return undefined;

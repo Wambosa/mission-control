@@ -15,7 +15,6 @@ import {
   HTTP_NOT_FOUND,
   HTTP_UNAUTHORIZED,
 } from "~/shared/http-status";
-import { normalizeScopeId } from "~/shared/sandbox";
 import { MAIN_WORKTREE_ID } from "~/shared/worktrees";
 
 export { json, jsonError };
@@ -29,11 +28,6 @@ export function urlWorktreeId(request: Request): string | null | undefined {
   const value = new URL(request.url).searchParams.get("worktreeId");
   if (value === null) return undefined;
   return value && value !== MAIN_WORKTREE_ID ? value : null;
-}
-
-/** `?scopeId=` → normalized scope id (falls back to the Local sentinel). */
-export function urlScopeId(request: Request): string {
-  return normalizeScopeId(new URL(request.url).searchParams.get("scopeId"));
 }
 
 export function noContent(): Response {

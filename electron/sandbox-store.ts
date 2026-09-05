@@ -157,19 +157,6 @@ export function rotateSandboxPairingToken(userDataDir: string, id: string): void
   }
 }
 
-/** The persisted active scope as a sandbox id, or null for Local. */
-export function readActiveSandboxId(userDataDir: string): string | null {
-  try {
-    const row = db(userDataDir)
-      .prepare("SELECT value FROM app_settings WHERE key = 'multiSandbox.activeScope'")
-      .get() as { value: string } | undefined;
-    const v = row?.value;
-    return v && v !== "local" ? v : null;
-  } catch {
-    return null;
-  }
-}
-
 export function disposeSandboxStore(): void {
   if (_db) {
     try {

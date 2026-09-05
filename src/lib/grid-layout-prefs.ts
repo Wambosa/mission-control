@@ -20,7 +20,7 @@ export const GRID_PREFS_EVENT = "mc:grid-prefs-changed";
 export type GridPrefsEventDetail = { scopeKey: string };
 
 /** One-shot "sort the grid by agent" command from the header dropdown to the
- *  mounted SessionGrid (same window-event bridge as GRID_EXPAND_TOGGLE_EVENT). */
+ *  mounted SessionGrid over a window-event bridge. */
 export const GRID_SORT_EVENT = "mc:grid-sort";
 export type GridSortEventDetail = { scopeKey: string; firstAgent: TaskAgent };
 

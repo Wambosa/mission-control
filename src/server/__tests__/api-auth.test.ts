@@ -48,12 +48,7 @@ const PROTECTED_ROUTES: ReadonlyArray<{ method: string; pathname: string }> = [
   { method: "POST", pathname: "/api/projects/abc/tasks" },
   // Git
   { method: "GET", pathname: "/api/projects/abc/git/status" },
-  { method: "GET", pathname: "/api/projects/abc/git/branches" },
   { method: "POST", pathname: "/api/projects/abc/git/stage" },
-  { method: "POST", pathname: "/api/projects/abc/git/commit" },
-  { method: "POST", pathname: "/api/projects/abc/git/push" },
-  { method: "POST", pathname: "/api/projects/abc/git/checkout" },
-  { method: "POST", pathname: "/api/projects/abc/git/create-pr" },
   // User terminals
   { method: "GET", pathname: "/api/projects/abc/user-terminals" },
   { method: "POST", pathname: "/api/projects/abc/user-terminals" },
@@ -74,9 +69,6 @@ const PROTECTED_ROUTES: ReadonlyArray<{ method: string; pathname: string }> = [
   // Settings
   { method: "GET", pathname: "/api/settings" },
   { method: "POST", pathname: "/api/settings" },
-  // Diagram skill
-  { method: "GET", pathname: "/api/skills/install/diagram/installed" },
-  { method: "POST", pathname: "/api/skills/install/diagram" },
   // Keybindings
   { method: "GET", pathname: "/api/keybindings" },
   { method: "PUT", pathname: "/api/keybindings" },

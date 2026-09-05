@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { BrowserWindow, IpcMain } from "electron";
 import { app } from "electron";
 import log from "electron-log/main";
@@ -224,10 +226,23 @@ async function loadUpdater(): Promise<AutoUpdater | null> {
   }
 }
 
+// electron-builder writes app-update.yml beside the packaged app only when a
+// publish feed is configured. This fork ships none — it diverges from upstream
+// deliberately, so upstream's releases are not updates to it — and
+// electron-updater treats the missing file as a hard error. Read the file's
+// absence as "this build has no update channel" rather than as a failure.
+function hasUpdateFeed(): boolean {
+  try {
+    return existsSync(join(process.resourcesPath, "app-update.yml"));
+  } catch {
+    return false;
+  }
+}
+
 type CheckTrigger = "startup" | "interval" | "ipc";
 
 async function safeCheck(trigger: CheckTrigger = "ipc"): Promise<void> {
-  if (!app.isPackaged) return;
+  if (!app.isPackaged || !hasUpdateFeed()) return;
   const au = await loadUpdater();
   if (!au) return;
   const prefs = applyUpdaterPreferences(au);
@@ -324,8 +339,11 @@ export function registerUpdateManager(
   safeHandle(IPC.updateDownload, () => safeDownload(), ipcMain);
   safeHandle(IPC.updateInstall, () => safeInstall(), ipcMain);
 
-  if (!app.isPackaged) {
-    // Stay in unsupported-dev. autoUpdater is intentionally not loaded.
+  if (!app.isPackaged || !hasUpdateFeed()) {
+    // Stay in unsupported-dev. autoUpdater is intentionally not loaded: in dev it
+    // would throw on isPackaged=false, and a build with no feed has nothing to
+    // check against.
+    broadcast({ kind: "unsupported-dev" });
     return;
   }
 
@@ -336,10 +354,4 @@ export function registerUpdateManager(
   // Initial check shortly after app ready; then periodically.
   setTimeout(() => void safeCheck("startup"), UPDATE_STARTUP_DELAY_MS);
   setInterval(() => void safeCheck("interval"), UPDATE_CHECK_INTERVAL_MS);
-
-  // TODO(academy auto-update infra): this only activates once academy serves the
-  // generic-provider artifacts (latest-mac.yml, latest.yml, latest-linux.yml,
-  // *.blockmap, *.zip) at https://agentsystem.dev/downloads/mission-control/auto-update.
-  // Until then autoUpdater will report `error` here and the renderer falls back to
-  // openExternal(downloadUrl).
 }

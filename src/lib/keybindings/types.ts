@@ -8,7 +8,7 @@ export const HOTKEY_ACTIONS = [
   "search.focus",
   "terminal.toggle",
   "terminal.close",
-  "terminal.expandToggle",
+  "terminal.clear",
   "terminal.newTab",
   "terminal.cycleNext",
   "terminal.cyclePrev",
@@ -25,12 +25,7 @@ export const HOTKEY_ACTIONS = [
   "file.finder",
   "file.save",
   "git.diff",
-  "project.ship",
-  "project.runToggle",
-  "project.openBrowser",
-  "voice.pushToTalk",
   "prompt.search",
-  "scratch.toggle",
   "screenshot.capture",
   "group.next",
   "group.prev",
@@ -45,7 +40,12 @@ export type Binding = {
   key: string;
 };
 
-export type BindingMap = Record<HotkeyAction, Binding>;
+/**
+ * Bindings by action. Partial because an action can simply be unbound — which
+ * is the default for all but two of them. A total map could not represent
+ * that, and every read guards accordingly.
+ */
+export type BindingMap = Partial<Record<HotkeyAction, Binding>>;
 
 export const ACTION_META: Record<HotkeyAction, { label: string; description: string }> = {
   "agent.new": { label: "New agent / project", description: "Create a new agent on a project page, or a new project on the home page." },
@@ -60,7 +60,7 @@ export const ACTION_META: Record<HotkeyAction, { label: string; description: str
   "search.focus": { label: "Focus search", description: "Focus the project search field on the home page." },
   "terminal.toggle": { label: "Toggle terminal panel", description: "Show or hide the bottom terminal panel." },
   "terminal.close": { label: "Toggle session panel", description: "Hide the active session panel, or show the last hidden session for the current project." },
-  "terminal.expandToggle": { label: "Expand / shrink session panel", description: "Toggle the session panel between its resizable width and full workspace width for the current project." },
+  "terminal.clear": { label: "Clear terminal", description: "Wipe the scrollback of the focused terminal in the bottom panel." },
   "terminal.newTab": { label: "New terminal", description: "Open a new shell tab in the terminal panel." },
   "terminal.cycleNext": { label: "Next terminal tab", description: "Switch to the next terminal tab." },
   "terminal.cyclePrev": { label: "Previous terminal tab", description: "Switch to the previous terminal tab." },
@@ -101,29 +101,10 @@ export const ACTION_META: Record<HotkeyAction, { label: string; description: str
   "file.finder": { label: "Open file finder", description: "Open the fuzzy file finder for the current project." },
   "file.save": { label: "Save file", description: "Save the file currently open in the editor." },
   "git.diff": { label: "Toggle Review Changes", description: "Open or close the change review view for the current project." },
-  "project.ship": {
-    label: "Ship",
-    description: "Open an AI session that commits, pushes, and syncs the current project with its remote.",
-  },
-  "project.runToggle": { label: "Run / Stop project", description: "Run the project's launch commands, or stop them if already running." },
-  "project.openBrowser": {
-    label: "Open in browser",
-    description: "Open the running project's launch URL in your default browser.",
-  },
-  "voice.pushToTalk": {
-    label: "Push to talk",
-    description:
-      "Hold to speak a voice command — switch project, run the project, or start an agent. Release to run it.",
-  },
   "prompt.search": {
     label: "Search prompt history",
     description:
       "Open a searchable popup of every prompt you've sent to a session; pick one to jump to that session.",
-  },
-  "scratch.toggle": {
-    label: "Toggle scratch pad",
-    description:
-      "Open or close the current project's scratch pad — a temporary place to paste text.",
   },
   "screenshot.capture": {
     label: "Capture screenshot",

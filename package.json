@@ -1,6 +1,6 @@
 {
   "name": "mission-control",
-  "version": "0.49.0",
+  "version": "1.0.0",
   "description": "Desktop control surface for managing agentic coding work across many projects.",
   "license": "MIT",
   "private": true,
@@ -12,7 +12,6 @@
   },
   "scripts": {
     "check:node": "node scripts/require-node-24.mjs",
-    "setup:whisper": "node scripts/fetch-whisper.mjs",
     "preinstall": "node scripts/require-node-24.mjs",
     "predev": "node scripts/require-node-24.mjs",
     "predev:electron": "node scripts/require-node-24.mjs",
@@ -200,13 +199,6 @@
     },
     "extraResources": [
       {
-        "from": "resources/whisper",
-        "to": "whisper",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
         "from": "dist/bundled-mcp",
         "to": "bundled-mcp",
         "filter": [
@@ -222,14 +214,14 @@
       ],
       "category": "public.app-category.developer-tools",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Mission Control uses the microphone for push-to-talk voice commands. Audio is transcribed locally on your machine and never leaves your computer.",
         "NSScreenCaptureUsageDescription": "Mission Control captures a screen region you select so you can attach it to an AI session as visual context."
       },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "notarize": true
+      "identity": "-",
+      "notarize": false
     },
     "linux": {
       "icon": "build/icon.png",
@@ -244,12 +236,6 @@
       ],
       "artifactName": "${productName}-${version}-Setup.${ext}"
     },
-    "publish": [
-      {
-        "provider": "generic",
-        "url": "https://agentsystem.dev/downloads/mission-control/auto-update",
-        "channel": "latest"
-      }
-    ]
+    "publish": null
   }
 }

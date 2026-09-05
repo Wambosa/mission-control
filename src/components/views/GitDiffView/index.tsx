@@ -16,20 +16,22 @@ import {
   type FileSelection,
 } from "./ChangedFilesList";
 import { DiffPane } from "./DiffPane";
-import { sandboxContainerRoot } from "~/lib/project-fs";
+import { projectRemoteRoot, type ProjectFsScope } from "~/lib/project-fs";
 
 export function GitDiffView({
   projectId,
   worktreeId,
   projectPath,
+  scope,
   enabled = true,
   onBack,
   showHeader = true,
-  onShip,
 }: {
   projectId: string;
   worktreeId?: string | null;
   projectPath: string;
+  /** Which machine this project's repo lives on, and where. */
+  scope: ProjectFsScope;
   enabled?: boolean;
   onBack: () => void;
   /**
@@ -38,14 +40,15 @@ export function GitDiffView({
    * is purely presentational; all git state/compute below is unchanged.
    */
   showHeader?: boolean;
-  onShip: () => void;
 }) {
-  // For a sandbox project the repo lives in the container; status/diff read over
-  // remoteGit (the host HTTP path is used otherwise). Derived from the host dir.
-  const sandboxRepoPath = sandboxContainerRoot(projectPath);
+  // For a project running off this machine the repo lives there; status/diff
+  // read over remoteGit (the host HTTP path is used otherwise). An SSH host
+  // states its directory; a managed VM's is derived from the local folder name.
+  const sandboxRepoPath = projectRemoteRoot(projectPath, scope.remoteDirectory, scope.sandboxId);
   const { data: status, isLoading, error } = useGitStatus(projectId, worktreeId, {
     enabled,
     sandboxRepoPath,
+    scope,
     // The diff view actively displays file-level changes — poll fast while open.
     fastPoll: enabled,
   });
@@ -121,7 +124,7 @@ export function GitDiffView({
     worktreeId,
     selection?.path ?? null,
     selection?.staged ?? false,
-    { enabled, sandboxRepoPath },
+    { enabled, sandboxRepoPath, scope },
   );
   const selectedDisplay = selection ? displayPath(selection.path) : null;
 
@@ -233,8 +236,6 @@ export function GitDiffView({
             onUnstageAll={onUnstageAll}
             onDeleteFile={(p) => deleteM.mutate(p)}
             busyPaths={busyPaths}
-            enabled={enabled}
-            onShip={onShip}
           />
           <div
             style={{

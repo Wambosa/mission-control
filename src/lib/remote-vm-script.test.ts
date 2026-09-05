@@ -241,9 +241,11 @@ describe("remote-vm CLI helpers", () => {
       expect(
         (db.prepare("SELECT value FROM app_settings WHERE key = ?").get("multiSandbox.enabled") as { value: string }).value,
       ).toBe("true");
+      // Registering a VM no longer writes an application-wide scope: nothing
+      // reads one, and a project names its own host.
       expect(
-        (db.prepare("SELECT value FROM app_settings WHERE key = ?").get("multiSandbox.activeScope") as { value: string }).value,
-      ).toBe("sb-test");
+        db.prepare("SELECT value FROM app_settings WHERE key = ?").get("multiSandbox.activeScope"),
+      ).toBeUndefined();
 
       updateRemoteVmStatus(db, "sb-test", "ready", null, { publicIp: "203.0.113.11" });
       expect(

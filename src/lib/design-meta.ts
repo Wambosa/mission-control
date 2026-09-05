@@ -42,19 +42,15 @@ export const DUPLICATE_ACTIVE_SESSION_EVENT = "mc:duplicate-active-session";
 export const ARCHIVE_ACTIVE_SESSION_EVENT = "mc:archive-active-session";
 export type ArchiveActiveSessionEventDetail = { taskId: string };
 
-/** Dispatched when Cmd+K (terminal.expandToggle) fires while a bottom user TTY has focus. */
+/** Dispatched by terminal.clear — the focused bottom user TTY wipes its buffer. */
 export const CLEAR_USER_TERMINAL_EVENT = "mc:clear-user-terminal";
-
-/** Dispatched when Cmd+K (terminal.expandToggle) fires while the session grid
- *  owns the workspace — SessionGrid toggles the focused (or expanded) cell. */
-export const GRID_EXPAND_TOGGLE_EVENT = "mc:grid-expand-toggle";
 
 /** Dispatched on Cmd+/Cmd-/Cmd0 when an xterm (user or session) has keyboard focus. */
 export const TERMINAL_ZOOM_IN_EVENT = "mc:terminal-zoom-in";
 export const TERMINAL_ZOOM_OUT_EVENT = "mc:terminal-zoom-out";
 export const TERMINAL_ZOOM_RESET_EVENT = "mc:terminal-zoom-reset";
 
-/** Dispatched by leaf components (e.g. ShipFailedDialog) to ask the Shell
+/** Dispatched by leaf components to ask the Shell
  * to open the Settings panel at a specific page. Listened to by __root.tsx. */
 export const OPEN_SETTINGS_EVENT = "mc:open-settings";
 export type OpenSettingsEventDetail = { panel?: string };
@@ -62,11 +58,6 @@ export type OpenSettingsEventDetail = { panel?: string };
 /** Dispatched by the Shell settings toggle to play the panel exit animation
  * before navigating away. Listened to by SettingsPanel. */
 export const CLOSE_SETTINGS_EVENT = "mc:close-settings";
-
-/** Dispatched to open the header sandbox-scope switcher (ScopeDropdown). Used
- * by the project actions menu: the scope chip hides while Local is active, so
- * this event is the way back into sandbox management. */
-export const OPEN_SCOPE_SWITCHER_EVENT = "mc:open-scope-switcher";
 
 export const ICON_COLORS = ["#ff5a1f", "#8ab4ff", "#c792ea", "#ff9466", "#f472b6", "#34d399", "#fb923c"];
 export const GROUP_COLORS = ["#ff5a1f", "#8ab4ff", "#c792ea", "#ff9466", "#f472b6", "#34d399", "#fb923c"];

@@ -392,13 +392,10 @@ function ensureSchema(sqlite: Database.Database) {
       image_path TEXT,
       group_id TEXT REFERENCES groups(id) ON DELETE SET NULL,
       sandbox_id TEXT REFERENCES sandboxes(id) ON DELETE CASCADE,
+      remote_directory TEXT,
       pinned INTEGER NOT NULL DEFAULT 0,
       pinned_order INTEGER,
       branch TEXT NOT NULL DEFAULT '${DEFAULT_BRANCH}',
-      launch_commands TEXT,
-      custom_scripts TEXT,
-      launch_url TEXT,
-      worktree_setup_command TEXT,
       remember_agent_settings INTEGER NOT NULL DEFAULT 0,
       saved_agent TEXT,
       saved_skip_permissions INTEGER NOT NULL DEFAULT 0,
@@ -442,6 +439,7 @@ function ensureSchema(sqlite: Database.Database) {
       claude_session_id TEXT,
       claude_skip_permissions INTEGER NOT NULL DEFAULT 0,
       claude_bare_session INTEGER NOT NULL DEFAULT 0,
+      agent_cwd TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -622,16 +620,6 @@ function ensureSchema(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS project_memory_status_idx ON project_memory(status);
     CREATE INDEX IF NOT EXISTS project_memory_pinned_idx ON project_memory(pinned);
 
-    CREATE TABLE IF NOT EXISTS scratch_pads (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      content TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS scratch_pads_project_idx ON scratch_pads(project_id);
-    CREATE INDEX IF NOT EXISTS scratch_pads_project_updated_idx ON scratch_pads(project_id, updated_at);
-
     CREATE TABLE IF NOT EXISTS graph_nodes (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -683,17 +671,14 @@ function ensureSchema(sqlite: Database.Database) {
   // (a schema-divergent build may already define `sandbox_id`), so the index is
   // created only after the column is guaranteed present. See docs/multi-sandbox-plan.md.
   ensureColumn(sqlite, "projects", "sandbox_id", "TEXT REFERENCES sandboxes(id) ON DELETE CASCADE");
+  // A project's directory on its SSH host. Guarded like sandbox_id so the
+  // fresh-install (inline DDL above) and upgrade (0028) paths converge.
+  ensureColumn(sqlite, "projects", "remote_directory", "TEXT");
   ensureProjectSandboxIndex(sqlite);
 
   // Manual group ordering. Legacy rows keep NULL until the user reorders (they
   // sort last by created_at meanwhile) — see groups.repo findAllGroups.
   ensureColumn(sqlite, "groups", "sort_order", "INTEGER");
-
-  // Per-project custom scripts (JSON array of {id,name,command}). Tolerate a
-  // pre-existing column: a fresh bootstrap marks migrations applied-only, so
-  // 0014 never runs on a brand-new DB — the inline DDL above covers that, and
-  // this guard covers any schema-divergent build. See 0014_custom_scripts.sql.
-  ensureColumn(sqlite, "projects", "custom_scripts", "TEXT");
 
   // Keep pre-release sandbox tables moving forward even if they were created by
   // an earlier branch before all remote/local config columns existed.
@@ -719,14 +704,18 @@ function ensureSchema(sqlite: Database.Database) {
   ensureColumn(sqlite, "tasks", "scope_id", `TEXT NOT NULL DEFAULT '${LOCAL_SCOPE_ID}'`);
   ensureColumn(sqlite, "tasks", "title_manually_set", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(sqlite, "tasks", "pinned", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "tasks", "agent_cwd", "TEXT");
   sqlite.exec("CREATE INDEX IF NOT EXISTS tasks_project_worktree_scope_idx ON tasks(project_id, worktree_id, scope_id);");
   sqlite.exec("CREATE INDEX IF NOT EXISTS tasks_scope_idx ON tasks(scope_id);");
   sqlite.exec("CREATE INDEX IF NOT EXISTS tasks_pinned_idx ON tasks(pinned);");
-  // findTasksByProjectId filters (project_id, scope_id) and orders by created_at
-  // DESC. Without a composite covering that shape SQLite picks a single-column
-  // index and sorts separately; this lets it satisfy the filter + order in one
-  // index scan.
-  sqlite.exec("CREATE INDEX IF NOT EXISTS tasks_project_scope_created_idx ON tasks(project_id, scope_id, created_at);");
+  // The scope column left the task query when scope stopped being a mode, so
+  // the composite cut for the old shape no longer matches anything.
+  sqlite.exec("DROP INDEX IF EXISTS tasks_project_scope_created_idx;");
+  // findTasksByProjectId filters project_id and orders by created_at DESC.
+  // Without a composite covering that shape SQLite picks a single-column index
+  // and sorts separately; this lets it satisfy the filter + order in one index
+  // scan.
+  sqlite.exec("CREATE INDEX IF NOT EXISTS tasks_project_created_idx ON tasks(project_id, created_at);");
   ensureColumn(sqlite, "user_terminals", "scope_id", `TEXT NOT NULL DEFAULT '${LOCAL_SCOPE_ID}'`);
   sqlite.exec("CREATE INDEX IF NOT EXISTS user_terminals_project_worktree_scope_idx ON user_terminals(project_id, worktree_id, scope_id);");
   sqlite.exec("CREATE INDEX IF NOT EXISTS user_terminals_scope_idx ON user_terminals(scope_id);");

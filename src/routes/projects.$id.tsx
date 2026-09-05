@@ -1,6 +1,6 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Btn } from "~/components/ui/Btn";
@@ -9,7 +9,6 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "~/components/ui/Dropdow
 import { Icon } from "~/components/ui/Icon";
 import { GridViewToggleIcon } from "~/components/ui/GridViewToggleIcon";
 import { Z_INDEX } from "~/lib/z-index";
-import { openExternal } from "~/lib/open-external";
 import { ProjectIcon } from "~/components/ui/ProjectIcon";
 import { EmptyState } from "~/components/ui/EmptyState";
 import { TaskColumn } from "~/components/views/TaskColumn";
@@ -31,28 +30,21 @@ import { FileFinderDialog } from "~/components/views/FileFinderDialog";
 const FileEditorDialog = lazy(() =>
   import("~/components/views/FileEditorDialog").then((m) => ({ default: m.FileEditorDialog })),
 );
-import { LaunchCommandsDialog } from "~/components/views/LaunchCommandsDialog";
-import { CustomScriptsDialog } from "~/components/views/CustomScriptsDialog";
-import { CustomScriptsButton } from "~/components/views/CustomScriptsButton";
 import { GridLayoutButton } from "~/components/views/GridLayoutButton";
 import { SessionGrid } from "~/components/views/SessionGrid";
-import { archiveOpenSession, invalidateSessionQueries } from "~/lib/archive-session";
 import { enterFocusSession } from "~/lib/focus-session";
 import { consumeProjectOnboardIntent, type ProjectOnboardIntent } from "~/lib/project-onboard-intent";
-import { sandboxUsableForProject } from "~/lib/project-scoped-sandboxes";
+import { projectHostLabel } from "~/lib/project-host-label";
 import { useHideableMenu } from "~/lib/hideable-elements";
 import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
-import { ScriptArgsModal } from "~/components/views/ScriptArgsModal";
-import { WorktreeSetupCommandDialog } from "~/components/views/WorktreeSetupCommandDialog";
 import { NewAgentButton } from "~/components/views/NewAgentButton";
 import { CursorGlow } from "~/components/ui/CursorGlow";
 import { HotkeyTooltip, StaticHotkeyTooltip } from "~/components/ui/Tooltip";
 import { Modal } from "~/components/ui/Modal";
 import { ConfirmDialog } from "~/components/ui/ConfirmDialog";
 import { RemoveProjectConfirmDialog } from "~/components/views/RemoveProjectConfirmDialog";
-import { TextField } from "~/components/ui/TextField";
 import { isEditableTarget, useHotkey } from "~/lib/use-hotkey";
-import { ApiError, api, type AppSettings } from "~/lib/api";
+import { api } from "~/lib/api";
 import { getElectron } from "~/lib/electron";
 import {
   screenshotCaptureErrorMessage,
@@ -60,7 +52,7 @@ import {
   screenshotSupported as isScreenshotSupported,
 } from "~/lib/screenshot";
 import { playScreenshotCapture } from "~/lib/screenshot-sound";
-import { isDockerSandboxRuntime } from "~/lib/sandbox-runtime";
+import { isRemoteProjectRuntime } from "~/lib/sandbox-runtime";
 import { newSessionId } from "~/lib/claude-command";
 import { TITLE_WAITING } from "~/lib/task-sentinels";
 import {
@@ -90,28 +82,13 @@ import {
 import { useServerEvents } from "~/lib/use-events";
 import { useDebouncedCallback } from "~/lib/use-debounced-callback";
 import { applyQuestionServerEvent } from "~/lib/agent-question-store";
-import { setPendingInitialInput, takePendingInitialInput } from "~/lib/voice-session-prompts";
+import { setPendingInitialInput, takePendingInitialInput } from "~/lib/session-initial-prompts";
 import {
   clearPendingSessionModel,
   peekPendingSessionModel,
   setPendingSessionModel,
 } from "~/lib/session-model-overrides";
-import { DEFAULT_SHIP_PROMPT } from "~/shared/ship-defaults";
-import { DEFAULT_SYNC_PROMPT } from "~/shared/sync-defaults";
-import { DEFAULT_PULL_REQUEST_PROMPT } from "~/shared/pull-request-defaults";
 import type { AiModelId } from "~/shared/ai-runtime-defaults";
-import {
-  VOICE_NEW_AGENT_EVENT,
-  VOICE_OPEN_BROWSER_EVENT,
-  VOICE_OPEN_DIFF_EVENT,
-  VOICE_REMEMBER_EVENT,
-  VOICE_RUN_PROJECT_EVENT,
-  VOICE_RUN_SCRIPT_EVENT,
-  type VoiceNewAgentDetail,
-  type VoiceRememberDetail,
-  type VoiceRunScriptDetail,
-} from "~/lib/voice-events";
-import { MEMORY_TITLE_MAX } from "~/shared/project-memory";
 import { useTerminals } from "~/lib/terminal-store";
 import { useUserTerminals } from "~/lib/user-terminal-store";
 import {
@@ -119,18 +96,7 @@ import {
   groupArchivedTasksForDisplay,
   groupTasksByStatusForDisplay,
 } from "~/lib/task-display-order";
-import {
-  DEFAULT_BRANCH,
-  type TaskAgent,
-  parseLaunchCommands,
-  parseCustomScripts,
-  serializeCustomScripts,
-  STATUS_DISPLAY_ORDER,
-  TASK_STATUS_META,
-  type CustomScript,
-} from "~/shared/domain";
-import { getPinnedProjectStatusDots } from "~/components/views/project-bar-status-dots";
-import { hasRunningLaunchSessions } from "~/lib/project-launch-running";
+import { DEFAULT_BRANCH, STATUS_DISPLAY_ORDER } from "~/shared/domain";
 import { agentSupportsSkipPermissions } from "~/shared/agents";
 import {
   queryKeys,
@@ -140,20 +106,12 @@ import {
   useSandboxes,
   useSettings,
   useTasks,
-  useWorktrees,
 } from "~/queries";
-import { useWorktreesEnabled } from "~/lib/use-worktrees-enabled";
 import { useActiveGroup } from "~/lib/active-group";
-import { useGitStatus, useUpstreamFetchPoll } from "~/queries/git";
+import { useGitStatus } from "~/queries/git";
+import { projectRemoteRoot, type ProjectFsScope } from "~/lib/project-fs";
 import { GitDiffModal } from "~/components/views/GitDiffView/GitDiffModal";
-import { CommitPushButton } from "~/components/views/CommitPushButton";
 import { RecallModal } from "~/components/views/RecallModal";
-import { BranchTypeahead } from "~/components/views/BranchTypeahead";
-import { HeaderActions } from "~/components/ui/HeaderActionsSlot";
-import { InstallDiagramSkillMenuItem } from "~/components/views/InstallDiagramSkillMenuItem";
-import { InstallDiagramSkillModal } from "~/components/views/InstallDiagramSkillModal";
-import { InstallShipSkillMenuItem } from "~/components/views/InstallShipSkillMenuItem";
-import { InstallShipSkillModal } from "~/components/views/InstallShipSkillModal";
 import { SandboxProvisioningState } from "~/components/views/SandboxProvisioningState";
 import {
   isSandboxProvisioning,
@@ -165,38 +123,19 @@ import {
   useCliAvailability,
 } from "~/lib/cli-availability";
 import {
-  activateSandboxScope,
-  projectRuntimeScopeId,
-  scopeIdToActivate,
-} from "~/lib/activate-sandbox-scope";
-import {
   SESSION_NOTIFICATION_OPEN_EVENT,
   clearPendingSessionOpen,
   readPendingSessionOpen,
   type PendingSessionOpen,
 } from "~/lib/session-notification-store";
-import type { Group, Project, Task, TaskStatus } from "~/db/schema";
+import type { Group, Task, TaskStatus } from "~/db/schema";
 import type { ProjectPathStatus } from "~/shared/projects";
-import type { WorktreeInfo } from "~/shared/worktrees";
-import {
-  MAIN_WORKTREE_ID,
-  OPTIMISTIC_WORKTREE_ID_PREFIX,
-  worktreeScopeKey,
-} from "~/shared/worktrees";
-import { LOCAL_SCOPE_ID, normalizeScopeId } from "~/shared/sandbox";
+import { worktreeScopeKey } from "~/shared/worktrees";
+import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 import { scopeKeyForProject } from "~/lib/scoped-project";
-import {
-  readCachedSelectedWorktreeByProject,
-  writeCachedSelectedWorktreeByProject,
-} from "~/lib/ui-preference-cache";
-import {
-  selectedWorktreeMapsEqual,
-  type SelectedWorktreeByProject,
-} from "~/shared/ui-preferences";
 import {
   ARCHIVE_ACTIVE_SESSION_EVENT,
   DUPLICATE_ACTIVE_SESSION_EVENT,
-  OPEN_SCOPE_SWITCHER_EVENT,
   pickByPriority,
   STATUS_META,
   type ArchiveActiveSessionEventDetail,
@@ -208,71 +147,19 @@ export const Route = createFileRoute("/projects/$id")({
   component: ProjectPage,
 });
 
-type DeleteWorktreeMode = "clean" | "stash" | "discard";
 type SessionView = "active" | "pinned" | "archived";
-const WORKTREE_DELETE_FILES_MAX_HEIGHT = 220;
 
-function apiErrorMessage(error: unknown): string | null {
-  if (error instanceof ApiError) {
-    const body =
-      error.body && typeof error.body === "object"
-        ? (error.body as { error?: unknown; stderr?: unknown })
-        : null;
-    if (typeof body?.error === "string" && body.error.trim()) return body.error.trim();
-    if (typeof body?.stderr === "string" && body.stderr.trim()) return body.stderr.trim();
-    return error.message;
-  }
-  if (error instanceof Error && error.message.trim()) return error.message.trim();
-  return null;
-}
 
-function gitUnavailableTitle(error: unknown): string {
-  const message = apiErrorMessage(error);
-  return message ? `Git unavailable: ${message}` : "Git unavailable";
-}
-
-function worktreeChangeLabel(count: number | undefined): string {
-  if (count === undefined) return "Checking changes";
-  return `${count} changed file${count === 1 ? "" : "s"}`;
-}
-
-function deleteWorktreeOptionsForMode(mode: DeleteWorktreeMode): {
-  force?: boolean;
-  stashChanges?: boolean;
-} {
-  if (mode === "stash") return { stashChanges: true };
-  if (mode === "discard") return { force: true };
-  return {};
-}
-
-function formatWorktreeChangeStatus(area: "staged" | "unstaged", status: string): string {
-  const areaLabel = area === "staged" ? "Staged" : "Unstaged";
-  return `${areaLabel} ${status.replace("-", " ")}`;
-}
 
 type ProjectPathCheck =
   | { state: "idle" | "checking" | "valid" }
   | { state: "invalid"; status: Extract<ProjectPathStatus, { ok: false }> }
   | { state: "error"; message: string };
 
-function isCurrentPathIssue(
-  status: Extract<ProjectPathStatus, { ok: false }>,
-  selectedWorktreeId: string | null,
-): boolean {
-  if (status.scope === "project") return selectedWorktreeId === null;
-  return status.worktreeId === selectedWorktreeId;
-}
-
-function launchUrlPort(raw: string | null): number[] {
-  if (!raw) return [];
-  try {
-    const url = new URL(raw);
-    if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname)) return [];
-    const port = Number(url.port);
-    return Number.isInteger(port) && port > 0 ? [port] : [];
-  } catch {
-    return [];
-  }
+/** Sessions always run from the project's own checkout, so only a project-scoped
+ *  path problem is the current one. */
+function isCurrentPathIssue(status: Extract<ProjectPathStatus, { ok: false }>): boolean {
+  return status.scope === "project";
 }
 
 function firstDisplayedTask<T extends { status: TaskStatus }>(tasks: T[]): T | undefined {
@@ -298,145 +185,61 @@ function ProjectPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { data: settings } = useSettings();
-  const settingsLoaded = settings !== undefined;
   const { hideElementContextMenu, hideableMenu } = useHideableMenu();
   // Which discretionary project-header buttons are shown (Settings → Interface,
   // or right-click → Hide on the button itself).
   const headerButtons = settings?.headerButtons ?? DEFAULT_HEADER_BUTTON_VISIBILITY;
-  const storedSelectedWorktreeByProject = settings?.selectedWorktreeByProject ?? null;
-  const [selectedWorktreeByProject, setSelectedWorktreeByProject] =
-    useState<SelectedWorktreeByProject>(() => {
-      return readCachedSelectedWorktreeByProject() ?? {};
-    });
-  const [worktreeSelectionHydrated, setWorktreeSelectionHydrated] = useState(false);
-  const selectedWorktreeByProjectRef = useRef(selectedWorktreeByProject);
-  const syncingStoredWorktreeSelectionRef = useRef(false);
-  useEffect(() => {
-    selectedWorktreeByProjectRef.current = selectedWorktreeByProject;
-  }, [selectedWorktreeByProject]);
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    if (!storedSelectedWorktreeByProject) {
-      syncingStoredWorktreeSelectionRef.current = false;
-      setWorktreeSelectionHydrated(true);
-      return;
-    }
-    syncingStoredWorktreeSelectionRef.current = !selectedWorktreeMapsEqual(
-      selectedWorktreeByProjectRef.current,
-      storedSelectedWorktreeByProject,
-    );
-    setSelectedWorktreeByProject((current) =>
-      selectedWorktreeMapsEqual(current, storedSelectedWorktreeByProject)
-        ? current
-        : storedSelectedWorktreeByProject,
-    );
-    setWorktreeSelectionHydrated(true);
-  }, [settingsLoaded, storedSelectedWorktreeByProject]);
-  useEffect(() => {
-    writeCachedSelectedWorktreeByProject(selectedWorktreeByProject);
-    if (!settingsLoaded) return;
-    if (!worktreeSelectionHydrated) return;
-    if (syncingStoredWorktreeSelectionRef.current) {
-      if (
-        selectedWorktreeMapsEqual(
-          storedSelectedWorktreeByProject,
-          selectedWorktreeByProject,
-        )
-      ) {
-        syncingStoredWorktreeSelectionRef.current = false;
-      } else {
-        return;
-      }
-    }
-    if (
-      selectedWorktreeMapsEqual(
-        storedSelectedWorktreeByProject,
-        selectedWorktreeByProject,
-      )
-    ) {
-      return;
-    }
-    if (
-      !storedSelectedWorktreeByProject &&
-      Object.keys(selectedWorktreeByProject).length === 0
-    ) {
-      return;
-    }
-    queryClient.setQueryData<AppSettings>(queryKeys.settings, (current) =>
-      current
-        ? { ...current, selectedWorktreeByProject }
-        : current,
-    );
-    void api
-      .updateSettings({ selectedWorktreeByProject })
-      .then((next) => queryClient.setQueryData(queryKeys.settings, next))
-      .catch((error) => {
-        console.error("[settings] failed to persist selected worktree:", error);
-      });
-  }, [
-    queryClient,
-    selectedWorktreeByProject,
-    settingsLoaded,
-    storedSelectedWorktreeByProject,
-    worktreeSelectionHydrated,
-  ]);
   const projectQuery = useProject(id);
   const { setActiveGroup } = useActiveGroup();
   const { data: sandboxState } = useSandboxes();
   useSyncProjectDiagrams(id);
-  const worktreesQuery = useWorktrees(id);
   const groupsQuery = useGroups();
   const project = projectQuery.data;
-  const worktreesEnabled = useWorktreesEnabled();
-  const worktrees = worktreesQuery.data ?? [];
-  const selectedWorktreeKey = worktreesEnabled
-    ? selectedWorktreeByProject[id] || MAIN_WORKTREE_ID
-    : MAIN_WORKTREE_ID;
-  const selectedWorktreeKeyRef = useRef(selectedWorktreeKey);
-  useEffect(() => {
-    selectedWorktreeKeyRef.current = selectedWorktreeKey;
-  }, [selectedWorktreeKey]);
-  const selectedWorktree =
-    worktrees.find((w) => w.id === selectedWorktreeKey) ??
-    worktrees.find((w) => w.id === MAIN_WORKTREE_ID) ??
-    null;
-  const selectedWorktreeId = worktreesEnabled && !selectedWorktree?.isMain ? selectedWorktree?.id ?? null : null;
-  const selectedWorktreePath = worktreesEnabled
-    ? selectedWorktree?.path ?? project?.path ?? ""
-    : project?.path ?? "";
+  // Sessions belong to the project, not to a worktree: the interface no longer
+  // switches worktrees, so every session runs from the project's own checkout.
+  // (Which worktree an agent has moved into is read per session from its
+  // lifecycle events — see the session header.)
+  const projectPath = project?.path ?? "";
+  // Which machine this project runs on, and where it lives there. Read from the
+  // project, not from an application-wide scope: two projects on two machines
+  // are live at once.
+  const projectFsScope = useMemo<ProjectFsScope>(
+    () => ({
+      sandboxId: project?.sandboxId ?? null,
+      remoteDirectory: project?.remoteDirectory ?? null,
+    }),
+    [project?.sandboxId, project?.remoteDirectory],
+  );
+  // The project states its host; nothing else selects one. A project with no
+  // host runs on this machine.
+  const activeRuntimeScopeId = project?.sandboxId ?? LOCAL_SCOPE_ID;
   const activeRuntimeSandbox =
-    sandboxState?.activeScopeId && sandboxState.activeScopeId !== LOCAL_SCOPE_ID
-      ? sandboxState.sandboxes.find((sandbox) => sandbox.id === sandboxState.activeScopeId) ?? null
+    sandboxState?.enabled && project?.sandboxId
+      ? sandboxState.sandboxes.find((sandbox) => sandbox.id === project.sandboxId) ?? null
       : null;
-  const activeRuntimeScopeId =
-    sandboxState?.enabled &&
-    activeRuntimeSandbox &&
-    project &&
-    sandboxUsableForProject(activeRuntimeSandbox, project.id)
-      ? sandboxState.activeScopeId
-      : LOCAL_SCOPE_ID;
+  const hostLabel = projectHostLabel(project?.sandboxId, sandboxState?.sandboxes);
   const deploySandboxId = activeRuntimeSandbox?.id ?? null;
   const { deployJob, deployLogText } = useRemoteVmDeployForSandbox(deploySandboxId);
   const sandboxProvisioning =
     activeRuntimeSandbox != null &&
     isSandboxProvisioning(activeRuntimeSandbox, deployJob);
-  const selectedScopeKey = `${worktreeScopeKey(id, selectedWorktreeId)}:${activeRuntimeScopeId}`;
+  const selectedScopeKey = `${worktreeScopeKey(id, null)}:${activeRuntimeScopeId}`;
   const scopedProject = useMemo(
     () =>
       project
         ? {
             ...project,
-            path: selectedWorktreePath || project.path,
-            activeWorktreeId: selectedWorktreeId,
+            path: projectPath || project.path,
+            activeWorktreeId: null,
             activeRuntimeScopeId,
           }
         : null,
-    [activeRuntimeScopeId, project, selectedWorktreeId, selectedWorktreePath],
+    [activeRuntimeScopeId, project, null, projectPath],
   );
   const [projectPathCheck, setProjectPathCheck] = useState<ProjectPathCheck>({
     state: "idle",
   });
-  const pathScopeKey = `${project?.id ?? ""}:${project?.path ?? ""}:${selectedWorktreeId ?? ""}:${selectedWorktreePath}`;
+  const pathScopeKey = `${project?.id ?? ""}:${project?.path ?? ""}:${projectPath}`;
   const pathScopeRef = useRef(pathScopeKey);
   useEffect(() => {
     if (!project) {
@@ -456,7 +259,7 @@ function ProjectPage() {
       return { state: "checking" };
     });
     void api
-      .getProjectPathStatus(project.id, selectedWorktreeId)
+      .getProjectPathStatus(project.id, null)
       .then(({ status }) => {
         if (cancelled) return;
         setProjectPathCheck(status.ok ? { state: "valid" } : { state: "invalid", status });
@@ -471,14 +274,14 @@ function ProjectPage() {
     return () => {
       cancelled = true;
     };
-  }, [pathScopeKey, project, selectedWorktreeId]);
+  }, [pathScopeKey, project, null]);
   const projectPathReady = projectPathCheck.state === "valid";
   const projectPathBlocked =
     projectPathCheck.state === "invalid" || projectPathCheck.state === "error";
   const projectPathUsable = projectPathReady || projectPathCheck.state === "checking";
   const projectPathIssue =
     projectPathCheck.state === "invalid" &&
-    isCurrentPathIssue(projectPathCheck.status, selectedWorktreeId)
+    isCurrentPathIssue(projectPathCheck.status)
       ? projectPathCheck.status
       : null;
   const terminalProject = projectPathReady ? scopedProject : null;
@@ -520,16 +323,7 @@ function ProjectPage() {
     },
     [terminalProject],
   );
-  useEffect(() => {
-    if (!worktreesQuery.data) return;
-    const exists = worktreesQuery.data.some((w) => w.id === selectedWorktreeKey);
-    if (!exists && selectedWorktreeKey !== MAIN_WORKTREE_ID) {
-      setSelectedWorktreeByProject((prev) =>
-        prev[id] === MAIN_WORKTREE_ID ? prev : { ...prev, [id]: MAIN_WORKTREE_ID }
-      );
-    }
-  }, [id, selectedWorktreeKey, worktreesQuery.data]);
-  const tasksQuery = useTasks(id, selectedWorktreeId, activeRuntimeScopeId);
+  const tasksQuery = useTasks(id, activeRuntimeScopeId);
   const tasks = tasksQuery.data ?? [];
   const wasSandboxProvisioningRef = useRef(false);
   useEffect(() => {
@@ -548,28 +342,25 @@ function ProjectPage() {
   );
   const groups = groupsQuery.data ?? [];
   useApiToken();
-  const { open: showDiffView, toggle: toggleDiffView, close: closeDiffView, setOpen: setDiffViewOpen } =
+  const { open: showDiffView, toggle: toggleDiffView, close: closeDiffView } =
     useGitDiffViewOpen(id);
-  const {
-    data: gitStatusData,
-    error: gitStatusError,
-    isError: gitStatusIsError,
-    refetch: refetchGitStatus,
-  } = useGitStatus(id, selectedWorktreeId, {
+  const { data: gitStatusData, isError: gitStatusIsError } = useGitStatus(id, null, {
     enabled: projectPathUsable,
+    // The diff view shares this key, so it has to read the same repository:
+    // for a project on another machine that is the one over there, not this
+    // one. Passing different inputs under one key made the chip and the diff
+    // disagree about the same project.
+    sandboxRepoPath: projectRemoteRoot(
+      projectPath || project?.path || "",
+      project?.remoteDirectory ?? null,
+      project?.sandboxId ?? null,
+    ),
+    scope: projectFsScope,
     // The toolbar chip only needs a lazy cadence; file-level surfaces (the
     // open diff view) poll fast via their own observer on the same key.
     fastPoll: showDiffView,
   });
   const gitStatus = gitStatusIsError ? undefined : gitStatusData;
-  // Keep remote-tracking refs fresh (focus-gated background fetch) so
-  // gitStatus.behindCount — and the branch Sync button — stay accurate. Local
-  // scope only: the remote sandbox agent's git RPC doesn't compute behindCount.
-  useUpstreamFetchPoll(id, selectedWorktreeId, {
-    enabled: projectPathUsable && activeRuntimeScopeId === LOCAL_SCOPE_ID,
-  });
-  const gitUnavailable = projectPathReady && gitStatusIsError;
-  const gitUnavailableMessage = gitUnavailable ? gitUnavailableTitle(gitStatusError) : null;
   // onToggleDiffView is defined lower down (after `terminals`) because opening
   // the diff must also drop out of the grid view — see the comment there.
   useEffect(() => {
@@ -626,8 +417,6 @@ function ProjectPage() {
     [],
   );
   const [confirmDeleteArchived, setConfirmDeleteArchived] = useState(false);
-  const [confirmArchiveAll, setConfirmArchiveAll] = useState(false);
-  const [archivingAll, setArchivingAll] = useState(false);
   // Leave the archived view automatically once it empties (last one restored
   // or deleted) so the toggle never strands the user on a blank list.
   useEffect(() => {
@@ -640,21 +429,8 @@ function ProjectPage() {
     setFileFinderResetKey((v) => v + 1);
     setFileFinderOpen(true);
   }, []);
-  const [showLaunchConfig, setShowLaunchConfig] = useState(false);
   const [showRecall, setShowRecall] = useState(false);
   const [recallInitialFilter, setRecallInitialFilter] = useState<"all" | "recent">("all");
-  const [showCustomScriptsConfig, setShowCustomScriptsConfig] = useState(false);
-  const [showWorktreeSetupConfig, setShowWorktreeSetupConfig] = useState(false);
-  const [showInstallDiagramSkill, setShowInstallDiagramSkill] = useState(false);
-  const [showInstallShipSkill, setShowInstallShipSkill] = useState(false);
-  const [showLaunchEmpty, setShowLaunchEmpty] = useState(false);
-  const [confirmDeleteWorktree, setConfirmDeleteWorktree] = useState(false);
-  const [worktreeDeleteConfirmName, setWorktreeDeleteConfirmName] = useState("");
-  const [creatingWorktree, setCreatingWorktree] = useState(false);
-  const creatingWorktreeRef = useRef(false);
-  const [deletingWorktree, setDeletingWorktree] = useState(false);
-  const [launching, setLaunching] = useState(false);
-  const [stopping, setStopping] = useState(false);
   const [pinning, setPinning] = useState(false);
   const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
   const [repairingProjectPath, setRepairingProjectPath] = useState(false);
@@ -664,36 +440,7 @@ function ProjectPage() {
   useEffect(() => {
     setProjectPathActionError(null);
   }, [projectPathCheck.state, projectPathIssue?.path]);
-  const launchCommands = parseLaunchCommands(project?.launchCommands ?? null);
-  const customScripts = useMemo(
-    () => parseCustomScripts(project?.customScripts ?? null),
-    [project?.customScripts]
-  );
-  const launchCommandSet = useMemo(
-    () =>
-      new Set(launchCommands.map((c) => c.command.trim()).filter(Boolean)),
-    [launchCommands]
-  );
   const cliAvailability = useCliAvailability();
-  const selectedWorktreeChangeCount = selectedWorktree && !selectedWorktree.isMain
-    ? gitStatus?.changedCount
-    : undefined;
-  const selectedWorktreeDirty =
-    !!selectedWorktree && !selectedWorktree.isMain && (selectedWorktreeChangeCount ?? 0) > 0;
-  const selectedWorktreeStatusPending =
-    !!selectedWorktree &&
-    !selectedWorktree.isMain &&
-    selectedWorktreeChangeCount === undefined &&
-    projectPathUsable;
-  const worktreeDiscardConfirmMatches =
-    !!selectedWorktree && worktreeDeleteConfirmName.trim() === selectedWorktree.name;
-  const worktreeChangedFiles = useMemo(() => {
-    return [
-      ...(gitStatus?.staged ?? []).map((file) => ({ ...file, area: "staged" as const })),
-      ...(gitStatus?.unstaged ?? []).map((file) => ({ ...file, area: "unstaged" as const })),
-    ];
-  }, [gitStatus?.staged, gitStatus?.unstaged]);
-
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [overflowMenuRect, setOverflowMenuRect] = useState<{
     top: number;
@@ -775,7 +522,7 @@ function ProjectPage() {
     if (!projectPathReady) return;
     toggleDiffView();
   }, [projectPathReady, toggleDiffView]);
-  // How many sessions the current scope's grid shows (drives "Archive all").
+  // How many sessions the current scope's grid shows (drives grid visibility).
   const gridScopeSessionCount = useMemo(
     () =>
       terminals.sessions.filter((s) => scopeKeyForProject(s.project) === selectedScopeKey).length,
@@ -846,128 +593,7 @@ function ProjectPage() {
       enterGridView();
     }
   }, [terminals, enterGridView, terminalProject, tasks]);
-  const {
-    setProject: setActiveUserTerminalProject,
-    createTerminal,
-    killTerminalsByStartCommand,
-    setPanelOpen,
-    sessions: userTerminalSessions,
-    runningLaunchWorktreeIdsForProject,
-  } = useUserTerminals();
-  const launchRunningWorktreeIds = useMemo(
-    () => runningLaunchWorktreeIdsForProject(project?.id ?? id, project?.launchCommands ?? null),
-    [id, project?.id, project?.launchCommands, runningLaunchWorktreeIdsForProject]
-  );
-  const hasRunningLaunch = hasRunningLaunchSessions(userTerminalSessions, launchCommandSet);
-  const runningWorktreeKey = worktreesEnabled
-    ? [...launchRunningWorktreeIds].find((key) => key.startsWith(`${project?.id ?? id}:`))
-    : undefined;
-  const runningBlocksSelectedWorktree =
-    worktreesEnabled && !!runningWorktreeKey && runningWorktreeKey !== selectedScopeKey;
-  const launchPorts = useMemo(
-    () => launchUrlPort(project?.launchUrl ?? null),
-    [project?.launchUrl]
-  );
-
-  const stopLaunch = useCallback(async () => {
-    setOverflowOpen(false);
-    if (launchCommands.length === 0) return;
-    setStopping(true);
-    try {
-      await killTerminalsByStartCommand(launchCommands.map((c) => c.command), {
-        ports: launchPorts,
-      });
-    } finally {
-      setStopping(false);
-    }
-  }, [launchCommands, launchPorts, killTerminalsByStartCommand]);
-
-  const runLaunch = useCallback(async () => {
-    setOverflowOpen(false);
-    if (!projectPathReady) return;
-    if (runningBlocksSelectedWorktree) {
-      const runningId = runningWorktreeKey?.split(":")[1] || MAIN_WORKTREE_ID;
-      const runningName =
-        worktrees.find((w) => w.id === runningId)?.name ?? runningId;
-      toast.error(`Switch to ${runningName} and stop it before launching another worktree.`);
-      return;
-    }
-    if (launchCommands.length === 0) {
-      setShowLaunchEmpty(true);
-      return;
-    }
-    setLaunching(true);
-    try {
-      await killTerminalsByStartCommand(launchCommands.map((c) => c.command), {
-        ports: launchPorts,
-      });
-      for (const c of launchCommands) {
-        // Don't steal keyboard focus: users commonly run (Cmd+.) then
-        // immediately hit another hotkey (e.g. open browser), and a focused
-        // terminal would swallow those keystrokes.
-        await createTerminal({ name: c.name, startCommand: c.command, focusOnCreate: false });
-      }
-      setPanelOpen(true);
-    } finally {
-      setLaunching(false);
-    }
-  }, [
-    runningBlocksSelectedWorktree,
-    runningWorktreeKey,
-    worktrees,
-    launchCommands,
-    launchPorts,
-    killTerminalsByStartCommand,
-    createTerminal,
-    setPanelOpen,
-    projectPathReady,
-  ]);
-
-  // Script awaiting argument values before it can run (null when none pending).
-  const [argsScript, setArgsScript] = useState<CustomScript | null>(null);
-
-  const executeScript = useCallback(
-    async (script: CustomScript, command: string) => {
-      try {
-        await createTerminal({ name: script.name, startCommand: command });
-        setPanelOpen(true);
-      } catch {
-        toast.error(`Failed to run ${script.name}`);
-      }
-    },
-    [createTerminal, setPanelOpen]
-  );
-
-  const runShipSkillInstallCommand = useCallback(
-    async (command: string) => {
-      try {
-        await createTerminal({
-          name: "Install ship skills",
-          startCommand: command,
-          cwd: selectedWorktreePath || project?.path || null,
-        });
-        setPanelOpen(true);
-        toast.success("Started ship skill install in a terminal.");
-      } catch {
-        toast.error("Failed to start ship skill install terminal.");
-        throw new Error("Failed to start install terminal");
-      }
-    },
-    [createTerminal, project?.path, selectedWorktreePath, setPanelOpen]
-  );
-
-  const runScript = useCallback(
-    (script: CustomScript) => {
-      if (!projectPathReady) return;
-      // Scripts with declared args open a fill-in modal first; the rest run as-is.
-      if (script.args && script.args.length > 0) {
-        setArgsScript(script);
-        return;
-      }
-      void executeScript(script, script.command);
-    },
-    [projectPathReady, executeScript]
-  );
+  const { setProject: setActiveUserTerminalProject } = useUserTerminals();
 
   useEffect(() => {
     if (terminalProject) setActiveUserTerminalProject(terminalProject);
@@ -1102,22 +728,11 @@ function ProjectPage() {
           clearPendingSessionOpen(request);
           return;
         }
-        if (!worktreesQuery.data) return;
-        if (!worktreesEnabled && request.worktreeId && request.worktreeId !== MAIN_WORKTREE_ID) {
-          clearPendingSessionOpen(request);
-          return;
-        }
-
-        let resolvedScopeId = normalizeScopeId(request.scopeId);
-        let resolvedWorktreeId = request.worktreeId;
+        // The session list is scope-blind, so a session recorded on a host the
+        // project no longer points at still opens here.
         let task = tasks.find((entry) => entry.id === request.taskId && !entry.archived) ?? null;
-
-        if (task) {
-          resolvedScopeId = normalizeScopeId(task.scopeId);
-          resolvedWorktreeId = task.worktreeId ?? null;
-        } else if (tasksQuery.isLoading || sandboxProvisioning) {
-          return;
-        } else {
+        if (!task) {
+          if (tasksQuery.isLoading || sandboxProvisioning) return;
           try {
             const { task: remoteTask } = await api.getTask(request.taskId);
             if (!remoteTask || remoteTask.projectId !== id || remoteTask.archived) {
@@ -1125,51 +740,10 @@ function ProjectPage() {
               return;
             }
             task = remoteTask;
-            resolvedScopeId = normalizeScopeId(remoteTask.scopeId);
-            resolvedWorktreeId = remoteTask.worktreeId ?? null;
           } catch {
             clearPendingSessionOpen(request);
             return;
           }
-        }
-
-        const targetRuntimeScopeId = projectRuntimeScopeId(sandboxState, id, resolvedScopeId);
-        const activateTo = scopeIdToActivate(sandboxState, id, resolvedScopeId);
-        const globalActiveScopeId = normalizeScopeId(sandboxState?.activeScopeId ?? LOCAL_SCOPE_ID);
-
-        if (globalActiveScopeId !== activateTo) {
-          const switched = await activateSandboxScope(queryClient, activateTo);
-          if (!switched) clearPendingSessionOpen(request);
-          return;
-        }
-
-        if (activeRuntimeScopeId !== targetRuntimeScopeId) return;
-
-        const requestedWorktreeKey = resolvedWorktreeId ?? MAIN_WORKTREE_ID;
-        const requestedWorktreeExists =
-          requestedWorktreeKey === MAIN_WORKTREE_ID ||
-          worktreesQuery.data.some((worktree) => worktree.id === requestedWorktreeKey);
-        if (!requestedWorktreeExists) {
-          clearPendingSessionOpen(request);
-          return;
-        }
-
-        if (requestedWorktreeKey !== selectedWorktreeKey) {
-          setSelectedWorktreeByProject((prev) =>
-            prev[id] === requestedWorktreeKey
-              ? prev
-              : { ...prev, [id]: requestedWorktreeKey },
-          );
-          return;
-        }
-
-        if (!task) {
-          task = tasks.find((entry) => entry.id === request.taskId && !entry.archived) ?? null;
-        }
-        if (!task) {
-          if (tasksQuery.isLoading || sandboxProvisioning) return;
-          clearPendingSessionOpen(request);
-          return;
         }
 
         const active = terminals.activeFor(selectedScopeKey);
@@ -1187,16 +761,10 @@ function ProjectPage() {
       id,
       terminalProject,
       selectedScopeKey,
-      selectedWorktreeKey,
-      activeRuntimeScopeId,
-      sandboxState,
       tasks,
       tasksQuery.isLoading,
       sandboxProvisioning,
       terminals,
-      worktreesEnabled,
-      worktreesQuery.data,
-      queryClient,
     ],
   );
 
@@ -1221,8 +789,8 @@ function ProjectPage() {
     [queryClient, id],
   );
   const invalidateTasks = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: queryKeys.tasks(id, selectedWorktreeId, activeRuntimeScopeId) }),
-    [queryClient, id, selectedWorktreeId, activeRuntimeScopeId]
+    () => queryClient.invalidateQueries({ queryKey: queryKeys.tasks(id, activeRuntimeScopeId) }),
+    [queryClient, id, activeRuntimeScopeId]
   );
   const invalidateProjects = useCallback(
     () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
@@ -1264,183 +832,6 @@ function ProjectPage() {
     }
   }, [project, pinning, invalidateProject, invalidateProjects]);
 
-  const selectWorktree = useCallback(
-    (worktreeId: string) => {
-      if (!worktreesEnabled && worktreeId !== MAIN_WORKTREE_ID) return;
-      selectedWorktreeKeyRef.current = worktreeId;
-      setSelectedWorktreeByProject((prev) =>
-        prev[id] === worktreeId ? prev : { ...prev, [id]: worktreeId }
-      );
-    },
-    [id, worktreesEnabled],
-  );
-
-  const createProjectWorktree = useCallback(async () => {
-    if (!worktreesEnabled || !project || creatingWorktreeRef.current || projectPathBlocked || gitUnavailable) {
-      if (gitUnavailableMessage) toast.error(gitUnavailableMessage);
-      return;
-    }
-    creatingWorktreeRef.current = true;
-    setCreatingWorktree(true);
-    const worktreesKey = queryKeys.worktrees(project.id);
-    const selectionAtCreate = selectedWorktreeKeyRef.current;
-    const optimisticWorktree: WorktreeInfo = {
-      id: `${OPTIMISTIC_WORKTREE_ID_PREFIX}${Date.now()}`,
-      projectId: project.id,
-      name: "Creating...",
-      path: project.path,
-      branch: "",
-      isMain: false,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    await queryClient.cancelQueries({ queryKey: worktreesKey });
-    queryClient.setQueryData<WorktreeInfo[]>(worktreesKey, (current) =>
-      current ? [...current, optimisticWorktree] : current
-    );
-    try {
-      const result = await api.createWorktree(project.id);
-      queryClient.setQueryData<WorktreeInfo[]>(worktreesKey, (current) => {
-        const withoutOptimistic = (current ?? []).filter(
-          (worktree) =>
-            worktree.id !== optimisticWorktree.id && worktree.id !== result.worktree.id
-        );
-        return [...withoutOptimistic, result.worktree];
-      });
-      await invalidateWorktrees();
-      if (selectedWorktreeKeyRef.current === selectionAtCreate) {
-        selectWorktree(result.worktree.id);
-      }
-      if (result.setupCommand) {
-        const setupProject = {
-          ...project,
-          path: result.worktree.path,
-          activeWorktreeId: result.worktree.id,
-          activeRuntimeScopeId,
-        };
-        await createTerminal({
-          project: setupProject,
-          name: `Setup: ${result.worktree.name}`,
-          startCommand: result.setupCommand,
-        });
-      }
-      toast.success(`Created worktree ${result.worktree.name}`);
-    } catch (e: unknown) {
-      queryClient.setQueryData<WorktreeInfo[]>(worktreesKey, (current) =>
-        current?.filter((worktree) => worktree.id !== optimisticWorktree.id) ?? current
-      );
-      void invalidateWorktrees();
-      toast.error(e instanceof Error ? e.message : "Could not create worktree");
-    } finally {
-      creatingWorktreeRef.current = false;
-      setCreatingWorktree(false);
-    }
-  }, [
-    project,
-    invalidateWorktrees,
-    selectWorktree,
-    createTerminal,
-    queryClient,
-    worktreesEnabled,
-    activeRuntimeScopeId,
-    projectPathBlocked,
-    gitUnavailable,
-    gitUnavailableMessage,
-  ]);
-
-  const closeDeleteWorktreeDialog = useCallback(() => {
-    setConfirmDeleteWorktree(false);
-    setWorktreeDeleteConfirmName("");
-  }, []);
-
-  const reviewSelectedWorktreeChanges = useCallback(() => {
-    closeDeleteWorktreeDialog();
-    setDiffViewOpen(true);
-  }, [closeDeleteWorktreeDialog, setDiffViewOpen]);
-
-  const deleteSelectedWorktree = useCallback(async (mode: DeleteWorktreeMode = "clean") => {
-    if (!worktreesEnabled || !project || !selectedWorktree || selectedWorktree.isMain) return;
-    if (launchRunningWorktreeIds.has(selectedScopeKey)) {
-      toast.error("Stop this worktree before deleting it.");
-      return;
-    }
-    setDeletingWorktree(true);
-    const worktreesKey = queryKeys.worktrees(project.id);
-    const previousWorktrees = queryClient.getQueryData<WorktreeInfo[]>(worktreesKey);
-    const previousSelectedWorktreeKey = selectedWorktreeKey;
-    try {
-      await queryClient.cancelQueries({ queryKey: worktreesKey });
-      closeDeleteWorktreeDialog();
-      selectWorktree(MAIN_WORKTREE_ID);
-      setProjectPathCheck({ state: "checking" });
-      setProjectPathActionError(null);
-      queryClient.setQueryData<WorktreeInfo[]>(worktreesKey, (current) =>
-        current?.filter((worktree) => worktree.id !== selectedWorktree.id) ?? current
-      );
-      // Kill any terminals/agents running inside this worktree first. On Windows
-      // their open file handles (notably Claude Code's `.claude/` dir) would
-      // otherwise hold a lock that makes `git worktree remove` fail with
-      // "Permission denied", leaving the worktree half-deleted.
-      const electron = getElectron();
-      if (electron && selectedWorktree.path) {
-        await electron.pty.killUnderPath(selectedWorktree.path).catch(() => undefined);
-      }
-      await api.deleteWorktree(
-        project.id,
-        selectedWorktree.id,
-        deleteWorktreeOptionsForMode(mode),
-      );
-      await Promise.all([
-        invalidateWorktrees(),
-        invalidateTasks(),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.scopedUserTerminals(
-            project.id,
-            selectedWorktree.id,
-            activeRuntimeScopeId,
-          ),
-        }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.project(project.id) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
-      ]);
-      toast.success(
-        mode === "stash"
-          ? `Stashed changes and deleted worktree ${selectedWorktree.name}`
-          : `Deleted worktree ${selectedWorktree.name}`,
-      );
-    } catch (e: unknown) {
-      if (previousWorktrees) {
-        queryClient.setQueryData(worktreesKey, previousWorktrees);
-      } else {
-        void invalidateWorktrees();
-      }
-      selectWorktree(previousSelectedWorktreeKey);
-      const isConflict = e instanceof ApiError && e.status === 409;
-      if (isConflict) void refetchGitStatus();
-      setConfirmDeleteWorktree(true);
-      toast.error(
-        isConflict
-          ? "This worktree has changes. Choose how to handle them before deleting."
-          : e instanceof Error ? e.message : "Could not delete worktree",
-      );
-    } finally {
-      setDeletingWorktree(false);
-    }
-  }, [
-    project,
-    selectedWorktree,
-    selectedWorktreeKey,
-    selectedScopeKey,
-    launchRunningWorktreeIds,
-    selectWorktree,
-    closeDeleteWorktreeDialog,
-    invalidateWorktrees,
-    invalidateTasks,
-    queryClient,
-    refetchGitStatus,
-    worktreesEnabled,
-  ]);
-
   const [showCodexHooksNotice, setShowCodexHooksNotice] = useState(false);
   const [agentUpdateRequired, setAgentUpdateRequired] = useState<{
     agent: Task["agent"];
@@ -1474,19 +865,18 @@ function ProjectPage() {
         return;
       }
 
-      const tasksKey = queryKeys.tasks(project.id, selectedWorktreeId, activeRuntimeScopeId);
+      const tasksKey = queryKeys.tasks(project.id, activeRuntimeScopeId);
       void queryClient.cancelQueries({ queryKey: tasksKey });
 
-      // A voice-seeded prompt can't ride a pre-spawned warm slot (it was launched
+      // A staged prompt can't ride a pre-spawned warm slot (it was launched
       // before we knew the prompt), so fall back to the cold path when set.
-      const warmSlot = (await isDockerSandboxRuntime()) || opts?.initialInput
+      const warmSlot = isRemoteProjectRuntime(project.sandboxId) || opts?.initialInput
         ? null
         : takeSessionWarmSlot(payload, terminalProject.path);
       if (warmSlot) {
         appendOptimisticTask(
           queryClient,
           project.id,
-          selectedWorktreeId,
           warmSlot.draftTask,
           activeRuntimeScopeId,
         );
@@ -1502,13 +892,11 @@ function ProjectPage() {
             const task = await persistWarmSlotTask(
               project.id,
               warmSlot,
-              selectedWorktreeId,
               activeRuntimeScopeId,
             );
             replaceOptimisticTask(
               queryClient,
               project.id,
-              selectedWorktreeId,
               warmSlot.clientTaskId,
               task,
               activeRuntimeScopeId,
@@ -1526,7 +914,6 @@ function ProjectPage() {
             removeOptimisticTask(
               queryClient,
               project.id,
-              selectedWorktreeId,
               warmSlot.clientTaskId,
               activeRuntimeScopeId,
             );
@@ -1550,7 +937,7 @@ function ProjectPage() {
       const optimisticTask = buildOptimisticTask({
         id: clientTaskId,
         projectId: project.id,
-        worktreeId: selectedWorktreeId,
+        worktreeId: null,
         scopeId: activeRuntimeScopeId,
         agent: payload.agent,
         branch: payload.branch,
@@ -1560,7 +947,7 @@ function ProjectPage() {
           : undefined,
         claudeBareSession: payload.agent === "claude-code" ? payload.bareSession : undefined,
       });
-      appendOptimisticTask(queryClient, project.id, selectedWorktreeId, optimisticTask, activeRuntimeScopeId);
+      appendOptimisticTask(queryClient, project.id, optimisticTask, activeRuntimeScopeId);
       if (opts?.initialInput) {
         // TerminalPane consumes this once, at the first spawn, as the PTY's
         // initialInput — the main process writes it after the agent TUI is ready.
@@ -1590,13 +977,12 @@ function ProjectPage() {
             claudeSkipPermissions: agentSupportsSkipPermissions(payload.agent)
               ? payload.skipPermissions
               : undefined,
-            worktreeId: selectedWorktreeId,
+            worktreeId: null,
             scopeId: activeRuntimeScopeId,
           });
           replaceOptimisticTask(
             queryClient,
             project.id,
-            selectedWorktreeId,
             optimisticTask.id,
             created.task,
             activeRuntimeScopeId,
@@ -1626,7 +1012,6 @@ function ProjectPage() {
           removeOptimisticTask(
             queryClient,
             project.id,
-            selectedWorktreeId,
             optimisticTask.id,
             activeRuntimeScopeId,
           );
@@ -1638,7 +1023,7 @@ function ProjectPage() {
     [
       project,
       terminalProject,
-      selectedWorktreeId,
+      null,
       activeRuntimeScopeId,
       queryClient,
       invalidateProject,
@@ -1770,35 +1155,6 @@ function ProjectPage() {
   });
 
   useHotkey(
-    "project.runToggle",
-    () => {
-      if (showNewAgent || showEdit || confirmRemove || projectPathIssue || projectPathCheck.state === "error") return;
-      if (hasRunningLaunch) {
-        if (!stopping) void stopLaunch();
-      } else if (!launching) {
-        void runLaunch();
-      }
-    },
-    { ignoreEditable: true },
-  );
-
-  // Open the running project's launch URL in the browser — mirrors the globe
-  // button that appears beside Stop while the project is running.
-  useHotkey(
-    "project.openBrowser",
-    () => {
-      if (showNewAgent || showEdit || confirmRemove || projectPathIssue || projectPathCheck.state === "error") return;
-      if (!hasRunningLaunch) return;
-      if (!project?.launchUrl) {
-        toast.error("No launch URL configured for this project.");
-        return;
-      }
-      void openExternal(project.launchUrl);
-    },
-    { ignoreEditable: true },
-  );
-
-  useHotkey(
     "file.finder",
     () => {
       if (openFileRel || showNewAgent || showEdit || confirmRemove || !projectPathReady) return;
@@ -1807,252 +1163,13 @@ function ProjectPage() {
     },
   );
 
-  // Start an agent session seeded with a spoken task (voice control). When the
-  // user didn't name a harness, use Settings -> Defaults.
-  const startVoiceAgent = useCallback(
-    (prompt: string, agent?: TaskAgent) => {
-      if (!project || !projectPathReady) return;
-      // Voice-seeded prompts only flow through the local cold-spawn path; remote
-      // sandbox sessions spawn via remotePty (no initialInput) and would drop it.
-      if (activeRuntimeScopeId !== LOCAL_SCOPE_ID) {
-        toast.error("Voice agents aren't supported in sandbox sessions yet.");
-        return;
-      }
-      const payload = defaultSessionPayload(project);
-      // Drop the new session beside the active one and focus it, like Clone.
-      const anchor = anchorSessionId();
-      if (anchor) terminals.requestCloneInsertAfter(anchor);
-      void createSession(
-        { ...payload, agent: agent ?? settings?.defaultAgent ?? "claude-code", bareSession: false },
-        { initialInput: prompt, focusOnCreate: true },
-      );
-    },
-    [
-      project,
-      projectPathReady,
-      activeRuntimeScopeId,
-      createSession,
-      settings?.defaultAgent,
-      anchorSessionId,
-      terminals,
-    ],
-  );
-
-  // Ship: open an AI session that pushes/syncs with remote using Settings → Defaults → Ship.
-  const startShipSession = useCallback(() => {
-    if (!project || !projectPathReady) return;
-    if (activeRuntimeScopeId !== LOCAL_SCOPE_ID) {
-      toast.error("Ship isn't supported in sandbox sessions yet.");
-      return;
-    }
-    const payload = defaultSessionPayload(project);
-    const anchor = anchorSessionId();
-    if (anchor) terminals.requestCloneInsertAfter(anchor);
-    void createSession(
-      {
-        ...payload,
-        agent: settings?.shipAgent ?? "claude-code",
-        bareSession: false,
-      },
-      {
-        initialInput: settings?.shipPrompt ?? DEFAULT_SHIP_PROMPT,
-        focusOnCreate: true,
-        model: settings?.shipModel ?? null,
-      },
-    );
-  }, [
-    project,
-    projectPathReady,
-    activeRuntimeScopeId,
-    createSession,
-    settings?.shipAgent,
-    settings?.shipModel,
-    settings?.shipPrompt,
-    anchorSessionId,
-    terminals,
-  ]);
-
-  // Create PR: like Ship, but the injected prompt (Settings → Defaults →
-  // Create PR) has the agent commit/push local work, sync with upstream, then
-  // open a pull request in the browser.
-  const startCreatePullRequestSession = useCallback(() => {
-    if (!project || !projectPathReady) return;
-    if (activeRuntimeScopeId !== LOCAL_SCOPE_ID) {
-      toast.error("Create PR isn't supported in sandbox sessions yet.");
-      return;
-    }
-    const payload = defaultSessionPayload(project);
-    const anchor = anchorSessionId();
-    if (anchor) terminals.requestCloneInsertAfter(anchor);
-    void createSession(
-      {
-        ...payload,
-        agent: settings?.pullRequestAgent ?? "claude-code",
-        bareSession: false,
-      },
-      {
-        initialInput: settings?.pullRequestPrompt ?? DEFAULT_PULL_REQUEST_PROMPT,
-        focusOnCreate: true,
-        model: settings?.pullRequestModel ?? null,
-      },
-    );
-  }, [
-    project,
-    projectPathReady,
-    activeRuntimeScopeId,
-    createSession,
-    settings?.pullRequestAgent,
-    settings?.pullRequestModel,
-    settings?.pullRequestPrompt,
-    anchorSessionId,
-    terminals,
-  ]);
-
-  // Sync: open an AI session that pulls upstream changes into the current
-  // branch (stash/commit → pull → resolve conflicts → stash pop), driven by the
-  // prompt in Settings → Defaults → Sync. Mirrors startShipSession, plus a
-  // re-entry guard: unlike Ship, two concurrent sync sessions would each run
-  // `git stash`/`git stash pop` in the same worktree and can clobber each
-  // other's stash, so we block an accidental double-spawn while one is in flight.
-  const syncSpawnLockRef = useRef(false);
-  const startSyncSession = useCallback(() => {
-    if (syncSpawnLockRef.current) return;
-    if (!project || !projectPathReady) return;
-    if (activeRuntimeScopeId !== LOCAL_SCOPE_ID) {
-      toast.error("Sync isn't supported in sandbox sessions yet.");
-      return;
-    }
-    const payload = defaultSessionPayload(project);
-    const anchor = anchorSessionId();
-    if (anchor) terminals.requestCloneInsertAfter(anchor);
-    syncSpawnLockRef.current = true;
-    void createSession(
-      {
-        ...payload,
-        agent: settings?.syncAgent ?? "claude-code",
-        bareSession: false,
-      },
-      {
-        initialInput: settings?.syncPrompt ?? DEFAULT_SYNC_PROMPT,
-        focusOnCreate: true,
-        model: settings?.syncModel ?? null,
-      },
-    ).finally(() => {
-      syncSpawnLockRef.current = false;
-    });
-  }, [
-    project,
-    projectPathReady,
-    activeRuntimeScopeId,
-    createSession,
-    settings?.syncAgent,
-    settings?.syncModel,
-    settings?.syncPrompt,
-    anchorSessionId,
-    terminals,
-  ]);
-
-  // Command bus: VoiceController (mounted at root) dispatches these for the
-  // active project route to perform. Mirrors the project.runToggle hotkey.
-  useEffect(() => {
-    const onRun = () => {
-      if (
-        showNewAgent ||
-        showEdit ||
-        confirmRemove ||
-        projectPathIssue ||
-        projectPathCheck.state === "error"
-      ) {
-        return;
-      }
-      if (hasRunningLaunch) {
-        if (!stopping) void stopLaunch();
-      } else if (!launching) {
-        void runLaunch();
-      }
-    };
-    const onNewAgent = (e: Event) => {
-      const detail = (e as CustomEvent<VoiceNewAgentDetail>).detail;
-      startVoiceAgent(detail?.prompt ?? "", detail?.agent);
-    };
-    const onOpenBrowser = () => {
-      if (!project?.launchUrl) {
-        toast.error("No launch URL configured for this project.");
-        return;
-      }
-      void openExternal(project.launchUrl);
-    };
-    const onRunScript = (e: Event) => {
-      const detail = (e as CustomEvent<VoiceRunScriptDetail>).detail;
-      const script = customScripts.find((s) => s.id === detail?.scriptId);
-      if (script) runScript(script);
-    };
-    const onOpenDiff = () => {
-      if (projectPathReady) setDiffViewOpen(true);
-    };
-    const onRemember = (e: Event) => {
-      const text = (e as CustomEvent<VoiceRememberDetail>).detail?.text?.trim();
-      if (!text) return;
-      // A spoken fact is a user-confirmed discovery. Long dictations overflow the
-      // title, so clamp to its limit — the whole utterance still reads as one line.
-      const title = text.slice(0, MEMORY_TITLE_MAX);
-      void api
-        .createMemory(id, { type: "discovery", title, source: "voice", confidence: "confirmed" })
-        .then(() => {
-          void queryClient.invalidateQueries({ queryKey: queryKeys.projectMemory(id) });
-          toast.success(`Remembered: “${title}”`);
-        })
-        .catch((err) =>
-          toast.error(err instanceof Error ? err.message : "Could not save that memory"),
-        );
-    };
-    window.addEventListener(VOICE_RUN_PROJECT_EVENT, onRun);
-    window.addEventListener(VOICE_NEW_AGENT_EVENT, onNewAgent as EventListener);
-    window.addEventListener(VOICE_OPEN_BROWSER_EVENT, onOpenBrowser);
-    window.addEventListener(VOICE_RUN_SCRIPT_EVENT, onRunScript as EventListener);
-    window.addEventListener(VOICE_OPEN_DIFF_EVENT, onOpenDiff);
-    window.addEventListener(VOICE_REMEMBER_EVENT, onRemember as EventListener);
-    return () => {
-      window.removeEventListener(VOICE_RUN_PROJECT_EVENT, onRun);
-      window.removeEventListener(VOICE_NEW_AGENT_EVENT, onNewAgent as EventListener);
-      window.removeEventListener(VOICE_OPEN_BROWSER_EVENT, onOpenBrowser);
-      window.removeEventListener(VOICE_RUN_SCRIPT_EVENT, onRunScript as EventListener);
-      window.removeEventListener(VOICE_OPEN_DIFF_EVENT, onOpenDiff);
-      window.removeEventListener(VOICE_REMEMBER_EVENT, onRemember as EventListener);
-    };
-  }, [
-    showNewAgent,
-    showEdit,
-    confirmRemove,
-    projectPathIssue,
-    projectPathCheck.state,
-    hasRunningLaunch,
-    stopping,
-    launching,
-    stopLaunch,
-    runLaunch,
-    startVoiceAgent,
-    project,
-    customScripts,
-    runScript,
-    projectPathReady,
-    setDiffViewOpen,
-    id,
-    queryClient,
-  ]);
 
   const anyBlockingDialogOpen =
     showNewAgent ||
     showEdit ||
     confirmRemove ||
-    confirmDeleteWorktree ||
     fileFinderOpen ||
     openFileRel !== null ||
-    showLaunchConfig ||
-    showWorktreeSetupConfig ||
-    showInstallDiagramSkill ||
-    showInstallShipSkill ||
-    showLaunchEmpty ||
     confirmDeleteArchived ||
     !!projectPathIssue ||
     projectPathCheck.state === "error" ||
@@ -2198,18 +1315,6 @@ function ProjectPage() {
     () => {
       if (anyBlockingDialogOpen || !projectPathReady) return;
       onToggleDiffView();
-    },
-    { capture: true },
-  );
-
-  // Ship: open the commit/push/sync AI session. Capture phase mirrors git.diff so
-  // a focused session terminal can't swallow the chord first; startShipSession
-  // itself guards project/path-ready and the local-scope requirement.
-  useHotkey(
-    "project.ship",
-    () => {
-      if (anyBlockingDialogOpen || !projectPathReady) return;
-      startShipSession();
     },
     { capture: true },
   );
@@ -2436,7 +1541,6 @@ function ProjectPage() {
   const pinnedListTasks = activeListGroups?.pinned ?? [];
 
   const activeId = terminals.activeTaskIdFor(selectedScopeKey);
-  const pathIssueIsWorktree = projectPathIssue?.scope === "worktree";
   const setTaskPinning = (taskId: string, pinning: boolean) => {
     setPinningTaskIds((current) => {
       if (pinning && current.has(taskId)) return current;
@@ -2473,12 +1577,11 @@ function ProjectPage() {
     pinRequestSeqRef.current[taskId] = requestId;
     setTaskPinning(taskId, true);
 
-    const tasksKey = queryKeys.tasks(project.id, selectedWorktreeId, activeRuntimeScopeId);
+    const tasksKey = queryKeys.tasks(project.id, activeRuntimeScopeId);
     await queryClient.cancelQueries({ queryKey: tasksKey });
     setTaskPinnedInCache(
       queryClient,
       project.id,
-      selectedWorktreeId,
       taskId,
       nextPinned,
       activeRuntimeScopeId,
@@ -2506,7 +1609,6 @@ function ProjectPage() {
           setTaskPinnedInCache(
             queryClient,
             project.id,
-            selectedWorktreeId,
             taskId,
             previousPinned,
             activeRuntimeScopeId,
@@ -2527,7 +1629,7 @@ function ProjectPage() {
     const task = tasks.find((t) => t.id === taskId);
     if (!task || !project) return;
 
-    const tasksKey = queryKeys.tasks(project.id, selectedWorktreeId, activeRuntimeScopeId);
+    const tasksKey = queryKeys.tasks(project.id, activeRuntimeScopeId);
     void queryClient.cancelQueries({ queryKey: tasksKey });
     const previousTasks = queryClient.getQueryData<Task[]>(tasksKey);
 
@@ -2544,7 +1646,7 @@ function ProjectPage() {
       else terminals.deselect(selectedScopeKey);
     }
 
-    removeTaskFromCache(queryClient, project.id, selectedWorktreeId, taskId, activeRuntimeScopeId);
+    removeTaskFromCache(queryClient, project.id, taskId, activeRuntimeScopeId);
 
     void (async () => {
       try {
@@ -2556,7 +1658,7 @@ function ProjectPage() {
         void refresh();
       } catch (e: unknown) {
         if (previousTasks) {
-          restoreTasksCache(queryClient, project.id, selectedWorktreeId, previousTasks, activeRuntimeScopeId);
+          restoreTasksCache(queryClient, project.id, previousTasks, activeRuntimeScopeId);
         }
         toast.error(e instanceof Error ? e.message : "Could not delete session");
       } finally {
@@ -2624,7 +1726,7 @@ function ProjectPage() {
     if (!project) return;
     setRetryingProjectPath(true);
     try {
-      const { status } = await api.getProjectPathStatus(project.id, selectedWorktreeId);
+      const { status } = await api.getProjectPathStatus(project.id, null);
       setProjectPathCheck(status.ok ? { state: "valid" } : { state: "invalid", status });
     } catch (e: unknown) {
       setProjectPathCheck({
@@ -2647,7 +1749,7 @@ function ProjectPage() {
     if (!project || targets.length === 0) return;
     const ids = new Set(targets.map((t) => t.id));
 
-    const tasksKey = queryKeys.tasks(project.id, selectedWorktreeId, activeRuntimeScopeId);
+    const tasksKey = queryKeys.tasks(project.id, activeRuntimeScopeId);
     void queryClient.cancelQueries({ queryKey: tasksKey });
     const previousTasks = queryClient.getQueryData<Task[]>(tasksKey);
 
@@ -2664,7 +1766,7 @@ function ProjectPage() {
       else terminals.deselect(selectedScopeKey);
     }
 
-    setTasksArchivedInCache(queryClient, project.id, selectedWorktreeId, ids, true, activeRuntimeScopeId);
+    setTasksArchivedInCache(queryClient, project.id, ids, true, activeRuntimeScopeId);
 
     void (async () => {
       try {
@@ -2682,7 +1784,7 @@ function ProjectPage() {
         void refresh();
       } catch (e: unknown) {
         if (previousTasks) {
-          restoreTasksCache(queryClient, project.id, selectedWorktreeId, previousTasks, activeRuntimeScopeId);
+          restoreTasksCache(queryClient, project.id, previousTasks, activeRuntimeScopeId);
         }
         toast.error(e instanceof Error ? e.message : "Could not archive session");
       }
@@ -2695,43 +1797,15 @@ function ProjectPage() {
   };
   archiveSessionRef.current = archiveSession;
 
-  // Archive every open session shown in the grid (across all projects). Used by
-  // the grid-view header's "Archive all" action. Plain function (not a hook)
-  // because it lives after this component's early returns.
-  const archiveAllGridSessions = async () => {
-    // Only archive the sessions shown in this project/scope's grid, not every
-    // open session across all projects.
-    const openSessions = terminals.sessions.filter(
-      (s) => scopeKeyForProject(s.project) === selectedScopeKey,
-    );
-    if (openSessions.length === 0) return;
-    const results = await Promise.allSettled(
-      openSessions.map((session) =>
-        archiveOpenSession(session, terminals.close, queryClient, { skipInvalidate: true }),
-      ),
-    );
-    // One deduped invalidation pass instead of a per-session fan-out (the
-    // global projects key alone would otherwise be invalidated N times).
-    await invalidateSessionQueries(queryClient, openSessions);
-    const failed = results.filter((r) => r.status === "rejected").length;
-    if (failed > 0) {
-      toast.error(
-        failed === openSessions.length
-          ? "Could not archive sessions"
-          : `Archived ${openSessions.length - failed} of ${openSessions.length} sessions`,
-      );
-    }
-  };
-
   const restoreSession = (taskId: string) => {
     if (!project) return;
     const task = tasks.find((t) => t.id === taskId);
     if (!task) return;
 
-    const tasksKey = queryKeys.tasks(project.id, selectedWorktreeId, activeRuntimeScopeId);
+    const tasksKey = queryKeys.tasks(project.id, activeRuntimeScopeId);
     void queryClient.cancelQueries({ queryKey: tasksKey });
     const previousTasks = queryClient.getQueryData<Task[]>(tasksKey);
-    setTaskArchivedInCache(queryClient, project.id, selectedWorktreeId, taskId, false, activeRuntimeScopeId);
+    setTaskArchivedInCache(queryClient, project.id, taskId, false, activeRuntimeScopeId);
 
     void (async () => {
       try {
@@ -2739,7 +1813,7 @@ function ProjectPage() {
         void refresh();
       } catch (e: unknown) {
         if (previousTasks) {
-          restoreTasksCache(queryClient, project.id, selectedWorktreeId, previousTasks, activeRuntimeScopeId);
+          restoreTasksCache(queryClient, project.id, previousTasks, activeRuntimeScopeId);
         }
         toast.error(e instanceof Error ? e.message : "Could not restore session");
       }
@@ -2762,11 +1836,11 @@ function ProjectPage() {
     const archived = tasks.filter((t) => t.archived);
     if (archived.length === 0) return;
 
-    const tasksKey = queryKeys.tasks(project.id, selectedWorktreeId, activeRuntimeScopeId);
+    const tasksKey = queryKeys.tasks(project.id, activeRuntimeScopeId);
     void queryClient.cancelQueries({ queryKey: tasksKey });
     const previousTasks = queryClient.getQueryData<Task[]>(tasksKey);
     const archivedIds = new Set(archived.map((t) => t.id));
-    removeTasksFromCache(queryClient, project.id, selectedWorktreeId, archivedIds, activeRuntimeScopeId);
+    removeTasksFromCache(queryClient, project.id, archivedIds, activeRuntimeScopeId);
 
     void (async () => {
       try {
@@ -2779,7 +1853,7 @@ function ProjectPage() {
         void refresh();
       } catch (e: unknown) {
         if (previousTasks) {
-          restoreTasksCache(queryClient, project.id, selectedWorktreeId, previousTasks, activeRuntimeScopeId);
+          restoreTasksCache(queryClient, project.id, previousTasks, activeRuntimeScopeId);
         }
         toast.error(e instanceof Error ? e.message : "Could not delete archived sessions");
       } finally {
@@ -2815,84 +1889,6 @@ function ProjectPage() {
       { focusOnCreate: true },
     );
   };
-
-  const headerActions = (
-    <HeaderActions>
-      {/* Single context→actions divider: the one boundary between "which
-       * project / scope" and the actions performed on it. */}
-      <span
-        aria-hidden
-        style={{
-          width: 1,
-          height: 18,
-          background: "var(--border)",
-          margin: "0 4px",
-          flexShrink: 0,
-        }}
-      />
-      <RunStatusPill
-        running={hasRunningLaunch}
-        launching={launching}
-        stopping={stopping}
-        disabled={projectPathBlocked}
-        disabledLabel="Folder unavailable"
-        launchUrl={project.launchUrl ?? null}
-        onStart={runLaunch}
-        onOpenUrl={() =>
-          project.launchUrl && window.electronAPI?.openExternal(project.launchUrl)
-        }
-        onStop={stopLaunch}
-      />
-      {worktreesEnabled && (
-        // "New worktree" now lives inside the branch dropdown (below), so the
-        // standalone create-worktree button is gone — one fewer control, and no
-        // second accent competing with Ship.
-        <>
-          {/* Separate Run (launch the app) from the git group (branch / changes
-           * / ship) — two different concerns. */}
-          <span
-            aria-hidden
-            style={{
-              width: 1,
-              height: 18,
-              background: "var(--border)",
-              margin: "0 4px",
-              flexShrink: 0,
-            }}
-          />
-          <WorktreeToggleGroup
-          worktrees={worktrees}
-          selectedId={selectedWorktree?.id ?? MAIN_WORKTREE_ID}
-          runningKeys={launchRunningWorktreeIds}
-          projectId={project.id}
-          onSelect={selectWorktree}
-          onDeleteSelected={() => setConfirmDeleteWorktree(true)}
-          mainBranchLabel={gitStatus?.branch}
-          mainBranchUnavailable={gitUnavailable}
-          mainBranchUnavailableTitle={gitUnavailableMessage ?? undefined}
-          branchSwitchDisabled={projectPathBlocked}
-          changedCount={gitStatus?.changedCount}
-          onToggleDiffView={onToggleDiffView}
-          shipDisabled={projectPathBlocked}
-          shipEnabled={projectPathUsable}
-          onShip={startShipSession}
-          onCreatePullRequest={startCreatePullRequestSession}
-          behindCount={gitStatus?.behindCount ?? null}
-          syncEnabled={projectPathUsable && activeRuntimeScopeId === LOCAL_SCOPE_ID}
-          onSync={startSyncSession}
-          onCreateWorktree={() => void createProjectWorktree()}
-          createWorktreeDisabled={creatingWorktree || projectPathBlocked || gitUnavailable}
-          createWorktreeTitle={
-            projectPathBlocked
-              ? "Project folder unavailable"
-              : gitUnavailableMessage || "Create a new worktree"
-          }
-            maxWidth="min(520px, 42vw)"
-          />
-        </>
-      )}
-    </HeaderActions>
-  );
 
   // Grid-view toggle lives in the project header beside the other session
   // controls — a session view mode, not app chrome, so it left the top bar.
@@ -3036,20 +2032,6 @@ function ProjectPage() {
                   zIndex: Z_INDEX.popover,
                 }}
               >
-                {hasRunningLaunch ? (
-                  <>
-                    <HotkeyTooltip action="project.runToggle">
-                      <DropdownMenuItem
-                        icon="x"
-                        onClick={stopLaunch}
-                        disabled={stopping}
-                      >
-                        {stopping ? "Stopping…" : "Stop launch"}
-                      </DropdownMenuItem>
-                    </HotkeyTooltip>
-                    <DropdownMenuSeparator />
-                  </>
-                ) : null}
                 <DropdownMenuItem
                   icon={project.pinned ? "pin-fill" : "pin"}
                   onClick={toggleProjectPin}
@@ -3067,9 +2049,9 @@ function ProjectPage() {
                   icon="folder"
                   onClick={() => {
                     setOverflowOpen(false);
-                    window.electronAPI?.openPath(selectedWorktreePath || project.path);
+                    window.electronAPI?.openPath(projectPath || project.path);
                   }}
-                  title={selectedWorktreePath || project.path}
+                  title={projectPath || project.path}
                 >
                   Reveal in Finder
                 </DropdownMenuItem>
@@ -3085,128 +2067,6 @@ function ProjectPage() {
                     Find file in project
                   </DropdownMenuItem>
                 </HotkeyTooltip>
-                {(settings?.recallEnabled ?? false) && (
-                  <DropdownMenuItem
-                    icon="sparkles"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      setRecallInitialFilter("all");
-                      setShowRecall(true);
-                    }}
-                    title="Recall — curated project memory fed to new sessions"
-                  >
-                    Recall
-                  </DropdownMenuItem>
-                )}
-                {project.githubUrl ? (
-                  <DropdownMenuItem
-                    icon="github"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      openExternal(project.githubUrl!);
-                    }}
-                  >
-                    Open GitHub
-                  </DropdownMenuItem>
-                ) : null}
-                <DropdownMenuSeparator />
-                <HotkeyTooltip action="git.diff">
-                  <DropdownMenuItem
-                    icon="git-branch"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      onToggleDiffView();
-                    }}
-                    disabled={projectPathBlocked}
-                    title={
-                      gitStatus && gitStatus.changedCount > 0
-                        ? `${gitStatus.changedCount} changed file${gitStatus.changedCount === 1 ? "" : "s"}`
-                        : gitStatus
-                          ? "Review Changes"
-                          : "Checking changes…"
-                    }
-                  >
-                    Review Changes
-                    {gitStatus && gitStatus.changedCount > 0 && (
-                      <span style={{ color: "var(--text-dim)" }}>
-                        {" · "}
-                        {gitStatus.changedCount} changed
-                      </span>
-                    )}
-                  </DropdownMenuItem>
-                </HotkeyTooltip>
-                {worktreesEnabled ? (
-                  <DropdownMenuItem
-                    icon="terminal"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      setShowWorktreeSetupConfig(true);
-                    }}
-                  >
-                    Worktree init
-                  </DropdownMenuItem>
-                ) : null}
-                {sandboxState?.enabled ? (
-                  <DropdownMenuItem
-                    icon="globe"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      // The header scope chip hides while Local is active, so
-                      // this is the way into the sandbox switcher/manager.
-                      window.dispatchEvent(new Event(OPEN_SCOPE_SWITCHER_EVENT));
-                    }}
-                    title="Switch scope or create a sandbox for this project"
-                  >
-                    Manage sandboxes
-                  </DropdownMenuItem>
-                ) : null}
-                <DropdownMenuSeparator />
-                <InstallDiagramSkillMenuItem
-                  onSelect={() => {
-                    setOverflowOpen(false);
-                    setShowInstallDiagramSkill(true);
-                  }}
-                />
-                <InstallShipSkillMenuItem
-                  onSelect={() => {
-                    setOverflowOpen(false);
-                    setShowInstallShipSkill(true);
-                  }}
-                />
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  icon="play"
-                  onClick={() => {
-                    setOverflowOpen(false);
-                    setShowLaunchConfig(true);
-                  }}
-                >
-                  Launch commands
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  icon="terminal"
-                  onClick={() => {
-                    setOverflowOpen(false);
-                    setShowCustomScriptsConfig(true);
-                  }}
-                >
-                  Custom scripts
-                </DropdownMenuItem>
-                {showGrid && gridScopeSessionCount > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      icon="archive"
-                      onClick={() => {
-                        setOverflowOpen(false);
-                        setConfirmArchiveAll(true);
-                      }}
-                      title="Archive all open sessions in this grid"
-                    >
-                      Archive all sessions
-                    </DropdownMenuItem>
-                  </>
-                )}
                 <DropdownMenuSeparator />
                 <HotkeyTooltip action="project.edit">
                   <DropdownMenuItem
@@ -3284,12 +2144,32 @@ function ProjectPage() {
               </button>
             );
           })()}
+          {/* R16: the host is stated once, here, instead of on every session.
+            * The value is read-only — it is changed in project configuration,
+            * which is what activating this opens. */}
+          <button
+            type="button"
+            className="mc-project-host-chip"
+            onClick={() => setShowEdit(true)}
+            title={`${hostLabel} — open project configuration`}
+            aria-label={`Runs on ${hostLabel}. Open project configuration.`}
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                background: project.sandboxId ? "var(--accent)" : "var(--text-faint, var(--text-dim))",
+                boxShadow: project.sandboxId ? "0 0 6px color-mix(in srgb, var(--accent) 40%, transparent)" : "none",
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {hostLabel}
+            </span>
+          </button>
           {hideableMenu}
-          <CustomScriptsButton
-            scripts={customScripts}
-            onRun={runScript}
-            disabled={!projectPathUsable}
-          />
           {showSessionScopeToggle && (
             <SessionScopeToggle
               view={sessionView}
@@ -3332,7 +2212,6 @@ function ProjectPage() {
                 />
               </HotkeyTooltip>
             )}
-            {headerActions}
             {headerButtons.gridView && gridViewToggle}
             {headerButtons.fileFinder && (
               // Hide sits on an outer wrapper, not the button: it disables when
@@ -3360,34 +2239,11 @@ function ProjectPage() {
                 </HotkeyTooltip>
               </span>
             )}
-            {!worktreesEnabled && (
-              <div
-                role="group"
-                aria-label="Review changes and ship"
-                className="mc-ship-group"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 0,
-                  maxWidth: 480,
-                  minWidth: 0,
-                }}
-              >
-                <ProjectGitStatusButton
-                  changedCount={gitStatus?.changedCount}
-                  onClick={onToggleDiffView}
-                  disabled={projectPathBlocked}
-                />
-                <CommitPushButton
-                  size="md"
-                  variant={gitStatus?.changedCount === 0 ? "gray-frame" : "primary"}
-                  splitTrailing
-                  enabled={projectPathUsable}
-                  onShip={startShipSession}
-                  onCreatePullRequest={startCreatePullRequestSession}
-                />
-              </div>
-            )}
+            <ProjectGitStatusButton
+              changedCount={gitStatus?.changedCount}
+              onClick={onToggleDiffView}
+              disabled={projectPathBlocked}
+            />
             {!showArchived && (
               <NewAgentButton
                 project={project}
@@ -3572,26 +2428,6 @@ function ProjectPage() {
                       >
                         View active
                       </Btn>
-                    ) : !showArchived && status === "finished" && tasksByStatus.finished.length > 0 ? (
-                      <Btn
-                        variant="ghost"
-                        icon="archive"
-                        onClick={() => archiveTasks(tasksByStatus.finished)}
-                        title="Archive all finished sessions"
-                      >
-                        Archive all
-                      </Btn>
-                    ) : !showArchived &&
-                      status === "disconnected" &&
-                      tasksByStatus.disconnected.length > 0 ? (
-                      <Btn
-                        variant="ghost"
-                        icon="archive"
-                        onClick={() => archiveTasks(tasksByStatus.disconnected)}
-                        title="Archive all disconnected sessions"
-                      >
-                        Archive all
-                      </Btn>
                     ) : undefined
                   }
                 />
@@ -3626,11 +2462,11 @@ function ProjectPage() {
       <GitDiffModal
         open={showDiffView}
         projectId={project.id}
-        worktreeId={selectedWorktreeId}
-        projectPath={selectedWorktreePath || project.path}
+        worktreeId={null}
+        projectPath={projectPath || project.path}
+        scope={projectFsScope}
         enabled={projectPathReady}
         onClose={closeDiffView}
-        onShip={startShipSession}
       />
 
       <CodexHooksNoticeDialog
@@ -3651,7 +2487,7 @@ function ProjectPage() {
       <Modal
         open={!!projectPathIssue}
         onClose={closePathIssue}
-        title={pathIssueIsWorktree ? "Worktree folder missing" : "Project folder missing"}
+        title="Project folder missing"
         width={540}
         footer={
           <>
@@ -3663,45 +2499,22 @@ function ProjectPage() {
                 Back to projects
               </Btn>
             </StaticHotkeyTooltip>
-            {pathIssueIsWorktree ? (
-              <>
-                <Btn
-                  variant="danger"
-                  icon="trash"
-                  onClick={() => void deleteSelectedWorktree()}
-                  disabled={deletingWorktree}
-                >
-                  {deletingWorktree ? "Deleting..." : "Delete worktree"}
-                </Btn>
-                <Btn
-                  variant="primary"
-                  icon="folder"
-                  onClick={() => selectWorktree(MAIN_WORKTREE_ID)}
-                  disabled={deletingWorktree}
-                >
-                  Switch to main
-                </Btn>
-              </>
-            ) : (
-              <>
-                <Btn
-                  variant="danger"
-                  icon="trash"
-                  onClick={() => void removeMissingProject()}
-                  disabled={repairingProjectPath || removingMissingProject}
-                >
-                  {removingMissingProject ? "Removing..." : "Remove project"}
-                </Btn>
-                <Btn
-                  variant="primary"
-                  icon="folder"
-                  onClick={() => void repairMissingProjectPath()}
-                  disabled={repairingProjectPath || removingMissingProject}
-                >
-                  {repairingProjectPath ? "Updating..." : "Choose new folder"}
-                </Btn>
-              </>
-            )}
+            <Btn
+              variant="danger"
+              icon="trash"
+              onClick={() => void removeMissingProject()}
+              disabled={repairingProjectPath || removingMissingProject}
+            >
+              {removingMissingProject ? "Removing..." : "Remove project"}
+            </Btn>
+            <Btn
+              variant="primary"
+              icon="folder"
+              onClick={() => void repairMissingProjectPath()}
+              disabled={repairingProjectPath || removingMissingProject}
+            >
+              {repairingProjectPath ? "Updating..." : "Choose new folder"}
+            </Btn>
           </>
         }
       >
@@ -3709,9 +2522,8 @@ function ProjectPage() {
           <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--text)" }}>
             {projectPathIssue?.message ?? "Mission Control cannot find this project folder."}
             {" "}
-            {pathIssueIsWorktree
-              ? "Switch back to the main project folder, or delete this missing worktree."
-              : "Choose the folder in its new location, or remove the project from Mission Control."}
+            Choose the folder in its new location, or remove the project from
+            Mission Control.
           </div>
           {projectPathActionError && (
             <div
@@ -3825,7 +2637,8 @@ function ProjectPage() {
 
       <FileFinderDialog
         open={fileFinderOpen}
-        projectRoot={selectedWorktreePath || project.path}
+        projectRoot={projectPath || project.path}
+        scope={projectFsScope}
         resetKey={fileFinderResetKey}
         onClose={() => setFileFinderOpen(false)}
         onPick={(rel) => setOpenFileRel(rel)}
@@ -3834,7 +2647,8 @@ function ProjectPage() {
       {openFileRel !== null && (
         <Suspense fallback={null}>
           <FileEditorDialog
-            projectRoot={selectedWorktreePath || project.path}
+            projectRoot={projectPath || project.path}
+            scope={projectFsScope}
             relPath={openFileRel}
             onClose={() => setOpenFileRel(null)}
             onBack={() => {
@@ -3845,19 +2659,6 @@ function ProjectPage() {
         </Suspense>
       )}
 
-      <InstallDiagramSkillModal
-        open={showInstallDiagramSkill}
-        onClose={() => setShowInstallDiagramSkill(false)}
-        projectPath={selectedWorktreePath || project.path}
-      />
-
-      <InstallShipSkillModal
-        open={showInstallShipSkill}
-        onClose={() => setShowInstallShipSkill(false)}
-        projectPath={selectedWorktreePath || project.path}
-        onRunInstall={runShipSkillInstallCommand}
-      />
-
       <RemoveProjectConfirmDialog
         open={confirmRemove}
         onClose={() => setConfirmRemove(false)}
@@ -3865,285 +2666,6 @@ function ProjectPage() {
         projectName={project.name}
         projectPath={project.path}
       />
-
-      {selectedWorktree && !selectedWorktree.isMain && (
-        <Modal
-          open={confirmDeleteWorktree}
-          onClose={closeDeleteWorktreeDialog}
-          title={selectedWorktreeDirty ? "Delete dirty worktree" : "Delete worktree"}
-          width={760}
-          maxWidth="calc(100vw - 32px)"
-          footerStyle={{ flexWrap: "nowrap", overflowX: "auto" }}
-          footer={
-            <>
-              <StaticHotkeyTooltip hotkey="Esc">
-                <Btn
-                  variant="ghost"
-                  onClick={closeDeleteWorktreeDialog}
-                  disabled={deletingWorktree}
-                >
-                  Cancel
-                </Btn>
-              </StaticHotkeyTooltip>
-              {selectedWorktreeDirty ? (
-                <>
-                  <Btn
-                    variant="ghost"
-                    icon="git-branch"
-                    onClick={reviewSelectedWorktreeChanges}
-                    disabled={deletingWorktree}
-                  >
-                    Review changes
-                  </Btn>
-                  <Btn
-                    variant="primary"
-                    icon="archive"
-                    onClick={() => void deleteSelectedWorktree("stash")}
-                    disabled={deletingWorktree}
-                  >
-                    {deletingWorktree ? "Deleting..." : "Stash and delete"}
-                  </Btn>
-                  <Btn
-                    variant="danger"
-                    icon="trash"
-                    onClick={() => void deleteSelectedWorktree("discard")}
-                    disabled={deletingWorktree || !worktreeDiscardConfirmMatches}
-                  >
-                    Discard and delete
-                  </Btn>
-                </>
-              ) : (
-                <Btn
-                  variant="danger"
-                  icon="trash"
-                  onClick={() => void deleteSelectedWorktree("clean")}
-                  disabled={deletingWorktree || selectedWorktreeStatusPending}
-                >
-                  {selectedWorktreeStatusPending
-                    ? "Checking..."
-                    : deletingWorktree
-                      ? "Deleting..."
-                      : "Delete"}
-                </Btn>
-              )}
-            </>
-          }
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <div style={{ fontSize: 13, color: "var(--text)" }}>
-                Delete worktree &ldquo;{selectedWorktree.name}&rdquo;?
-              </div>
-              <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5 }}>
-                Mission Control will remove this worktree folder. The branch is kept.
-              </div>
-            </div>
-            <div
-              style={{
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                background: "var(--surface-0)",
-                padding: "9px 11px",
-                fontFamily: "var(--mono)",
-                fontSize: 11.5,
-                color: "var(--text-dim)",
-                lineHeight: 1.45,
-                wordBreak: "break-all",
-              }}
-            >
-              {selectedWorktree.path}
-            </div>
-
-            {selectedWorktreeStatusPending && (
-              <div
-                role="status"
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  background: "var(--surface-0)",
-                  padding: "9px 11px",
-                  color: "var(--text-dim)",
-                  fontSize: 12,
-                  lineHeight: 1.5,
-                }}
-              >
-                Checking for uncommitted changes before delete is enabled.
-              </div>
-            )}
-
-            {selectedWorktreeDirty && (
-              <>
-                <div
-                  style={{
-                    border: "1px solid color-mix(in srgb, var(--status-failed) 45%, transparent)",
-                    borderRadius: 8,
-                    background: "color-mix(in srgb, var(--status-failed) 10%, transparent)",
-                    padding: "10px 12px",
-                    color: "var(--text)",
-                    fontSize: 12,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  This worktree has {worktreeChangeLabel(selectedWorktreeChangeCount)}.
-                  Review them, stash them before deletion, or type the worktree name to discard them.
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: 8,
-                  }}
-                >
-                  <WorktreeChangeStat
-                    label="Staged"
-                    count={gitStatus?.staged.length ?? 0}
-                  />
-                  <WorktreeChangeStat
-                    label="Unstaged"
-                    count={gitStatus?.unstaged.length ?? 0}
-                  />
-                </div>
-                {worktreeChangedFiles.length > 0 && (
-                  <div
-                    role="region"
-                    aria-label="Changed files in worktree"
-                    style={{
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      background: "var(--surface-0)",
-                      maxHeight: WORKTREE_DELETE_FILES_MAX_HEIGHT,
-                      overflowX: "hidden",
-                      overflowY: "auto",
-                    }}
-                  >
-                    {worktreeChangedFiles.map((file, index) => (
-                      <div
-                        key={`${file.area}:${file.status}:${file.path}:${index}`}
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "92px minmax(0, 1fr)",
-                          gap: 10,
-                          padding: "7px 10px",
-                          borderTop: index === 0 ? 0 : "1px solid var(--border)",
-                          fontFamily: "var(--mono)",
-                          fontSize: 11,
-                          lineHeight: 1.35,
-                        }}
-                      >
-                        <span style={{ color: "var(--text-faint)" }}>
-                          {formatWorktreeChangeStatus(file.area, file.status)}
-                        </span>
-                        <span style={{ color: "var(--text-dim)", wordBreak: "break-all" }}>
-                          {file.path}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <TextField
-                  label="Discard confirmation"
-                  value={worktreeDeleteConfirmName}
-                  onChange={setWorktreeDeleteConfirmName}
-                  placeholder={selectedWorktree.name}
-                  mono
-                  hint={`Type ${selectedWorktree.name} to enable Discard and delete.`}
-                  ariaLabel={`Type ${selectedWorktree.name} to discard changes and delete the worktree`}
-                />
-              </>
-            )}
-          </div>
-        </Modal>
-      )}
-
-      <LaunchCommandsDialog
-        open={showLaunchConfig}
-        project={project}
-        onClose={() => setShowLaunchConfig(false)}
-        onSave={async (next) => {
-          await api.updateProject(project.id, { launchCommands: next });
-          await refresh();
-        }}
-      />
-
-      <ScriptArgsModal
-        open={argsScript !== null}
-        script={argsScript}
-        onCancel={() => setArgsScript(null)}
-        onRun={(resolvedCommand) => {
-          const script = argsScript;
-          setArgsScript(null);
-          if (script) void executeScript(script, resolvedCommand);
-        }}
-      />
-
-      <CustomScriptsDialog
-        open={showCustomScriptsConfig}
-        project={project}
-        onClose={() => setShowCustomScriptsConfig(false)}
-        onSave={(next) => {
-          const projectKey = queryKeys.project(project.id);
-          const previousProject = queryClient.getQueryData<Project>(projectKey);
-          const serialized = serializeCustomScripts(next);
-          queryClient.setQueryData<Project>(projectKey, (prev) =>
-            prev ? { ...prev, customScripts: serialized, updatedAt: Date.now() } : prev,
-          );
-          void (async () => {
-            try {
-              const { project: updated } = await api.updateProject(project.id, {
-                customScripts: next,
-              });
-              queryClient.setQueryData(projectKey, updated);
-              void invalidateProjects();
-            } catch (error) {
-              queryClient.setQueryData(projectKey, previousProject);
-              toast.error(
-                error instanceof Error ? error.message : "Could not save custom scripts",
-              );
-            }
-          })();
-        }}
-      />
-
-      <WorktreeSetupCommandDialog
-        open={showWorktreeSetupConfig}
-        project={project}
-        onClose={() => setShowWorktreeSetupConfig(false)}
-        onSave={async (command) => {
-          await api.updateProject(project.id, { worktreeSetupCommand: command });
-          await refresh();
-        }}
-      />
-
-      <Modal
-        open={showLaunchEmpty}
-        onClose={() => setShowLaunchEmpty(false)}
-        title="No launch commands"
-        width={420}
-        footer={
-          <>
-            <StaticHotkeyTooltip hotkey="Esc">
-              <Btn variant="ghost" onClick={() => setShowLaunchEmpty(false)}>
-                Close
-              </Btn>
-            </StaticHotkeyTooltip>
-            <Btn
-              variant="primary"
-              icon="settings"
-              onClick={() => {
-                setShowLaunchEmpty(false);
-                setShowLaunchConfig(true);
-              }}
-            >
-              Configure
-            </Btn>
-          </>
-        }
-      >
-        <p style={{ margin: 0, fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5 }}>
-          You haven't configured any launch commands for this project yet. Open the configuration
-          modal to add up to 5 commands that will run when you press Launch.
-        </p>
-      </Modal>
 
       <ConfirmDialog
         open={confirmDeleteArchived}
@@ -4159,35 +2681,6 @@ function ProjectPage() {
         </div>
         <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
           {archivedTasks.length} archived session{archivedTasks.length === 1 ? "" : "s"} will be deleted. This cannot be undone. Active sessions are unaffected.
-        </div>
-      </ConfirmDialog>
-
-      <ConfirmDialog
-        open={confirmArchiveAll}
-        onClose={() => setConfirmArchiveAll(false)}
-        onConfirm={async () => {
-          setArchivingAll(true);
-          try {
-            await archiveAllGridSessions();
-          } finally {
-            setArchivingAll(false);
-            setConfirmArchiveAll(false);
-          }
-        }}
-        title="Archive all sessions?"
-        confirmLabel="Archive all"
-        variant="danger"
-        icon="archive"
-        loading={archivingAll}
-        width={460}
-      >
-        <div style={{ fontSize: 13, color: "var(--text)", marginBottom: 8 }}>
-          Archive all {gridScopeSessionCount} open session
-          {gridScopeSessionCount === 1 ? "" : "s"} in &ldquo;{project.name}&rdquo;?
-        </div>
-        <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
-          Any running sessions will be disconnected and their agents stopped. You
-          can restore archived sessions later, but in-progress runs won&rsquo;t resume.
         </div>
       </ConfirmDialog>
       </div>
@@ -4359,230 +2852,6 @@ function SessionScopeToggle({
   );
 }
 
-function WorktreeBadgeDots({
-  launchRunning,
-  taskCounts,
-}: {
-  /** A launch command's terminal is running in this worktree. */
-  launchRunning: boolean;
-  taskCounts?: WorktreeInfo["taskCounts"];
-}) {
-  const statusDots = taskCounts ? getPinnedProjectStatusDots(taskCounts) : [];
-  if (!launchRunning && statusDots.length === 0) return null;
-  return (
-    <span
-      aria-hidden
-      style={{
-        position: "absolute",
-        top: -4,
-        left: "50%",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 3,
-        transform: "translateX(-50%)",
-        pointerEvents: "none",
-        zIndex: 1,
-      }}
-    >
-      {launchRunning && (
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            background: "var(--status-running)",
-            boxShadow: "0 0 6px var(--status-running)",
-          }}
-        />
-      )}
-      {statusDots.map((status, dot) => (
-        <span
-          key={`${status}-${dot}`}
-          style={{
-            width: 5,
-            height: 5,
-            borderRadius: "50%",
-            background: TASK_STATUS_META[status].color,
-            boxShadow:
-              status === "running" ? `0 0 5px ${TASK_STATUS_META[status].color}` : "none",
-          }}
-        />
-      ))}
-    </span>
-  );
-}
-
-function WorktreeToggleGroup({
-  worktrees,
-  selectedId,
-  runningKeys,
-  projectId,
-  onSelect,
-  onDeleteSelected,
-  mainBranchLabel,
-  mainBranchUnavailable = false,
-  mainBranchUnavailableTitle,
-  branchSwitchDisabled = false,
-  changedCount,
-  onToggleDiffView,
-  shipDisabled = false,
-  shipEnabled = true,
-  onShip,
-  onCreatePullRequest,
-  behindCount = null,
-  syncEnabled = true,
-  onSync,
-  onCreateWorktree,
-  createWorktreeDisabled = false,
-  createWorktreeTitle,
-  maxWidth = 420,
-}: {
-  worktrees: WorktreeInfo[];
-  selectedId: string;
-  runningKeys: ReadonlySet<string>;
-  projectId: string;
-  onSelect: (id: string) => void;
-  onDeleteSelected?: (worktree: WorktreeInfo) => void;
-  /** Live git branch for the main worktree — shown instead of the "main" id. */
-  mainBranchLabel?: string | null;
-  mainBranchUnavailable?: boolean;
-  mainBranchUnavailableTitle?: string;
-  branchSwitchDisabled?: boolean;
-  changedCount?: number;
-  onToggleDiffView: () => void;
-  shipDisabled?: boolean;
-  shipEnabled?: boolean;
-  onShip: () => void;
-  /** Opens the Create PR AI session from the Ship split-button's dropdown. */
-  onCreatePullRequest?: () => void;
-  /** Commits the current branch is behind its upstream; > 0 reveals Sync. */
-  behindCount?: number | null;
-  syncEnabled?: boolean;
-  onSync?: () => void;
-  onCreateWorktree?: () => void;
-  createWorktreeDisabled?: boolean;
-  createWorktreeTitle?: string;
-  maxWidth?: number | string;
-}) {
-  if (worktrees.length === 0) return null;
-  // The old pill strip is gone: one branch/worktree control now switches
-  // worktree *or* checks out a branch (worktrees are folded into its dropdown),
-  // so we render the controls for whichever worktree is currently selected.
-  const selectedWorktree =
-    worktrees.find((worktree) => worktree.id === selectedId) ??
-    worktrees.find((worktree) => worktree.isMain) ??
-    worktrees[0]!;
-  const selectedIsMain = selectedWorktree.isMain;
-  const selectedScopeKey = worktreeScopeKey(
-    projectId,
-    selectedIsMain ? null : selectedWorktree.id,
-  );
-  const selectedRunning = [...runningKeys].some(
-    (key) => key === selectedScopeKey || key.startsWith(`${selectedScopeKey}:`),
-  );
-  const branchLabel = selectedIsMain ? mainBranchLabel : selectedWorktree.branch;
-  // Sync stays main-only: behindCount is the main worktree's upstream delta.
-  // The action lives inside the branch dropdown now (with a ↓N badge on the
-  // trigger) — no standalone Sync split-button.
-  const syncBehindCount = selectedIsMain ? behindCount ?? 0 : 0;
-  // Un-fused: Changes (quiet, review diff) and Ship (bold primary) read as two
-  // distinct controls with hierarchy, not one welded segment.
-  const shipControls = (
-    <>
-      <ProjectGitStatusButton
-        changedCount={changedCount}
-        onClick={onToggleDiffView}
-        disabled={shipDisabled}
-      />
-      <CommitPushButton
-        size="md"
-        variant={changedCount === 0 ? "gray-frame" : "primary"}
-        enabled={shipEnabled}
-        onShip={onShip}
-        onCreatePullRequest={onCreatePullRequest}
-      />
-    </>
-  );
-  return (
-    <div
-      role="group"
-      aria-label="Worktree, branch, and ship controls"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        maxWidth,
-        minWidth: 0,
-        // Single compact control now (no horizontal strip), so keep overflow
-        // visible for the badge dots that sit above the branch button.
-        overflow: "visible",
-        padding: "7px 2px",
-        flexShrink: 1,
-      }}
-    >
-      {selectedIsMain && mainBranchUnavailable ? (
-        <Btn
-          variant="ghost"
-          icon="git-branch"
-          disabled
-          title={mainBranchUnavailableTitle ?? "Git unavailable"}
-          style={{
-            fontFamily: "var(--mono)",
-            maxWidth: "min(36ch, 42vw)",
-            color: "var(--text-dim)",
-          }}
-        >
-          <span
-            style={{
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            No Git repo
-          </span>
-        </Btn>
-      ) : (
-        // Badge dots sit above the branch button via the relative parent.
-        <div
-          style={{
-            position: "relative",
-            display: "inline-flex",
-            alignItems: "center",
-            minWidth: 0,
-          }}
-        >
-          <WorktreeBadgeDots
-            launchRunning={selectedRunning}
-            taskCounts={selectedWorktree.taskCounts}
-          />
-          <BranchTypeahead
-            projectId={projectId}
-            worktreeId={selectedIsMain ? null : selectedWorktree.id}
-            branch={branchLabel}
-            disabled={branchSwitchDisabled}
-            worktreePath={selectedWorktree.path}
-            selected={!selectedIsMain}
-            behindCount={syncBehindCount}
-            syncEnabled={syncEnabled}
-            onSync={onSync}
-            onCreateWorktree={onCreateWorktree}
-            createWorktreeDisabled={createWorktreeDisabled}
-            createWorktreeTitle={createWorktreeTitle}
-            worktrees={worktrees}
-            selectedWorktreeId={selectedWorktree.id}
-            onSelectWorktree={onSelect}
-            onDeleteWorktree={onDeleteSelected}
-            runningKeys={runningKeys}
-          />
-        </div>
-      )}
-      {shipControls}
-    </div>
-  );
-}
-
 function ProjectGitStatusButton({
   changedCount,
   onClick,
@@ -4629,186 +2898,4 @@ function ProjectGitStatusButton({
   );
 }
 
-function WorktreeChangeStat({ label, count }: { label: string; count: number }) {
-  return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        background: "var(--surface-0)",
-        padding: "9px 10px",
-      }}
-    >
-      <div
-        style={{
-          fontFamily: "var(--mono)",
-          fontSize: 10.5,
-          color: "var(--text-faint)",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          marginBottom: 3,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontFamily: "var(--mono)",
-          fontSize: 16,
-          fontWeight: 650,
-          color: "var(--text)",
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {count}
-      </div>
-    </div>
-  );
-}
 
-function RunStatusPill({
-  running,
-  launching,
-  stopping,
-  disabled = false,
-  disabledLabel = "Unavailable",
-  launchUrl,
-  onStart,
-  onOpenUrl,
-  onStop,
-}: {
-  running: boolean;
-  launching: boolean;
-  stopping: boolean;
-  disabled?: boolean;
-  disabledLabel?: string;
-  launchUrl: string | null;
-  onStart: () => void;
-  onOpenUrl: () => void;
-  onStop: () => void;
-}) {
-  const busy = launching || stopping;
-  const label = disabled
-    ? disabledLabel
-    : stopping
-    ? "Stopping…"
-    : launching
-      ? "Starting…"
-      : running
-        ? "Running"
-        : "Offline";
-
-  const interactive = !disabled && !busy && !running;
-  const onClick = disabled || busy ? undefined : running ? undefined : onStart;
-
-  const title = disabled
-    ? disabledLabel
-    : busy
-    ? label
-    : running
-      ? "Running"
-      : "Run launch commands";
-
-  const tone = !disabled && (running || launching) ? "active" : "idle";
-  const dotColor = tone === "active" ? "var(--accent)" : "var(--text-faint)";
-  const borderColor = tone === "active" ? "var(--accent-border)" : "var(--border)";
-  const background = tone === "active" ? "var(--accent-faint)" : "var(--surface-0)";
-  const fg = tone === "active" ? "var(--accent)" : "var(--text-dim)";
-
-  const activeFrameIconStyle: CSSProperties = {
-    width: 52,
-    minWidth: 52,
-    paddingInline: 0,
-    fontFamily: "var(--mono)",
-  };
-
-  const showRunningSplit = running && !busy;
-
-  if (showRunningSplit) {
-    return (
-      <div
-        role="group"
-        aria-label="Project launch — running"
-        style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-      >
-        <HotkeyTooltip action="project.runToggle" label="Stop launch commands">
-          <Btn
-            variant="danger"
-            icon="stop"
-            onClick={() => onStop()}
-            aria-label="Stop launch commands"
-            style={activeFrameIconStyle}
-          />
-        </HotkeyTooltip>
-        {launchUrl ? (
-          <HotkeyTooltip action="project.openBrowser" label="Open in browser">
-            <Btn
-              variant="ghost"
-              icon="globe"
-              onClick={onOpenUrl}
-              aria-label={`Open ${launchUrl} in browser`}
-              style={activeFrameIconStyle}
-            />
-          </HotkeyTooltip>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (!running && !busy) {
-    return (
-      <HotkeyTooltip action="project.runToggle" label={title}>
-        <Btn
-          variant="ghost"
-          icon="play"
-          onClick={disabled || busy ? undefined : onStart}
-          disabled={disabled || busy}
-          aria-label={title}
-          style={activeFrameIconStyle}
-        />
-      </HotkeyTooltip>
-    );
-  }
-
-  return (
-    <HotkeyTooltip action="project.runToggle" label={title}>
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={!interactive}
-        aria-label={title}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 8,
-          height: 28,
-          padding: "0 12px",
-          borderRadius: 999,
-          border: `1px solid ${borderColor}`,
-          background,
-          color: fg,
-          fontFamily: "var(--mono)",
-          fontSize: 11.5,
-          fontWeight: 600,
-          cursor: interactive ? "pointer" : "default",
-          opacity: busy ? 0.7 : 1,
-          transition: "background 0.12s, border-color 0.12s, color 0.12s",
-          boxShadow: running ? "0 0 8px var(--accent-glow)" : "none",
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            width: 7,
-            height: 7,
-            borderRadius: "50%",
-            background: dotColor,
-            boxShadow: running ? "0 0 6px var(--accent-glow)" : "none",
-            animation: launching || stopping ? "pulse-border 1.4s ease-in-out infinite" : "none",
-          }}
-        />
-        <span>{label}</span>
-      </button>
-    </HotkeyTooltip>
-  );
-}

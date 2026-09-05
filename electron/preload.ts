@@ -76,6 +76,7 @@ export type SandboxSettingsPatchBridge = Partial<{
 }>;
 
 export type RemotePtySpawnOptionsBridge = {
+  sandboxId: string;
   taskId: string;
   /** Absolute in-container path (e.g. /workspace/<slug>). */
   cwd: string;
@@ -169,20 +170,6 @@ const electronAPI = {
     regenerateToken: (): Promise<string> =>
       ipcRenderer.invoke(IPC.settingsRegenerateToken),
   },
-  voice: {
-    /** Whether the bundled whisper model is installed on this platform. */
-    available: (): Promise<boolean> => ipcRenderer.invoke(IPC.voiceAvailable),
-    /** Load the model ahead of the first command so push-to-talk feels instant. */
-    prewarm: (): Promise<boolean> => ipcRenderer.invoke(IPC.voicePrewarm),
-    /** Transcribe a 16 kHz mono 16-bit WAV buffer offline via whisper.cpp.
-     *  `prompt` biases the decoder toward expected words (e.g. project names). */
-    transcribe: (
-      wav: ArrayBuffer,
-      prompt?: string,
-    ): Promise<
-      { ok: true; text: string } | { ok: false; error: string; code?: "unavailable" }
-    > => ipcRenderer.invoke(IPC.voiceTranscribe, wav, prompt),
-  },
   sandbox: {
     // Phase 2: lifecycle is per-sandbox (sandboxId; falls back to the active scope).
     getState: (sandboxId?: string): Promise<SandboxStateBridge> =>
@@ -193,7 +180,7 @@ const electronAPI = {
      * inside a Mission Control VM; the user's own home (or a configured root)
      * on an SSH host, where no such container path exists.
      */
-    getRemoteRoot: (sandboxId?: string): Promise<string | null> =>
+    getRemoteRoot: (sandboxId: string | null): Promise<string | null> =>
       ipcRenderer.invoke(IPC.sandboxGetRemoteRoot, sandboxId),
     updateSettings: (patch: SandboxSettingsPatchBridge): Promise<SandboxSettingsBridge> =>
       ipcRenderer.invoke(IPC.sandboxUpdateSettings, patch),
@@ -206,8 +193,8 @@ const electronAPI = {
     destroy: (sandboxId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC.sandboxDestroy, sandboxId),
     /** Set the scope the renderer is showing; routes remote PTY/fs/git. null = Local. */
-    setActive: (sandboxId: string | null): Promise<{ ok: true }> =>
-      ipcRenderer.invoke(IPC.sandboxSetActive, sandboxId),
+    ensureStarted: (sandboxId: string): Promise<{ ok: true }> =>
+      ipcRenderer.invoke(IPC.sandboxEnsureStarted, sandboxId),
     connect: (sandboxId?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC.sandboxConnect, sandboxId),
     disconnect: (sandboxId?: string): Promise<{ ok: true }> =>
@@ -284,13 +271,26 @@ const electronAPI = {
   remotePty: {
     spawn: (opts: RemotePtySpawnOptionsBridge): Promise<{ ptyId: string }> =>
       ipcRenderer.invoke(IPC.remotePtySpawn, opts),
-    write: (ptyId: string, data: string): Promise<boolean> =>
-      ipcRenderer.invoke(IPC.remotePtyWrite, ptyId, data),
-    resize: (ptyId: string, cols: number, rows: number): Promise<boolean> =>
-      ipcRenderer.invoke(IPC.remotePtyResize, ptyId, cols, rows),
-    kill: (ptyId: string): Promise<boolean> => ipcRenderer.invoke(IPC.remotePtyKill, ptyId),
-    replay: (ptyId: string): Promise<{ data: string; nextSeq: number }> =>
-      ipcRenderer.invoke(IPC.remotePtyReplay, ptyId),
+    // The trailing scope is optional so this stays shape-compatible with the
+    // local `pty` API the renderer treats as one type. It lets the main process
+    // recover a pty's owner after a restart, when its in-memory map is empty
+    // but the agent still holds the process.
+    write: (ptyId: string, data: string, sandboxId?: string | null): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.remotePtyWrite, ptyId, data, sandboxId ?? null),
+    resize: (
+      ptyId: string,
+      cols: number,
+      rows: number,
+      sandboxId?: string | null,
+    ): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.remotePtyResize, ptyId, cols, rows, sandboxId ?? null),
+    kill: (ptyId: string, sandboxId?: string | null): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.remotePtyKill, ptyId, sandboxId ?? null),
+    replay: (
+      ptyId: string,
+      sandboxId?: string | null,
+    ): Promise<{ data: string; nextSeq: number }> =>
+      ipcRenderer.invoke(IPC.remotePtyReplay, ptyId, sandboxId ?? null),
     onData: (cb: (msg: { ptyId: string; data: string; seq: number }) => void) =>
       subscribe(IPC.remotePtyData, cb),
     onExit: (cb: (msg: { ptyId: string; exitCode: number; signal?: number }) => void) =>
@@ -300,21 +300,30 @@ const electronAPI = {
       subscribe(IPC.remotePtySpawnError, cb),
   },
   remoteFs: {
-    list: (path: string) => ipcRenderer.invoke(IPC.remoteFsList, path),
-    read: (path: string) => ipcRenderer.invoke(IPC.remoteFsRead, path),
-    write: (path: string, content: string, expectedMtimeMs: number | null) =>
-      ipcRenderer.invoke(IPC.remoteFsWrite, path, content, expectedMtimeMs),
-    watch: (path: string) => ipcRenderer.invoke(IPC.remoteFsWatch, path),
-    unwatch: (watchId: string) => ipcRenderer.invoke(IPC.remoteFsUnwatch, watchId),
+    list: (sandboxId: string | null, path: string) =>
+      ipcRenderer.invoke(IPC.remoteFsList, sandboxId, path),
+    read: (sandboxId: string | null, path: string) =>
+      ipcRenderer.invoke(IPC.remoteFsRead, sandboxId, path),
+    write: (
+      sandboxId: string | null,
+      path: string,
+      content: string,
+      expectedMtimeMs: number | null,
+    ) => ipcRenderer.invoke(IPC.remoteFsWrite, sandboxId, path, content, expectedMtimeMs),
+    watch: (sandboxId: string | null, path: string) =>
+      ipcRenderer.invoke(IPC.remoteFsWatch, sandboxId, path),
+    unwatch: (sandboxId: string | null, watchId: string) =>
+      ipcRenderer.invoke(IPC.remoteFsUnwatch, sandboxId, watchId),
     onChange: (cb: (msg: { watchId: string; path: string; mtimeMs: number }) => void) =>
       subscribe(IPC.remoteFsChange, cb),
   },
   remoteGit: {
-    status: (repo: string) => ipcRenderer.invoke(IPC.remoteGitStatus, repo),
-    diff: (repo: string, file: string, staged: boolean) =>
-      ipcRenderer.invoke(IPC.remoteGitDiff, repo, file, staged),
-    clone: (remote: string, slug: string, branch?: string) =>
-      ipcRenderer.invoke(IPC.remoteGitClone, remote, slug, branch),
+    status: (sandboxId: string | null, repo: string) =>
+      ipcRenderer.invoke(IPC.remoteGitStatus, sandboxId, repo),
+    diff: (sandboxId: string | null, repo: string, file: string, staged: boolean) =>
+      ipcRenderer.invoke(IPC.remoteGitDiff, sandboxId, repo, file, staged),
+    clone: (sandboxId: string | null, remote: string, slug: string, branch?: string) =>
+      ipcRenderer.invoke(IPC.remoteGitClone, sandboxId, remote, slug, branch),
   },
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   browseFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.dialogBrowseFolder),
@@ -475,8 +484,6 @@ const electronAPI = {
     resize: (ptyId: string, cols: number, rows: number) =>
       ipcRenderer.invoke(IPC.ptyResize, { ptyId, cols, rows }),
     kill: (ptyId: string) => ipcRenderer.invoke(IPC.ptyKill, { ptyId }),
-    killLaunchProcesses: (opts: { cwd: string; commands: string[]; ports?: number[] }) =>
-      ipcRenderer.invoke(IPC.ptyKillLaunchProcesses, opts),
     killUnderPath: (cwd: string) =>
       ipcRenderer.invoke(IPC.ptyKillUnderPath, { cwd }) as Promise<{ ptyCount: number }>,
     onData: (cb: (msg: { ptyId: string; data: string; seq: number }) => void) =>

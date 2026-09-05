@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { emptyVoiceCommandAliases } from "~/shared/voice-command-aliases";
 import { DEFAULT_SESSION_HEADER_BUTTON_VISIBILITY } from "~/shared/session-header-buttons";
 import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
 
@@ -322,15 +321,13 @@ describe("settings API", () => {
     expect(await jsonBody(read!)).toMatchObject({ terminalZoomLevel: 2 });
   });
 
-  it("hides the zoom session button by default and shows the rest", async () => {
+  it("shows both session buttons by default", async () => {
     const response = await handleApiRequest(authedRequest("http://localhost/api/settings"));
     expect(await jsonBody(response!)).toMatchObject({
       sessionHeaderButtons: DEFAULT_SESSION_HEADER_BUTTON_VISIBILITY,
     });
-    expect(DEFAULT_SESSION_HEADER_BUTTON_VISIBILITY).toMatchObject({
+    expect(DEFAULT_SESSION_HEADER_BUTTON_VISIBILITY).toEqual({
       rename: true,
-      zoom: false,
-      clone: true,
       focus: true,
     });
   });
@@ -340,15 +337,16 @@ describe("settings API", () => {
       authedRequest("http://localhost/api/settings", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        // Only send the two the user changed; unknown keys are dropped and the
-        // rest fall back to their defaults.
-        body: JSON.stringify({ sessionHeaderButtons: { zoom: true, clone: false, bogus: true } }),
+        // Only send the one the user changed; unknown keys (including the
+        // retired clone/expand/zoom) are dropped and the rest fall back to
+        // their defaults.
+        body: JSON.stringify({ sessionHeaderButtons: { rename: false, clone: false, bogus: true } }),
       }),
     );
     const read = await handleApiRequest(authedRequest("http://localhost/api/settings"));
 
     expect(update?.status).toBe(200);
-    const expected = { rename: true, zoom: true, clone: false, focus: true };
+    const expected = { rename: false, focus: true };
     expect(await jsonBody(update!)).toMatchObject({ sessionHeaderButtons: expected });
     expect(await jsonBody(read!)).toMatchObject({ sessionHeaderButtons: expected });
   });
@@ -359,9 +357,7 @@ describe("settings API", () => {
       headerButtons: DEFAULT_HEADER_BUTTON_VISIBILITY,
     });
     expect(DEFAULT_HEADER_BUTTON_VISIBILITY).toMatchObject({
-      scratchPad: true,
       promptSearch: true,
-      voice: true,
       notifications: true,
       screenshot: true,
       gridView: true,
@@ -442,7 +438,7 @@ describe("settings API", () => {
     expect(await jsonBody(read!)).toMatchObject({ showBackgroundGrid: false });
   });
 
-  it("defaults voice agents to Claude Code with no model until one is chosen", async () => {
+  it("defaults new agent sessions to Claude Code with no model until one is chosen", async () => {
     const response = await handleApiRequest(authedRequest("http://localhost/api/settings"));
     expect(await jsonBody(response!)).toMatchObject({
       defaultAgent: "claude-code",
@@ -450,14 +446,7 @@ describe("settings API", () => {
     });
   });
 
-  it("has no custom voice command aliases by default", async () => {
-    const response = await handleApiRequest(authedRequest("http://localhost/api/settings"));
-    expect(await jsonBody(response!)).toMatchObject({
-      voiceCommandAliases: emptyVoiceCommandAliases(),
-    });
-  });
-
-  it("persists the default harness and generic model for voice-started agents", async () => {
+  it("persists the default harness and generic model for new agent sessions", async () => {
     const update = await handleApiRequest(
       authedRequest("http://localhost/api/settings", {
         method: "POST",
@@ -497,17 +486,7 @@ describe("settings API", () => {
     });
   });
 
-  it("defaults Ship to Claude Code with the sync prompt until customized", async () => {
-    const response = await handleApiRequest(authedRequest("http://localhost/api/settings"));
-    expect(await jsonBody(response!)).toMatchObject({
-      shipAgent: "claude-code",
-      shipModel: null,
-      shipPrompt:
-        "commit my changes, then push my latest branch changes to remote, and if upstream changes exist, pull them, fix conflict, and push when resolved.",
-    });
-  });
-
-  it("persists the annotation harness and model independently of the voice default", async () => {
+  it("persists the annotation harness and model independently of the session default", async () => {
     const update = await handleApiRequest(
       authedRequest("http://localhost/api/settings", {
         method: "POST",
@@ -521,7 +500,7 @@ describe("settings API", () => {
     const read = await handleApiRequest(authedRequest("http://localhost/api/settings"));
 
     expect(update?.status).toBe(200);
-    // The annotation runtime is set without disturbing the voice default.
+    // The annotation runtime is set without disturbing the session default.
     expect(await jsonBody(update!)).toMatchObject({
       annotationAgent: "opencode",
       annotationModel: "anthropic/claude-sonnet-4-5",
@@ -544,97 +523,6 @@ describe("settings API", () => {
         body: JSON.stringify({ annotationModel: "$(whoami)" }),
       }),
     );
-    expect(update?.status).toBe(400);
-  });
-
-  it("persists the Ship harness, model, and prompt independently of voice defaults", async () => {
-    const update = await handleApiRequest(
-      authedRequest("http://localhost/api/settings", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          shipAgent: "codex",
-          shipModel: "gpt-5.3-codex",
-          shipPrompt: "  push and reconcile with origin  ",
-        }),
-      }),
-    );
-    const read = await handleApiRequest(authedRequest("http://localhost/api/settings"));
-
-    expect(update?.status).toBe(200);
-    expect(await jsonBody(update!)).toMatchObject({
-      shipAgent: "codex",
-      shipModel: "gpt-5.3-codex",
-      shipPrompt: "push and reconcile with origin",
-      defaultAgent: "claude-code",
-      defaultModel: null,
-    });
-    expect(await jsonBody(read!)).toMatchObject({
-      shipAgent: "codex",
-      shipModel: "gpt-5.3-codex",
-      shipPrompt: "push and reconcile with origin",
-    });
-  });
-
-  it("rejects an unsafe ship model value", async () => {
-    const update = await handleApiRequest(
-      authedRequest("http://localhost/api/settings", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ shipModel: "gpt-4; rm -rf /" }),
-      }),
-    );
-    expect(update?.status).toBe(400);
-  });
-
-  it("persists normalized custom voice command aliases", async () => {
-    const update = await handleApiRequest(
-      authedRequest("http://localhost/api/settings", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          voiceCommandAliases: {
-            ship: [" Send It! ", "send it"],
-            "switch-project": ["Hop To"],
-            "new-agent": ["tell the agent"],
-          },
-        }),
-      }),
-    );
-    const read = await handleApiRequest(authedRequest("http://localhost/api/settings"));
-
-    expect(update?.status).toBe(200);
-    expect(await jsonBody(update!)).toMatchObject({
-      voiceCommandAliases: {
-        ...emptyVoiceCommandAliases(),
-        ship: ["send it"],
-        "switch-project": ["hop to"],
-        "new-agent": ["tell the agent"],
-      },
-    });
-    expect(await jsonBody(read!)).toMatchObject({
-      voiceCommandAliases: {
-        ...emptyVoiceCommandAliases(),
-        ship: ["send it"],
-        "switch-project": ["hop to"],
-        "new-agent": ["tell the agent"],
-      },
-    });
-  });
-
-  it("rejects invalid custom voice command alias payloads", async () => {
-    const update = await handleApiRequest(
-      authedRequest("http://localhost/api/settings", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          voiceCommandAliases: {
-            "unknown-command": ["send it"],
-          },
-        }),
-      }),
-    );
-
     expect(update?.status).toBe(400);
   });
 
@@ -803,7 +691,6 @@ describe("settings API", () => {
       gitDiffChangedFilesView: null,
       gitDiffChangedFilesWidth: null,
       projectsDashboardView: null,
-      selectedWorktreeByProject: null,
     });
   });
 
@@ -826,26 +713,6 @@ describe("settings API", () => {
     expect(await jsonBody(read!)).toMatchObject({
       worktreesEnabled: true,
     });
-  });
-
-  it("keeps voice control enabled", async () => {
-    const response = await handleApiRequest(authedRequest("http://localhost/api/settings"));
-    expect(await jsonBody(response!)).toMatchObject({ voiceControlEnabled: true });
-  });
-
-  it("ignores attempts from older clients to disable voice control", async () => {
-    const update = await handleApiRequest(
-      authedRequest("http://localhost/api/settings", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ voiceControlEnabled: false }),
-      }),
-    );
-    const read = await handleApiRequest(authedRequest("http://localhost/api/settings"));
-
-    expect(update?.status).toBe(200);
-    expect(await jsonBody(update!)).toMatchObject({ voiceControlEnabled: true });
-    expect(await jsonBody(read!)).toMatchObject({ voiceControlEnabled: true });
   });
 
   it("keeps multiplayer pets disabled by default (opt-in)", async () => {
@@ -920,7 +787,6 @@ describe("settings API", () => {
   });
 
   it("persists durable UI preferences", async () => {
-    const selectedWorktreeByProject = { "project-1": "worktree-2" };
     const update = await handleApiRequest(
       authedRequest("http://localhost/api/settings", {
         method: "POST",
@@ -929,7 +795,6 @@ describe("settings API", () => {
           gitDiffChangedFilesView: "tree",
           gitDiffChangedFilesWidth: 420,
           projectsDashboardView: "table",
-          selectedWorktreeByProject,
         }),
       }),
     );
@@ -942,14 +807,20 @@ describe("settings API", () => {
       gitDiffChangedFilesView: "tree",
       gitDiffChangedFilesWidth: 420,
       projectsDashboardView: "table",
-      selectedWorktreeByProject,
     });
     expect(await jsonBody(read!)).toMatchObject({
       gitDiffChangedFilesView: "tree",
       gitDiffChangedFilesWidth: 420,
       projectsDashboardView: "table",
-      selectedWorktreeByProject,
     });
+  });
+
+  // The worktree selector is gone, so the interface no longer keeps a chosen
+  // worktree per project. A stale value from an older build is inert: the
+  // settings response simply does not carry the field.
+  it("no longer reports a selected worktree per project", async () => {
+    const read = await handleApiRequest(authedRequest("http://localhost/api/settings"));
+    expect(await jsonBody(read!)).not.toHaveProperty("selectedWorktreeByProject");
   });
 
   it("defaults to the painted theme style", async () => {

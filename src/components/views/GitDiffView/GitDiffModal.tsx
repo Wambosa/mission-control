@@ -1,6 +1,7 @@
 import { Modal } from "~/components/ui/Modal";
 import { Icon } from "~/components/ui/Icon";
 import { GitDiffView } from "./index";
+import type { ProjectFsScope } from "~/lib/project-fs";
 
 /**
  * Full-screen modal presentation of the git diff view (mirrors the prompt-search
@@ -17,17 +18,18 @@ export function GitDiffModal({
   projectId,
   worktreeId,
   projectPath,
+  scope,
   enabled = true,
   onClose,
-  onShip,
 }: {
   open: boolean;
   projectId: string;
   worktreeId?: string | null;
   projectPath: string;
+  /** Which machine this project's repo lives on, and where. */
+  scope: ProjectFsScope;
   enabled?: boolean;
   onClose: () => void;
-  onShip: () => void;
 }) {
   return (
     <Modal
@@ -75,10 +77,10 @@ export function GitDiffModal({
         projectId={projectId}
         worktreeId={worktreeId}
         projectPath={projectPath}
+        scope={scope}
         enabled={enabled}
         onBack={onClose}
         showHeader={false}
-        onShip={onShip}
       />
     </Modal>
   );

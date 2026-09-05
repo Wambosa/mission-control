@@ -44,16 +44,11 @@ type UiVisibilityPatch = Partial<
 
 const SESSION_BUTTON_LABELS: Record<SessionHeaderButtonKey, string> = {
   rename: "rename button",
-  zoom: "zoom buttons",
-  clone: "clone button",
   focus: "focus button",
-  expand: "expand button",
 };
 
 const HEADER_BUTTON_LABELS: Record<HeaderButtonKey, string> = {
-  scratchPad: "scratch pads button",
   promptSearch: "prompt search button",
-  voice: "push-to-talk button",
   notifications: "notifications bell",
   screenshot: "screenshot button",
   gridView: "grid view button",

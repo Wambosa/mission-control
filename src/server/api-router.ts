@@ -18,11 +18,9 @@ import * as userTerminalsController from "./controllers/user-terminals.controlle
 import * as homeTerminalsController from "./controllers/home-terminals.controller";
 import * as settingsController from "./controllers/settings.controller";
 import * as keybindingsController from "./controllers/keybindings.controller";
-import * as skillsController from "./controllers/skills.controller";
 import * as hooksController from "./controllers/hooks.controller";
 import * as promptsController from "./controllers/prompts.controller";
 import * as projectMemoryController from "./controllers/project-memory.controller";
-import * as scratchPadsController from "./controllers/scratch-pads.controller";
 import * as codeGraphController from "./controllers/code-graph.controller";
 import * as usageController from "./controllers/usage.controller";
 import * as claudeUsageLimitsController from "./controllers/claude-usage-limits.controller";
@@ -30,7 +28,6 @@ import * as providerUsageController from "./controllers/provider-usage.controlle
 import * as agentLaunchersController from "./controllers/agent-launchers.controller";
 import * as eventsController from "./controllers/events.controller";
 import * as gitController from "./controllers/git.controller";
-import * as commitCliController from "./controllers/commit-cli.controller";
 import * as projectFileController from "./controllers/project-file.controller";
 import * as healthController from "./controllers/health.controller";
 import * as diagramsController from "./controllers/diagrams.controller";
@@ -50,8 +47,6 @@ const PROJECT_MEMORY_PATH = /^\/api\/projects\/([^/]+)\/memory$/;
 const PROJECT_BRIEF_PATH = /^\/api\/projects\/([^/]+)\/brief$/;
 const PROJECT_MEMORY_SEARCH_PATH = /^\/api\/projects\/([^/]+)\/memory\/search$/;
 const MEMORY_PATH = /^\/api\/memory\/([^/]+)$/;
-const PROJECT_SCRATCH_PADS_PATH = /^\/api\/projects\/([^/]+)\/scratch-pads$/;
-const PROJECT_SCRATCH_PAD_PATH = /^\/api\/projects\/([^/]+)\/scratch-pads\/([^/]+)$/;
 const MEMORY_VERIFY_PATH = /^\/api\/memory\/([^/]+)\/verify$/;
 const PROJECT_GRAPH_STATUS_PATH = /^\/api\/projects\/([^/]+)\/graph\/status$/;
 const PROJECT_GRAPH_SUMMARY_PATH = /^\/api\/projects\/([^/]+)\/graph\/summary$/;
@@ -248,9 +243,6 @@ async function dispatch(
   if (pathname === "/api/sandboxes/ssh-host" && method === "POST") {
     return sandboxesController.registerSsh(request);
   }
-  if (pathname === "/api/sandboxes/active" && method === "PUT") {
-    return sandboxesController.setActive(request);
-  }
   if (pathname === "/api/sandboxes/enabled" && method === "PUT") {
     return sandboxesController.setEnabled(request);
   }
@@ -268,7 +260,7 @@ async function dispatch(
   m = pathname.match(PROJECT_TASKS_PATH);
   if (m) {
     const id = decode(m[1]);
-    if (method === "GET") return tasksController.listForProject(id, request);
+    if (method === "GET") return tasksController.listForProject(id);
     if (method === "POST") return tasksController.create(id, request);
   }
   m = pathname.match(PROJECT_WORKTREES_PATH);
@@ -292,16 +284,9 @@ async function dispatch(
     const id = decode(m[1]);
     const action = m[2]!;
     if (action === "status" && method === "GET") return gitController.status(id, url);
-    if (action === "branches" && method === "GET") return gitController.branches(id, url);
     if (action === "diff" && method === "GET") return gitController.diff(id, url);
     if (action === "stage" && method === "POST") return gitController.stage(id, request);
     if (action === "unstage" && method === "POST") return gitController.unstage(id, request);
-    if (action === "commit" && method === "POST") return gitController.commit(id, request);
-    if (action === "push" && method === "POST") return gitController.push(id, request);
-    if (action === "fetch" && method === "POST") return gitController.fetch(id, request);
-    if (action === "pull" && method === "POST") return gitController.pull(id, request);
-    if (action === "create-pr" && method === "POST") return gitController.createPr(id, request);
-    if (action === "checkout" && method === "POST") return gitController.checkout(id, request);
   }
   m = pathname.match(PROJECT_USER_TERMINALS_PATH);
   if (m) {
@@ -330,22 +315,6 @@ async function dispatch(
     const id = decode(m[1]);
     if (method === "PATCH") return projectMemoryController.update(id, request);
     if (method === "DELETE") return projectMemoryController.remove(id, url);
-  }
-
-  // Scratch pads — per-project temporary text buffers. Item routes stay nested
-  // under the project so ownership is checked against the addressed project.
-  m = pathname.match(PROJECT_SCRATCH_PADS_PATH);
-  if (m) {
-    const id = decode(m[1]);
-    if (method === "GET") return scratchPadsController.list(id);
-    if (method === "POST") return scratchPadsController.create(id, request);
-  }
-  m = pathname.match(PROJECT_SCRATCH_PAD_PATH);
-  if (m) {
-    const projectId = decode(m[1]);
-    const padId = decode(m[2]);
-    if (method === "PATCH") return scratchPadsController.update(projectId, padId, request);
-    if (method === "DELETE") return scratchPadsController.remove(projectId, padId);
   }
 
   // Recall — code graph. Literal `/graph/index/cancel` before `/graph/index`.
@@ -416,7 +385,7 @@ async function dispatch(
 
   // Home terminals (project-less dashboard terminals)
   if (pathname === "/api/home/user-terminals") {
-    if (method === "GET") return homeTerminalsController.listAll(request);
+    if (method === "GET") return homeTerminalsController.listAll();
     if (method === "POST") return homeTerminalsController.create(request);
   }
   m = pathname.match(HOME_USER_TERMINAL_PATH);
@@ -431,25 +400,8 @@ async function dispatch(
     if (method === "GET") return settingsController.read();
     if (method === "POST") return settingsController.update(request);
   }
-  if (pathname === "/api/commit-cli/detect" && method === "GET") {
-    return commitCliController.detect();
-  }
   if (pathname === "/api/ai-runtime/models" && method === "GET") {
     return aiRuntimeModelsController.list(url);
-  }
-
-  // Diagram skill (local bundled install)
-  if (pathname === "/api/skills/install/diagram/installed" && method === "GET") {
-    return skillsController.diagramInstalled(url);
-  }
-  if (pathname === "/api/skills/install/diagram" && method === "POST") {
-    return skillsController.installDiagram(request);
-  }
-  if (pathname === "/api/skills/install/ship/installed" && method === "GET") {
-    return skillsController.shipInstalled(url);
-  }
-  if (pathname === "/api/skills/install/ship" && method === "POST") {
-    return skillsController.installShip(request);
   }
 
   // Keybindings

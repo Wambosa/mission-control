@@ -55,7 +55,6 @@ const BUNDLED_GOLDEN_AMI_MANIFEST = path.join(
 const GOLDEN_AMI_OWNER_DEFAULT = "493255580566";
 const GOLDEN_AMI_OWNER_PIN = process.env.MC_GOLDEN_AMI_OWNER?.trim() || GOLDEN_AMI_OWNER_DEFAULT;
 const REMOTE_CONFIG_VERSION = 1;
-const ACTIVE_SCOPE_KEY = "multiSandbox.activeScope";
 const SANDBOXES_ENABLED_KEY = "multiSandbox.enabled";
 
 class CliError extends Error {
@@ -1021,7 +1020,7 @@ function openMissionControlDb(userDataDir = resolveUserDataDir()) {
 
 export function insertRemoteVmSandbox(
   db,
-  { id, name, apiKey, remoteConfig, activate = false, gitAuthMode = "none", copyAgentCreds = false },
+  { id, name, apiKey, remoteConfig, gitAuthMode = "none", copyAgentCreds = false },
 ) {
   const now = remoteConfig.createdAt ?? Date.now();
   const config = { ...remoteConfig, createdAt: now, updatedAt: now };
@@ -1037,12 +1036,6 @@ export function insertRemoteVmSandbox(
     SANDBOXES_ENABLED_KEY,
     "true",
   );
-  if (activate) {
-    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)").run(
-      ACTIVE_SCOPE_KEY,
-      id,
-    );
-  }
 }
 
 export function updateRemoteVmStatus(db, id, status, statusMessage = null, patch = {}, options = {}) {
@@ -1334,7 +1327,6 @@ async function deployAws(flags) {
     localPort: intFlag(flags, "local-port", null),
     waitTimeout: intFlag(flags, "wait-timeout", 900),
     noWait: boolFlag(flags, "no-wait"),
-    activate: boolFlag(flags, "activate"),
     json: boolFlag(flags, "json"),
   };
   // Copy the user's ~/.ssh keys to the VM (over the agent WS on connect) by
@@ -1462,7 +1454,7 @@ async function deployAws(flags) {
       updatedAt: now,
     });
     try {
-      insertRemoteVmSandbox(db, { id: sandboxId, name, apiKey, remoteConfig, activate: opts.activate, gitAuthMode, copyAgentCreds });
+      insertRemoteVmSandbox(db, { id: sandboxId, name, apiKey, remoteConfig, gitAuthMode, copyAgentCreds });
       const stored = db.prepare("SELECT copy_agent_creds AS v FROM sandboxes WHERE id = ?").get(sandboxId);
       console.log(
         `[remote-vm] sandbox ${sandboxId}: persisted copy_agent_creds=${stored?.v ?? "?"} git_auth_mode=${gitAuthMode}`,
@@ -1948,7 +1940,6 @@ Common deploy flags:
   --access-cidr <cidr>    Source CIDR allowed to reach the agent port. Defaults to your public IPv4 /32.
   --wait-timeout <sec>    Bootstrap wait timeout. Default: 900.
   --no-wait              Store the VM after cloud creation without waiting for agent health.
-  --activate             Make the new sandbox the active Mission Control scope.
   --json                 Print a machine-readable REMOTE_VM_RESULT_JSON line.
 
 Lifecycle flags:

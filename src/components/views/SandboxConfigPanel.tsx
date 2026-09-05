@@ -23,7 +23,6 @@ import { pruneStoredSessionFinishNotifications } from "~/lib/session-notificatio
 import { useTerminalActions } from "~/lib/terminal-store";
 import { useUserTerminals } from "~/lib/user-terminal-store";
 import { queryKeys, useProjects, useSandboxes } from "~/queries";
-import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 import type { RemoteVmLifecycleStatus, SandboxGitAuthMode, SandboxKind } from "~/shared/sandbox";
 import type {
   RemoteVmDeployJobSnapshot,
@@ -830,11 +829,6 @@ export function SandboxConfigPanel({
         }
       }
 
-      if (scopes?.activeScopeId === sandboxId) {
-        await api.setActiveScope(LOCAL_SCOPE_ID);
-        await sandbox.setActive(null);
-      }
-
       await api.deleteSandbox(sandboxId);
 
       await Promise.all([
@@ -860,21 +854,15 @@ export function SandboxConfigPanel({
     sandbox,
     sandboxId,
     scopedProjects,
-    scopes?.activeScopeId,
     selectedSandbox,
   ]);
 
   const pauseRemoteVm = useCallback(async () => {
     if (!selectedSandbox || cloudBusy || !electron.remoteVm) return;
     const sandboxName = selectedSandbox.name;
-    const wasActive = scopes?.activeScopeId === sandboxId;
     setCloudBusy("pausing");
     setError(null);
-    markSandboxStoppingInCache(queryClient, sandboxId, { switchActiveToLocal: wasActive });
-    if (wasActive) {
-      await api.setActiveScope(LOCAL_SCOPE_ID).catch(() => undefined);
-      await sandbox.setActive(null).catch(() => undefined);
-    }
+    markSandboxStoppingInCache(queryClient, sandboxId);
     try {
       await closeSandboxUi();
       const down = await sandbox.down(sandboxId);
@@ -902,7 +890,6 @@ export function SandboxConfigPanel({
     queryClient,
     sandbox,
     sandboxId,
-    scopes?.activeScopeId,
     selectedSandbox,
   ]);
 

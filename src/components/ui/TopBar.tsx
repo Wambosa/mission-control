@@ -53,7 +53,7 @@ export function TopBar({
         }}
       >
         {/* App identity recedes to a logo-only home button so the project
-         * cockpit (picker → scope → run → branch/ship) is the bar's centre of
+         * cockpit (picker → scope → run → branch) is the bar's centre of
          * gravity. The wordmark still shows on the home/launch screen. */}
         <button
           type="button"

@@ -17,7 +17,6 @@ import { TerminalSettingsPage } from "./TerminalSettingsPage";
 import { ThemeSettingsPage } from "./ThemeSettingsPage";
 import { TermsSettingsPage } from "./TermsSettingsPage";
 import { UsageSettingsPage } from "./UsageSettingsPage";
-import { VoiceCommandsPage } from "./VoiceCommandsPage";
 
 // Single source of truth for settings panel ids lives in ./settings-panel-ids
 // (a dependency-free module) so eager importers don't pin this whole panel into
@@ -93,7 +92,6 @@ export function SettingsPanel({
     { id: "interface", label: "Interface", icon: "eye" },
     { id: "theme", label: "Theme", icon: "sun" },
     { id: "pet", label: "Pet", icon: "pet" },
-    { id: "voice", label: "Voice", icon: "play" },
     { id: "keybindings", label: "Keybindings", icon: "settings" },
   ];
 
@@ -331,8 +329,6 @@ export function SettingsPanel({
             <ThemeSettingsPage />
           ) : activePanel === "pet" ? (
             <PetSettingsPage />
-          ) : activePanel === "voice" ? (
-            <VoiceCommandsPage />
           ) : activePanel === "recall" ? (
             <RecallSettingsPage />
           ) : activePanel === "keybindings" ? (

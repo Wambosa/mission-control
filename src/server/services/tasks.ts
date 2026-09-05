@@ -1,7 +1,6 @@
 import { DEFAULT_BRANCH, DEFAULT_TASK_STATUS, isTaskAgent, isTaskStatus } from "~/shared/domain";
 import type { TaskAgent, TaskStatus } from "~/shared/domain";
 import type { Task } from "~/db/schema";
-import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 import { events } from "../events";
 import { deleteDiagramsForTask } from "./diagram-store";
 import { clearPendingQuestion } from "./pending-questions";
@@ -11,7 +10,6 @@ import {
   findActiveLocalTasks,
   findTaskById,
   findTasksByProjectId,
-  findTasksByProjectIdAndWorktreeId,
   insertTask,
   updateTaskRow,
 } from "../repositories/tasks.repo";
@@ -25,23 +23,8 @@ import { newId } from "./_ids";
 import { isClientDomainId } from "../../shared/client-id";
 import { normalizeProjectScopeId } from "./sandbox-scope";
 
-export function listTasksForProject(
-  projectId: string,
-  scopeId: string | null = LOCAL_SCOPE_ID,
-): Task[] {
-  return findTasksByProjectId(projectId, normalizeProjectScopeId(projectId, scopeId));
-}
-
-export function listTasksForProjectWorktree(
-  projectId: string,
-  worktreeId: string | null,
-  scopeId: string | null = LOCAL_SCOPE_ID,
-): Task[] {
-  return findTasksByProjectIdAndWorktreeId(
-    projectId,
-    worktreeId,
-    normalizeProjectScopeId(projectId, scopeId),
-  );
+export function listTasksForProject(projectId: string): Task[] {
+  return findTasksByProjectId(projectId);
 }
 
 export function getTask(id: string): Task | null {
@@ -89,6 +72,9 @@ export function createTask(input: {
     claudeSessionId: input.claudeSessionId ?? null,
     claudeSkipPermissions: input.claudeSkipPermissions ?? false,
     claudeBareSession: input.claudeBareSession ?? false,
+    // No lifecycle event has arrived yet; the header falls back to the
+    // worktree this session was created against until one does.
+    agentCwd: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -183,6 +169,28 @@ export function updateTask(
   updateTaskRow(id, next);
   events.emit("task:updated", { id, projectId: existing.projectId });
   return next;
+}
+
+/**
+ * Record the directory the session's agent reports working in.
+ *
+ * Separate from updateTask because this is the only writer and it must stay
+ * quiet: a lifecycle hook fires many times a turn, almost always naming the
+ * same directory, and emitting task:updated for an unchanged value would churn
+ * every session subscriber for nothing. A blank or missing directory is no
+ * signal at all and leaves the stored one alone — the header keeps saying what
+ * it last knew rather than blanking (R13).
+ *
+ * Takes the row rather than an id: the hook handler has already loaded it, and
+ * this runs on every event of every open session.
+ */
+export function recordAgentCwd(existing: Task, cwd: string | undefined): Task {
+  const next = cwd?.trim();
+  if (!next || existing.agentCwd === next) return existing;
+  const updated = { ...existing, agentCwd: next, updatedAt: Date.now() };
+  updateTaskRow(existing.id, updated);
+  events.emit("task:updated", { id: existing.id, projectId: existing.projectId });
+  return updated;
 }
 
 export function archiveTask(id: string): Task | null {

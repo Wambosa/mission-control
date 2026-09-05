@@ -19,8 +19,8 @@ export type AccentColor = {
   name: string;
   value: string;
   rgb: string;
-  /** Ink for text/icons sitting ON the solid accent fill (e.g. the Ship /
-   *  primary buttons in the flat theme). Bright accents take dark ink; the
+  /** Ink for text/icons sitting ON the solid accent fill (e.g. the primary
+   *  buttons in the flat theme). Bright accents take dark ink; the
    *  darker, saturated accents (blue/indigo/purple/red) take light ink, where
    *  near-black reads as muddy even though its raw contrast ratio passes. */
   onAccent: string;

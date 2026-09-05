@@ -3,15 +3,12 @@ import * as path from "node:path";
 import { getSqlite } from "~/db/client";
 import {
   DEFAULT_BRANCH,
-  LAUNCH_COMMANDS_MAX,
-  CUSTOM_SCRIPTS_MAX,
   TASK_STATUSES,
   isActiveStatus,
   isTaskStatus,
-  normalizeScriptArgs,
 } from "~/shared/domain";
 import { normalizeRepoRemote } from "~/shared/repo-key";
-import type { CustomScript, LaunchCommand, TaskStatus } from "~/shared/domain";
+import type { TaskStatus } from "~/shared/domain";
 import type { Project, Task } from "~/db/schema";
 import type { ProjectPathStatus, ProjectWithCounts } from "~/shared/projects";
 import { events } from "../events";
@@ -24,6 +21,7 @@ import {
   updateProjectRow,
 } from "../repositories/projects.repo";
 import { findWorktreeById } from "../repositories/worktrees.repo";
+import { findSandboxById } from "../repositories/sandboxes.repo";
 import { findTasksByProjectId } from "../repositories/tasks.repo";
 import { deleteAllProjectImagesFor } from "./project-images";
 import { reconcileProjectWorktrees } from "./worktrees";
@@ -308,6 +306,14 @@ export function createProject(input: {
   pinned?: boolean;
 }): Project {
   const localPath = validateWorkingDirectory(input.path ?? "");
+  // The same invariant the update path enforces: a project on an SSH host has
+  // to say where it lives there, and creation takes no directory, so binding
+  // one to a host at create time is refused rather than left to a guess.
+  if (input.sandboxId && isSshHostSandbox(input.sandboxId)) {
+    throw new ValidationError(
+      "Create the project first, then choose its SSH host and remote directory together.",
+    );
+  }
 
   const name = input.name?.trim() || path.basename(localPath) || "project";
 
@@ -328,13 +334,10 @@ export function createProject(input: {
     groupId: input.groupId ?? null,
     // Inherits the scope the project was created in (Local when null/undefined).
     sandboxId: input.sandboxId ?? null,
+    remoteDirectory: null,
     pinned: !!input.pinned,
     pinnedOrder: input.pinned ? nextPinnedOrder(findAllProjects()) : null,
     branch,
-    launchCommands: null,
-    customScripts: null,
-    launchUrl: null,
-    worktreeSetupCommand: null,
     rememberAgentSettings,
     savedAgent,
     savedSkipPermissions: false,
@@ -348,6 +351,12 @@ export function createProject(input: {
   return row;
 }
 
+/** True when the scope is a machine the user owns (not a managed remote VM,
+ *  which clones the project into its own workspace and derives the path). */
+function isSshHostSandbox(sandboxId: string): boolean {
+  return findSandboxById(sandboxId)?.kind === "ssh-host";
+}
+
 export function updateProject(
   id: string,
   patch: Partial<
@@ -359,29 +368,42 @@ export function updateProject(
       | "iconColor"
       | "imagePath"
       | "groupId"
+      | "sandboxId"
+      | "remoteDirectory"
       | "pinned"
       | "pinnedOrder"
       | "branch"
-      | "launchUrl"
-      | "worktreeSetupCommand"
       | "rememberAgentSettings"
       | "savedAgent"
       | "savedSkipPermissions"
       | "savedBareSession"
     >
-  > & { launchCommands?: LaunchCommand[] | null; customScripts?: CustomScript[] | null }
+  >
 ): Project | null {
   const existing = findProjectById(id);
   if (!existing) return null;
-  const { launchCommands, customScripts, ...rest } = patch;
+  const rest = patch;
   const nextPath =
     rest.path !== undefined ? validateWorkingDirectory(rest.path) : undefined;
-  if (
-    rest.worktreeSetupCommand !== undefined &&
-    rest.worktreeSetupCommand !== null &&
-    rest.worktreeSetupCommand.length > 500
-  ) {
-    throw new Error("worktreeSetupCommand cannot exceed 500 characters");
+  const nextRemoteDirectory =
+    rest.remoteDirectory !== undefined
+      ? rest.remoteDirectory?.trim() || null
+      : existing.remoteDirectory;
+  const nextSandboxId =
+    rest.sandboxId !== undefined ? rest.sandboxId : existing.sandboxId;
+  // A project on an SSH host must say where it lives there — the directory was
+  // guessed from the local folder name before, and the guess put sessions in a
+  // tree the host may never have had. Emptiness is all that is checked: the
+  // directory may not exist yet, and a host round-trip to find out would block
+  // a perfectly reasonable save.
+  //
+  // The rule binds the transition, not the stored row. A project bound to a
+  // host before this column existed has no directory yet, and checking the
+  // resulting row would reject every unrelated edit to it — renaming it,
+  // moving it to another group — until someone happened to set one.
+  const bindingChanged = patch.sandboxId !== undefined || patch.remoteDirectory !== undefined;
+  if (bindingChanged && nextSandboxId && !nextRemoteDirectory && isSshHostSandbox(nextSandboxId)) {
+    throw new ValidationError("A project on an SSH host needs a remote directory.");
   }
   const updated = {
     ...existing,
@@ -402,66 +424,12 @@ export function updateProject(
           branch: rest.branch ?? detectBranch(nextPath),
         }
       : {}),
-    ...(rest.worktreeSetupCommand !== undefined
-      ? { worktreeSetupCommand: rest.worktreeSetupCommand?.trim() || null }
-      : {}),
-    ...(launchCommands !== undefined
-      ? { launchCommands: serializeLaunchCommands(launchCommands) }
-      : {}),
-    ...(customScripts !== undefined
-      ? { customScripts: serializeCustomScripts(customScripts) }
-      : {}),
+    ...(rest.remoteDirectory !== undefined ? { remoteDirectory: nextRemoteDirectory } : {}),
     updatedAt: Date.now(),
   };
   updateProjectRow(id, updated);
   events.emit("project:updated", { id });
   return updated;
-}
-
-function serializeCommandList(
-  input: LaunchCommand[] | null,
-  max: number,
-  field: string
-): string | null {
-  if (!input) return null;
-  if (!Array.isArray(input)) throw new ValidationError(`${field} must be an array`);
-  if (input.length > max) {
-    throw new ValidationError(`${field} cannot exceed ${max} entries`);
-  }
-  const cleaned = input.map((c) => {
-    const id = String(c?.id ?? "").trim();
-    const name = String(c?.name ?? "").trim();
-    const command = String(c?.command ?? "").trim();
-    if (!id) throw new ValidationError(`${field}: id is required`);
-    if (!name) throw new ValidationError(`${field}: name is required`);
-    if (!command) throw new ValidationError(`${field}: command is required`);
-    return { id, name, command };
-  });
-  return cleaned.length === 0 ? null : JSON.stringify(cleaned);
-}
-
-function serializeLaunchCommands(input: LaunchCommand[] | null): string | null {
-  return serializeCommandList(input, LAUNCH_COMMANDS_MAX, "launchCommands");
-}
-
-function serializeCustomScripts(input: CustomScript[] | null): string | null {
-  if (!input) return null;
-  if (!Array.isArray(input)) throw new ValidationError("customScripts must be an array");
-  if (input.length > CUSTOM_SCRIPTS_MAX) {
-    throw new ValidationError(`customScripts cannot exceed ${CUSTOM_SCRIPTS_MAX} entries`);
-  }
-  const cleaned = input.map((c) => {
-    const id = String(c?.id ?? "").trim();
-    const name = String(c?.name ?? "").trim();
-    const command = String(c?.command ?? "").trim();
-    if (!id) throw new ValidationError("customScripts: id is required");
-    if (!name) throw new ValidationError("customScripts: name is required");
-    if (!command) throw new ValidationError("customScripts: command is required");
-    // serializeCommandList would strip args; preserve the normalized arg list.
-    const args = normalizeScriptArgs(c?.args);
-    return args ? { id, name, command, args } : { id, name, command };
-  });
-  return cleaned.length === 0 ? null : JSON.stringify(cleaned);
 }
 
 export function togglePin(id: string): Project | null {

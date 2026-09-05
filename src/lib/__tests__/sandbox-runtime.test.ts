@@ -1,23 +1,47 @@
 import { describe, expect, it, vi } from "vitest";
-import { isDockerSandboxRuntime, readSandboxRuntimeMode } from "../sandbox-runtime";
+import {
+  cachedSandboxRemoteRoot,
+  isRemoteProjectRuntime,
+  projectRuntimeMode,
+  readSandboxRemoteRoot,
+} from "../sandbox-runtime";
 
-function electronWithState(status: string) {
-  return {
-    sandbox: {
-      getState: vi.fn().mockResolvedValue({ status }),
-    },
-  } as never;
-}
-
-describe("sandbox-runtime", () => {
-  it("treats an active sandbox scope as docker; Local/disabled as host", async () => {
-    // Phase 2: a non-disabled active state means a sandbox scope is selected.
-    await expect(isDockerSandboxRuntime(electronWithState("connected"))).resolves.toBe(true);
-    await expect(isDockerSandboxRuntime(electronWithState("running"))).resolves.toBe(true);
-    await expect(isDockerSandboxRuntime(electronWithState("disabled"))).resolves.toBe(false);
+describe("projectRuntimeMode", () => {
+  it("reads the machine from the project's own scope, not a global setting", () => {
+    expect(projectRuntimeMode("sb-1")).toBe("docker");
+    expect(projectRuntimeMode(null)).toBe("host");
+    expect(projectRuntimeMode(undefined)).toBe("host");
   });
 
-  it("defaults to host when the Electron sandbox bridge is unavailable", async () => {
-    await expect(readSandboxRuntimeMode(null)).resolves.toBe("host");
+  it("lets two projects on two machines disagree at the same time", () => {
+    expect(isRemoteProjectRuntime("sb-host-a")).toBe(true);
+    expect(isRemoteProjectRuntime("sb-host-b")).toBe(true);
+    expect(isRemoteProjectRuntime(null)).toBe(false);
+  });
+});
+
+describe("readSandboxRemoteRoot", () => {
+  it("asks for the named scope's root and caches it per scope", async () => {
+    const getRemoteRoot = vi
+      .fn()
+      .mockImplementation(async (id: string) => (id === "sb-a" ? "/home/a" : "/home/b"));
+    const electron = { sandbox: { getRemoteRoot } } as never;
+
+    await expect(readSandboxRemoteRoot("sb-a", electron)).resolves.toBe("/home/a");
+    await expect(readSandboxRemoteRoot("sb-b", electron)).resolves.toBe("/home/b");
+    expect(getRemoteRoot).toHaveBeenNthCalledWith(1, "sb-a");
+    expect(getRemoteRoot).toHaveBeenNthCalledWith(2, "sb-b");
+
+    // Cached per scope — neither read displaces the other.
+    expect(cachedSandboxRemoteRoot("sb-a")).toBe("/home/a");
+    expect(cachedSandboxRemoteRoot("sb-b")).toBe("/home/b");
+    await readSandboxRemoteRoot("sb-a", electron);
+    expect(getRemoteRoot).toHaveBeenCalledTimes(2);
+  });
+
+  it("has no remote root for Local, and none before a scope's first read", async () => {
+    expect(cachedSandboxRemoteRoot(null)).toBeNull();
+    expect(cachedSandboxRemoteRoot("sb-never-read")).toBeNull();
+    await expect(readSandboxRemoteRoot(null, null)).resolves.toBeNull();
   });
 });

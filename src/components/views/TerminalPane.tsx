@@ -21,21 +21,16 @@ import { EscTooltip, HotkeyTooltip, Tooltip } from "~/components/ui/Tooltip";
 import { Z_INDEX } from "~/lib/z-index";
 import {
   AGENT_META,
-  DUPLICATE_ACTIVE_SESSION_EVENT,
   STATUS_META,
 } from "~/lib/design-meta";
 import { getElectron } from "~/lib/electron";
 import { useHideableMenu } from "~/lib/hideable-elements";
 import { enterFocusSession, takePendingRefocus } from "~/lib/focus-session";
-import { takePendingInitialInput } from "~/lib/voice-session-prompts";
-import {
-  VOICE_PASTE_TO_FOCUSED_SESSION_EVENT,
-  type VoicePasteToFocusedSessionDetail,
-} from "~/lib/voice-events";
+import { takePendingInitialInput } from "~/lib/session-initial-prompts";
 import { consumeIntentionalSessionClose } from "~/lib/intentional-session-close";
 import { DEFAULT_SESSION_ICON, isSessionIcon } from "~/lib/session-icons";
 import { isRemotePtyId } from "~/lib/pty-id";
-import { isDockerSandboxRuntime } from "~/lib/sandbox-runtime";
+import { isRemoteProjectRuntime, readSandboxRemoteRoot } from "~/lib/sandbox-runtime";
 import {
   attachTerminalKeyHandler,
   terminalExitTaskStatus,
@@ -59,7 +54,6 @@ import {
 } from "~/lib/use-terminal-zoom";
 import { useHotkey } from "~/lib/use-hotkey";
 import { SandboxCloneOfferBanner } from "~/components/views/SandboxCloneOfferBanner";
-import { TerminalZoomControls } from "~/components/views/TerminalZoomControls";
 import { api, resolveApiToken } from "~/lib/api";
 import { remoteStartErrorMessage } from "~/lib/remote-runtime-errors";
 import { useSandboxCloneConfirm } from "~/lib/use-sandbox-clone-confirm";
@@ -129,7 +123,7 @@ import {
 } from "~/lib/terminal-replay";
 import { getPtyStreamRouter, type PtyStreamHandlers } from "~/lib/pty-stream-router";
 import { isPowerSaveActive, watchPowerSave } from "~/lib/power-save";
-import { queryKeys, useSettings, useTask } from "~/queries";
+import { queryKeys, useSettings, useTask, useWorktrees } from "~/queries";
 import {
   normalizeSessionHeaderButtonVisibility,
   type SessionHeaderButtonVisibility,
@@ -138,9 +132,10 @@ import { terminalSurfaceIdForProject, useTerminalActions } from "~/lib/terminal-
 import type { Project, Task } from "~/db/schema";
 import { normalizePtySize } from "~/shared/pty-size";
 import { workspaceSlug } from "~/shared/sandbox-workspace";
-import { sandboxContainerRoot } from "~/lib/project-fs";
+import { projectRemoteRoot } from "~/lib/project-fs";
 import { AGENT_REGISTRY } from "~/shared/agents";
 import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
+import { resolveSessionWorktree } from "~/shared/session-worktree";
 import { toast } from "sonner";
 import { useSuspendAppDragRegion } from "~/lib/use-dismissable-menu";
 
@@ -168,12 +163,6 @@ export type TerminalDescriptor = {
   pendingValidation?: boolean;
 };
 
-/** The session pane's cached xterm surface; carries the sandbox flag so the
- *  "sandbox" badge can be restored on reattach without re-detecting the runtime. */
-interface SessionTerminalSurface extends PaneTerminalSurface {
-  useSandbox: boolean;
-}
-
 // Header width (px) below which the secondary controls (rename, zoom, clone)
 // collapse into the "…" menu; below the tiny threshold the title/status block
 // is hidden too and surfaces at the top of that menu instead; below micro even
@@ -200,33 +189,21 @@ function HeaderMoreMenu({
   statusLabel,
   statusColor,
   showTitle,
-  showSandboxBadge,
-  expanded,
-  onToggleExpanded,
-  onHide,
+  worktreeLabel,
   onTogglePin,
   pinned,
   pinBusy,
   buttons,
   onRename,
-  onClone,
   onFocusMode,
-  canZoomIn,
-  canZoomOut,
-  onZoomIn,
-  onZoomOut,
 }: {
   title: string;
   statusLabel: string;
   statusColor: string;
   /** Tiny header: the pane title is hidden, so show it at the top of the menu. */
   showTitle: boolean;
-  showSandboxBadge: boolean;
-  expanded: boolean;
-  /** Present only when the expand control was also collapsed into the menu. */
-  onToggleExpanded?: () => void;
-  /** Present only when the close control was also collapsed into the menu. */
-  onHide?: () => void;
+  /** The agent's worktree, when the header itself is too narrow to state it. */
+  worktreeLabel: string | null;
   /** Present only when the pin control was collapsed into the menu (micro). */
   onTogglePin?: () => void;
   pinned: boolean;
@@ -234,12 +211,7 @@ function HeaderMoreMenu({
   /** Which discretionary actions the user has chosen to show (mirrors the header). */
   buttons: SessionHeaderButtonVisibility;
   onRename: () => void;
-  onClone: () => void;
   onFocusMode: () => void;
-  canZoomIn: boolean;
-  canZoomOut: boolean;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
 }) {
   const [open, setOpen] = useState(false);
   useSuspendAppDragRegion(open);
@@ -351,10 +323,23 @@ function HeaderMoreMenu({
                     }}
                   >
                     <span style={{ color: statusColor }}>{statusLabel}</span>
-                    {showSandboxBadge && (
-                      <span style={{ color: "var(--accent)", opacity: 0.85 }}>sandbox</span>
-                    )}
                   </div>
+                  {worktreeLabel && (
+                    <div
+                      title={worktreeLabel}
+                      style={{
+                        fontFamily: "var(--mono)",
+                        fontSize: 10,
+                        marginTop: 2,
+                        color: "var(--text-dim)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {worktreeLabel}
+                    </div>
+                  )}
                 </div>
                 <DropdownMenuSeparator />
               </>
@@ -362,21 +347,6 @@ function HeaderMoreMenu({
             {buttons.rename && (
               <DropdownMenuItem icon="pencil" onClick={() => pick(onRename)}>
                 Rename session
-              </DropdownMenuItem>
-            )}
-            {buttons.zoom && (
-              <>
-                <DropdownMenuItem icon="zoom-out" disabled={!canZoomOut} onClick={onZoomOut}>
-                  Zoom out
-                </DropdownMenuItem>
-                <DropdownMenuItem icon="zoom-in" disabled={!canZoomIn} onClick={onZoomIn}>
-                  Zoom in
-                </DropdownMenuItem>
-              </>
-            )}
-            {buttons.clone && (
-              <DropdownMenuItem icon="copy" onClick={() => pick(onClone)}>
-                Clone session
               </DropdownMenuItem>
             )}
             {buttons.focus && (
@@ -393,22 +363,6 @@ function HeaderMoreMenu({
                 {pinned ? "Unpin session" : "Pin session"}
               </DropdownMenuItem>
             )}
-            {buttons.expand && onToggleExpanded && (
-              <DropdownMenuItem
-                icon={expanded ? "minimize" : "maximize"}
-                onClick={() => pick(onToggleExpanded)}
-              >
-                {expanded ? "Shrink panel" : "Expand panel"}
-              </DropdownMenuItem>
-            )}
-            {onHide && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem icon="x" danger onClick={() => pick(onHide)}>
-                  Hide session panel
-                </DropdownMenuItem>
-              </>
-            )}
           </CardFrame>,
           document.body,
         )}
@@ -420,8 +374,6 @@ export function TerminalPane({
   project,
   task,
   onHide,
-  expanded = false,
-  onToggleExpanded,
   isLast,
   descriptor,
   onPtyReady,
@@ -433,9 +385,9 @@ export function TerminalPane({
 }: {
   project: Project & { activeWorktreeId?: string | null; activeRuntimeScopeId?: string | null };
   task: Task;
+  /** Dismiss/close this session. No longer a header control — invoked by the
+   *  route-level close handler and by a clean shell exit. */
   onHide?: () => void;
-  expanded?: boolean;
-  onToggleExpanded?: () => void;
   isLast: boolean;
   descriptor: TerminalDescriptor;
   onPtyReady: (ptyId: string | null) => void;
@@ -461,7 +413,6 @@ export function TerminalPane({
   const [liveStatus, setLiveStatus] = useState("");
   const [startError, setStartError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
-  const [isSandboxTerminal, setIsSandboxTerminal] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [titleDraft, setTitleDraft] = useState(task.title);
   const [savingTitle, setSavingTitle] = useState(false);
@@ -480,21 +431,18 @@ export function TerminalPane({
   const [cloneOffer, setCloneOffer] = useState<{ remote: string; slug: string } | null>(null);
   const [cloning, setCloning] = useState(false);
   const {
-    level: zoomLevel,
     fontSize: terminalFontSize,
     zoomBy,
     zoomIn,
     zoomOut,
     resetZoom,
-    canZoomIn,
-    canZoomOut,
   } = useTerminalZoom(descriptor.taskId);
   useTerminalPaneZoomShortcuts(paneRef, zoomIn, zoomOut, resetZoom);
   useTerminalPaneWheelZoom(paneRef, zoomBy);
 
-  // Which discretionary header buttons the user has chosen to show. Zoom is
-  // hidden by default; the keyboard shortcuts (Cmd/Ctrl +/-/0) still work. The
-  // zoom shortcuts and wheel-zoom above stay wired regardless of visibility.
+  // Which discretionary header buttons the user has chosen to show. The zoom
+  // shortcuts (Cmd/Ctrl +/-/0) and wheel-zoom above are always wired — they
+  // never had a header control of their own to hide.
   const { data: appSettings } = useSettings();
   const sessionButtons: SessionHeaderButtonVisibility =
     normalizeSessionHeaderButtonVisibility(appSettings?.sessionHeaderButtons);
@@ -526,24 +474,49 @@ export function TerminalPane({
   const tinyHeader = headerTier === "tiny" || headerTier === "micro";
   const microHeader = headerTier === "micro";
   // Whether the "…" overflow menu carries anything. At tiny/micro it always
-  // holds the title (and folded expand/close), so it's kept even with every
-  // discretionary button hidden. At the plain compact tier it only holds those
-  // buttons — so if the user hid them all, skip the menu rather than open an
-  // empty popover (expand/close still render inline below).
-  const anyDiscretionaryButton =
-    sessionButtons.rename || sessionButtons.zoom || sessionButtons.clone || sessionButtons.focus;
+  // holds the title, so it's kept even with every discretionary button hidden.
+  // At the plain compact tier it only holds those buttons — so if the user hid
+  // them all, skip the menu rather than open an empty popover.
+  const anyDiscretionaryButton = sessionButtons.rename || sessionButtons.focus;
   const showMoreMenu = compactHeader && (tinyHeader || anyDiscretionaryButton);
 
   const activeRuntimeScopeId = project.activeRuntimeScopeId ?? LOCAL_SCOPE_ID;
   // Per-row subscription: with N panes mounted, a whole-array subscription
   // re-rendered every pane's header on any task change.
-  const { data: selectedLiveTask } = useTask(
-    project.id,
-    project.activeWorktreeId ?? null,
-    activeRuntimeScopeId,
-    task.id,
-  );
+  const { data: selectedLiveTask } = useTask(project.id, activeRuntimeScopeId, task.id);
   const liveTask = selectedLiveTask ?? task;
+  // Which worktree this session's agent is actually in. The agent reports its
+  // directory on every lifecycle event; the project's worktree list turns that
+  // into a name. A session on a host has no local worktree list to match
+  // against — worktree discovery reads this machine only — so its root is the
+  // configured remote directory and only that comparison runs.
+  const { data: projectWorktrees } = useWorktrees(project.id);
+  const worktreeDisplay = resolveSessionWorktree({
+    cwd: liveTask.agentCwd,
+    projectRoot: project.sandboxId
+      ? projectRemoteRoot(project.path, project.remoteDirectory, project.sandboxId)
+      : project.path,
+    worktrees: project.sandboxId ? [] : (projectWorktrees ?? []).filter((w) => !w.isMain),
+    assignedWorktreeId: liveTask.worktreeId,
+  });
+  // R14's single refresh: a directory the project does not recognize is most
+  // often a worktree made moments ago inside the session itself. Refresh the
+  // list once per unseen directory — never in a loop, and never for a host
+  // scope, where the list is about the wrong machine.
+  const refreshedCwdsRef = useRef<Set<string>>(new Set());
+  const unresolvedCwd = worktreeDisplay.kind === "path" ? worktreeDisplay.path : null;
+  useEffect(() => {
+    if (!unresolvedCwd || project.sandboxId) return;
+    if (refreshedCwdsRef.current.has(unresolvedCwd)) return;
+    refreshedCwdsRef.current.add(unresolvedCwd);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.worktrees(project.id) });
+  }, [unresolvedCwd, project.id, project.sandboxId, queryClient]);
+  const worktreeLabel =
+    worktreeDisplay.kind === "worktree"
+      ? worktreeDisplay.name
+      : worktreeDisplay.kind === "path"
+        ? worktreeDisplay.path
+        : null;
   liveTaskStatusRef.current = liveTask.status;
   const meta = AGENT_META[liveTask.agent];
   const statusMeta = STATUS_META[liveTask.status];
@@ -551,7 +524,6 @@ export function TerminalPane({
   const sessionRunning = liveTask.status === "running";
   const tasksKey = queryKeys.tasks(
     project.id,
-    project.activeWorktreeId ?? null,
     activeRuntimeScopeId,
   );
 
@@ -627,16 +599,6 @@ export function TerminalPane({
   const router = useRouter();
   const requestFocusMode = () => {
     enterFocusSession(router, task.id);
-  };
-
-  const requestSessionClone = () => {
-    if (typeof window === "undefined") return;
-    // Carry this pane's own session id so the handler clones (and, in grid view,
-    // positions the clone next to) the session whose button was clicked — not
-    // whatever session happens to be active in the current scope.
-    window.dispatchEvent(
-      new CustomEvent(DUPLICATE_ACTIVE_SESSION_EVENT, { detail: { taskId: task.id } }),
-    );
   };
 
   useEffect(() => {
@@ -723,11 +685,10 @@ export function TerminalPane({
     // PARKS the surface (offscreen, still subscribed) instead of disposing it, so
     // leaving and returning to this session is a DOM move rather than a teardown +
     // scrollback replay.
-    const bindMount = (surface: SessionTerminalSurface) => {
+    const bindMount = (surface: PaneTerminalSurface) => {
       // On screen again — exempt from parked-surface eviction while visible.
       cache.markMounted(surface.id);
       termSurfaceRef.current = surface.controls;
-      setIsSandboxTerminal(surface.useSandbox);
       surface.controls.setFontSize(terminalFontSize);
       // Refit only after the resize settles — a live refit clears the WebGL
       // canvas on every cell-boundary crossing, strobing the whole grid.
@@ -750,7 +711,7 @@ export function TerminalPane({
       };
     };
 
-    const existing = cache.get(surfaceId) as SessionTerminalSurface | null;
+    const existing = cache.get(surfaceId) as PaneTerminalSurface | null;
     if (existing && existing.buildKey === buildKey) {
       container.appendChild(existing.el);
       const detach = bindMount(existing);
@@ -770,21 +731,27 @@ export function TerminalPane({
       const { Terminal, FitAddon } = await prefetchTerminalModules();
       if (cancelled || !containerRef.current) return;
 
-      // Sandbox terminals talk to the remote agent via `remotePty`; host
-      // terminals use the local PTY.
-      // `remotePty` mirrors `pty`'s method shape, so only spawn differs below.
-      // Read the runtime setting fresh at terminal start; default to host.
-      const useSandbox = !!electron && (await isDockerSandboxRuntime(electron));
+      // Which machine this session runs on comes from its own project, not
+      // from an application-wide scope — so a Local project and a project on a
+      // host can both hold live sessions at the same time. `remotePty` mirrors
+      // `pty`'s method shape, so only spawn differs below.
+      const projectScopeId = project.sandboxId ?? null;
+      const useSandbox = !!electron && isRemoteProjectRuntime(projectScopeId);
+      // Warm this scope's project root so the managed-VM derivation below can
+      // read it synchronously. No-op for a host project, which states its own.
+      if (useSandbox && !project.remoteDirectory) {
+        await readSandboxRemoteRoot(projectScopeId, electron);
+      }
       if (cancelled || !containerRef.current) return;
       const ptyApi = electron ? (useSandbox ? electron.remotePty : electron.pty) : null;
       // Split on either separator: a Windows project path never split at all,
       // so its whole drive path became the "name".
       const sandboxPathName = project.path.split(/[\\/]/).filter(Boolean).pop() ?? project.name;
-      // Uses the active scope's own root. `/workspace` exists only inside a
-      // Mission Control VM, so a session on an SSH host was started in a
-      // directory that machine has never had. Derived from the same name the
-      // clone slug below uses, so the two always agree.
-      const sandboxCwd = sandboxContainerRoot(project.path);
+      // A project on an SSH host says where it lives there. Only a managed VM,
+      // which creates the project inside its own workspace, still derives the
+      // path from the local folder name (the same name the clone slug below
+      // uses, so the two always agree).
+      const sandboxCwd = projectRemoteRoot(project.path, project.remoteDirectory, projectScopeId);
 
       // A grid mounts every pane in one commit; building all their xterm
       // surfaces in one task blocks the route transition's first paint. Take
@@ -813,11 +780,10 @@ export function TerminalPane({
       term.open(el);
       const gpu = createTerminalGpuLease(term);
 
-      const surface: SessionTerminalSurface = {
+      const surface: PaneTerminalSurface = {
         id: surfaceId,
         el,
         buildKey,
-        useSandbox,
         ptyId: null,
         destroyed: false,
         gpu,
@@ -955,20 +921,6 @@ export function TerminalPane({
         });
       }
 
-      const onVoicePaste = (event: Event) => {
-        const detail = (event as CustomEvent<VoicePasteToFocusedSessionDetail>).detail;
-        if (!detail?.text || !activePtyId) return;
-        const activeEl = document.activeElement;
-        if (!(activeEl instanceof HTMLElement) || !host.contains(activeEl)) return;
-        term.paste(detail.text);
-        term.focus();
-        detail.handled = true;
-      };
-      window.addEventListener(VOICE_PASTE_TO_FOCUSED_SESSION_EVENT, onVoicePaste);
-      subscriptions.push(() =>
-        window.removeEventListener(VOICE_PASTE_TO_FOCUSED_SESSION_EVENT, onVoicePaste),
-      );
-
       // If an agent process exits before it has had a chance to render its
       // first useful prompt, preserve the panel so the user can read the error.
       const START_FAILURE_EXIT_MS = 3000;
@@ -1051,7 +1003,6 @@ export function TerminalPane({
             queryClient.invalidateQueries({
               queryKey: queryKeys.tasks(
                 project.id,
-                project.activeWorktreeId ?? null,
                 activeRuntimeScopeId,
               ),
             }),
@@ -1196,7 +1147,6 @@ export function TerminalPane({
                   queryClient.invalidateQueries({
                     queryKey: queryKeys.tasks(
                       project.id,
-                      project.activeWorktreeId ?? null,
                       activeRuntimeScopeId,
                     ),
                   }),
@@ -1244,7 +1194,10 @@ export function TerminalPane({
         void resizeElectronPtyToSurface(ptyId);
         let replay: PtyReplaySnapshot = { data: "", nextSeq: 0 };
         try {
-          replay = await ptyApi.replay(ptyId);
+          // Name the project's scope: after an app restart the main process no
+          // longer remembers which host owns this pty, and without it the
+          // reattach comes back empty and the session starts a second agent.
+          replay = await ptyApi.replay(ptyId, projectScopeId);
         } finally {
           if (electronReplayPtyId === ptyId) {
             electronReplayPtyId = null;
@@ -1293,6 +1246,7 @@ export function TerminalPane({
         try {
           spawnResult = useSandbox
             ? await electron.remotePty.spawn({
+                sandboxId: projectScopeId!,
                 taskId: descriptor.taskId,
                 cwd: sandboxCwd, // in-container clone path (/workspace/<slug>)
                 command,
@@ -1313,7 +1267,7 @@ export function TerminalPane({
                 dangerouslySkipPermissions: descriptor.dangerouslySkipPermissions,
                 mcEnv: await resolveMcEnv(electron),
                 missionControlTheme: getTerminalColorScheme(),
-                // Voice-seeded starting prompt, consumed once on the first spawn so
+                // Staged starting prompt, consumed once on the first spawn so
                 // reloads/re-spawns never re-inject it. Undefined for normal sessions.
                 initialInput,
               });
@@ -1386,10 +1340,17 @@ export function TerminalPane({
           // Clone-on-open: a sandbox project whose repo isn't cloned into the
           // container yet gets a clone offer (remote detected from the host repo)
           // instead of an empty terminal. No remote → fall through (empty dir).
-          if (useSandbox && electron) {
+          //
+          // Only for a managed VM, whose workspace layout Mission Control owns
+          // and whose clone destination it can therefore derive. A project on
+          // an SSH host states its own directory, and the clone RPC takes a
+          // slug rather than a path — it would put the repo somewhere other
+          // than the directory the session is about to open in, and the
+          // session would still start in an empty one. Say so instead.
+          if (useSandbox && electron && !project.remoteDirectory) {
             let repoPresent = true;
             try {
-              await electron.remoteGit.status(sandboxCwd);
+              await electron.remoteGit.status(projectScopeId, sandboxCwd);
             } catch {
               repoPresent = false;
             }
@@ -1407,7 +1368,7 @@ export function TerminalPane({
                 setCloning(true);
                 setLiveStatus("Cloning the project into the sandbox…");
                 try {
-                  await electron.remoteGit.clone(remote, slug);
+                  await electron.remoteGit.clone(projectScopeId, remote, slug);
                   if (surface.destroyed) return;
                   setCloneOffer(null);
                   setCloning(false);
@@ -1421,6 +1382,21 @@ export function TerminalPane({
                 }
               }
             }
+          }
+          // A host project whose configured directory is not there cannot be
+          // fixed by a clone this code can place, so it fails with the fact.
+          if (useSandbox && electron && project.remoteDirectory) {
+            try {
+              await electron.remoteGit.status(projectScopeId, sandboxCwd);
+            } catch {
+              if (surface.destroyed) return;
+              setStartError(
+                `${sandboxCwd} was not found on this project's host. Check the remote directory in project settings.`,
+              );
+              setLiveStatus("");
+              return;
+            }
+            if (surface.destroyed) return;
           }
 
           const isResume = isAgentResumeCommand(task.agent, descriptor.startCommand);
@@ -1462,6 +1438,7 @@ export function TerminalPane({
   }, [descriptor.taskId, descriptor.awaitingCreate, descriptor.pendingValidation, retryNonce]);
 
   const confirmClone = useSandboxCloneConfirm({
+    sandboxId: project.sandboxId ?? null,
     cloneOffer,
     setCloneOffer,
     setCloning,
@@ -1613,23 +1590,14 @@ export function TerminalPane({
           className="mc-pane-header-actions"
           style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}
         >
-          {isSandboxTerminal && !tinyHeader && (
-            <span
-              title="This terminal runs inside the selected sandbox"
-              style={{
-                padding: "1px 7px",
-                borderRadius: 999,
-                fontFamily: "var(--mono)",
-                fontSize: 10,
-                color: "var(--accent)",
-                background: "var(--accent-faint, var(--accent-dim))",
-                border: "1px solid var(--accent-border)",
-                whiteSpace: "nowrap",
-                opacity: 0.85,
-                marginRight: 6,
-              }}
-            >
-              sandbox
+          {/* Where this session's agent is working. Nothing for the main
+            * checkout (R12). R14's fallback can be an arbitrary absolute path,
+            * so the slot truncates and carries the whole value in its title —
+            * and gives up entirely at the tier where the header has no room,
+            * surfacing in the overflow menu instead. */}
+          {worktreeLabel && !tinyHeader && (
+            <span className="mc-pane-worktree" title={worktreeLabel}>
+              {worktreeLabel}
             </span>
           )}
           {compactHeader ? (
@@ -1639,21 +1607,13 @@ export function TerminalPane({
               statusLabel={statusMeta.label}
               statusColor={statusMeta.color}
               showTitle={tinyHeader}
-              showSandboxBadge={isSandboxTerminal}
-              expanded={expanded}
-              onToggleExpanded={tinyHeader ? onToggleExpanded : undefined}
-              onHide={microHeader ? onHide : undefined}
+              worktreeLabel={tinyHeader ? worktreeLabel : null}
               onTogglePin={microHeader ? onTogglePin : undefined}
               pinned={liveTask.pinned}
               pinBusy={pinBusy}
               buttons={sessionButtons}
               onRename={openRenameDialog}
-              onClone={requestSessionClone}
               onFocusMode={requestFocusMode}
-              canZoomIn={canZoomIn}
-              canZoomOut={canZoomOut}
-              onZoomIn={zoomIn}
-              onZoomOut={zoomOut}
             />
             ) : null
           ) : (
@@ -1670,33 +1630,6 @@ export function TerminalPane({
                     style={{ width: 34, padding: 0 }}
                   />
                 </Tooltip>
-              )}
-              {sessionButtons.zoom && (
-                <span
-                  style={{ display: "contents" }}
-                  onContextMenu={hideElementContextMenu("session-button:zoom")}
-                >
-                  <TerminalZoomControls
-                    level={zoomLevel}
-                    canZoomIn={canZoomIn}
-                    canZoomOut={canZoomOut}
-                    onZoomIn={zoomIn}
-                    onZoomOut={zoomOut}
-                  />
-                </span>
-              )}
-              {sessionButtons.clone && (
-                <HotkeyTooltip action="session.clone" label="Clone session">
-                  <Btn
-                    variant="ghost"
-                    size="sm"
-                    icon="copy"
-                    onClick={requestSessionClone}
-                    onContextMenu={hideElementContextMenu("session-button:clone")}
-                    aria-label="Clone session"
-                    style={{ width: 34, padding: 0 }}
-                  />
-                </HotkeyTooltip>
               )}
               {sessionButtons.focus && (
                 <HotkeyTooltip action="session.focusMode" label="Focus session (floating window)">
@@ -1734,35 +1667,6 @@ export function TerminalPane({
                 }}
               />
             </Tooltip>
-          )}
-          {sessionButtons.expand && onToggleExpanded && !tinyHeader && (
-            <HotkeyTooltip
-              action="terminal.expandToggle"
-              label={expanded ? "Shrink session panel" : "Expand session panel"}
-            >
-              <Btn
-                variant="ghost"
-                size="sm"
-                icon={expanded ? "minimize" : "maximize"}
-                onClick={onToggleExpanded}
-                onContextMenu={hideElementContextMenu("session-button:expand")}
-                aria-label={expanded ? "Shrink session panel" : "Expand session panel"}
-                aria-pressed={expanded}
-                style={{ width: 34, padding: 0 }}
-              />
-            </HotkeyTooltip>
-          )}
-          {onHide && !microHeader && (
-            <HotkeyTooltip action="terminal.close" label="Hide session panel">
-              <Btn
-                variant="ghost"
-                size="sm"
-                icon="x"
-                onClick={onHide}
-                aria-label="Hide session panel"
-                style={{ width: 34, padding: 0 }}
-              />
-            </HotkeyTooltip>
           )}
         </div>
       </div>

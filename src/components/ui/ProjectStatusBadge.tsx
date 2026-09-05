@@ -2,7 +2,6 @@ import type { ProjectActivityState } from "~/shared/projects";
 
 const ACTIVITY_LABELS: Record<ProjectActivityState, string> = {
   offline: "Offline",
-  "launch-running": "Launch running",
   "agent-running": "Agent running",
   "needs-input": "Needs input",
   interrupted: "Interrupted",

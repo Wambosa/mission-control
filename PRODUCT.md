@@ -29,6 +29,7 @@ Calm, precise, operator-grade. A cockpit, not a dashboard-as-marketing. Confiden
 3. **Feedback on every interaction** — everything clickable acknowledges hover and press within ~150ms; motion conveys state, never decorates.
 4. **Density with rhythm** — the app is dense by design; use spacing and tonal steps, not extra boxes, to organize it.
 5. **Consistent vocabulary** — same button/pane/control grammar across painted and flat themes, dark and light.
+6. **State, or start a session — nothing in between** — the interface says what is true and opens sessions; it offers no control for work the agent already does. A proposed button has to answer why the agent cannot do it.
 
 ## Accessibility & Inclusion
 

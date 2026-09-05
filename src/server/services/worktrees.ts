@@ -1,7 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnCapture } from "./_spawn";
-import { MAIN_WORKTREE_ID, WORKTREE_NAME_RE, normalizeWorktreeId } from "~/shared/worktrees";
+import {
+  MAIN_WORKTREE_ID,
+  WORKTREE_CONTAINER_DIRS,
+  WORKTREE_NAME_RE,
+  normalizeWorktreeId,
+} from "~/shared/worktrees";
 import type { WorktreeInfo, WorktreeTaskCounts } from "~/shared/worktrees";
 import { TASK_STATUSES } from "~/shared/domain";
 import { findProjectById } from "../repositories/projects.repo";
@@ -13,7 +18,7 @@ import {
   insertWorktree,
   updateWorktreeBranch,
 } from "../repositories/worktrees.repo";
-import { findTasksByProjectIdAllScopes } from "../repositories/tasks.repo";
+import { findTasksByProjectId } from "../repositories/tasks.repo";
 import { newId } from "./_ids";
 import { events } from "../events";
 
@@ -128,10 +133,6 @@ export function canonicalPath(p: string): string {
   }
 }
 
-// `.worktrees` (plural) is the container older releases used; rows created back
-// then still point there and must stay deletable.
-const WORKTREE_CONTAINER_DIRS = [".worktree", ".worktrees"];
-
 function isContainedWorktreePath(projectRoot: string, worktreePath: string): boolean {
   // Compare both the plain-resolved and realpath'd spellings: rows written by
   // the app store the symlinked form while adopted rows store git's canonical
@@ -210,7 +211,7 @@ function emptyTaskCounts(): WorktreeTaskCounts {
 /** Non-archived sessions per worktree id (null key = main), across all scopes. */
 function countTasksByWorktree(projectId: string): Map<string | null, WorktreeTaskCounts> {
   const byWorktree = new Map<string | null, WorktreeTaskCounts>();
-  for (const task of findTasksByProjectIdAllScopes(projectId)) {
+  for (const task of findTasksByProjectId(projectId)) {
     if (task.archived) continue;
     const key = task.worktreeId ?? null;
     let counts = byWorktree.get(key);
@@ -410,7 +411,6 @@ export function resolveProjectWorktreeCwd(projectId: string, worktreeId?: string
 
 export async function createWorktree(projectId: string): Promise<{
   worktree: WorktreeInfo;
-  setupCommand: string | null;
 }> {
   const project = findProjectById(projectId);
   if (!project) throw new Error("project not found");
@@ -453,10 +453,7 @@ export async function createWorktree(projectId: string): Promise<{
     }
     events.emit("worktree:created", { id: row.id, projectId });
     events.emit("project:updated", { id: projectId });
-    return {
-      worktree: toInfo(row, projectRoot),
-      setupCommand: project.worktreeSetupCommand?.trim() || null,
-    };
+    return { worktree: toInfo(row, projectRoot) };
   }
   throw lastError ?? new Error("could not generate a unique worktree name");
 }

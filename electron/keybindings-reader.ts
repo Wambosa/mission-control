@@ -1,12 +1,16 @@
 import { DEFAULT_BINDINGS } from "../src/lib/keybindings/defaults";
+import { HOTKEY_ACTIONS } from "../src/lib/keybindings/types";
 import type { Binding, BindingMap, HotkeyAction } from "../src/lib/keybindings/types";
 import { getStringAppSetting } from "./app-settings-store";
 
 const KEYBINDINGS_SCOPE = "global";
 const settingKey = (scope: string) => `keybindings:${scope}`;
 
+// Against the registry, not the defaults: almost every action is unbound out
+// of the box, so a stored override is exactly the interesting case and must
+// not be discarded for missing from the default map.
 function isHotkeyAction(s: string): s is HotkeyAction {
-  return s in DEFAULT_BINDINGS;
+  return (HOTKEY_ACTIONS as readonly string[]).includes(s);
 }
 
 function isBinding(v: unknown): v is Binding {
@@ -37,7 +41,8 @@ function readOverrides(userDataDir: string): Partial<BindingMap> {
   }
 }
 
-export function getBinding(userDataDir: string, action: HotkeyAction): Binding {
+/** The chord bound to an action, or undefined when the operator bound none. */
+export function getBinding(userDataDir: string, action: HotkeyAction): Binding | undefined {
   const overrides = readOverrides(userDataDir);
   return overrides[action] ?? DEFAULT_BINDINGS[action];
 }

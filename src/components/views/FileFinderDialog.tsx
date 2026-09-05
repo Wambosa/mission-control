@@ -18,7 +18,7 @@ import {
   flattenFilePathTree,
   type FilePathTreeNode,
 } from "~/lib/file-tree";
-import { listProjectFiles } from "~/lib/project-fs";
+import { listProjectFiles, type ProjectFsScope } from "~/lib/project-fs";
 import {
   readCachedFileFinderView,
   writeCachedFileFinderView,
@@ -31,12 +31,15 @@ type FileFinderViewMode = FileFinderView;
 export function FileFinderDialog({
   open,
   projectRoot,
+  scope,
   resetKey = 0,
   onClose,
   onPick,
 }: {
   open: boolean;
   projectRoot: string;
+  /** Which machine this project's files live on, and where. */
+  scope: ProjectFsScope;
   resetKey?: number;
   onClose: () => void;
   onPick: (relPath: string) => void;
@@ -55,10 +58,10 @@ export function FileFinderDialog({
 
   // Lazy: only fetch the file list when the dialog is opened.
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["files:list", projectRoot],
+    queryKey: ["files:list", projectRoot, scope],
     queryFn: async () => {
       // Routes to the in-container clone (remoteFs) when Terminal runtime = Docker.
-      const r = await listProjectFiles(projectRoot);
+      const r = await listProjectFiles(projectRoot, scope);
       if (!r.ok) throw new Error(r.error);
       return r.files;
     },

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { GroupsDialog } from "~/components/views/GroupsDialog";
 import { api } from "~/lib/api";
-import { queryKeys, useGroups, useScopedProjects } from "~/queries";
+import { queryKeys, useGroups, useProjects } from "~/queries";
 import type { Group } from "~/db/schema";
 
 type Ctx = {
@@ -22,7 +22,7 @@ export function GroupsDialogProvider({ children }: { children: React.ReactNode }
   const [isOpen, setIsOpen] = useState(false);
   const queryClient = useQueryClient();
   const { data: groups = [] } = useGroups();
-  const { data: projects = [] } = useScopedProjects();
+  const { data: projects = [] } = useProjects();
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => setIsOpen(false), []);

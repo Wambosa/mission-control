@@ -1,6 +1,6 @@
 // web-tree-sitter loader for the code-graph indexer. Loads the grammar `.wasm`
 // files (bundled as assets — dev vs packaged path resolution mirrors
-// bundled-skills-path.ts / whisper-server.ts) and hands back a parser per
+// bundled-skills-path.ts) and hands back a parser per
 // language. web-tree-sitter itself is externalized from the SSR bundle (see
 // vite.config.ts `ssr.external`) so its emscripten glue loads intact from
 // node_modules and its own runtime wasm resolves normally; we only need to

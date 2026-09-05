@@ -3,16 +3,10 @@ import { relations } from "drizzle-orm";
 import {
   DEFAULT_BRANCH,
   DEFAULT_TASK_STATUS,
-  LAUNCH_COMMANDS_MAX,
-  CUSTOM_SCRIPTS_MAX,
   TASK_AGENTS,
   TASK_STATUSES,
-  parseLaunchCommands,
-  parseCustomScripts,
   isActiveStatus,
   isTerminalStatus,
-  type LaunchCommand,
-  type CustomScript,
   type TaskAgent,
   type TaskStatus,
 } from "~/shared/domain";
@@ -89,13 +83,13 @@ export const projects = sqliteTable(
     // everything" delete semantics. `path` is host-absolute for Local projects and
     // an in-container workspace path for sandboxed projects.
     sandboxId: text("sandbox_id").references(() => sandboxes.id, { onDelete: "cascade" }),
+    // Where this project lives on its SSH host — configuration, not a guess
+    // from the local folder name. Null for a Local project (and for a project
+    // whose host has not been configured yet).
+    remoteDirectory: text("remote_directory"),
     pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
     pinnedOrder: integer("pinned_order"),
     branch: text("branch").notNull().default(DEFAULT_BRANCH),
-    launchCommands: text("launch_commands"),
-    customScripts: text("custom_scripts"),
-    launchUrl: text("launch_url"),
-    worktreeSetupCommand: text("worktree_setup_command"),
     rememberAgentSettings: integer("remember_agent_settings", { mode: "boolean" })
       .notNull()
       .default(false),
@@ -163,6 +157,10 @@ export const tasks = sqliteTable(
     claudeSessionId: text("claude_session_id"),
     claudeSkipPermissions: integer("claude_skip_permissions", { mode: "boolean" }).notNull().default(false),
     claudeBareSession: integer("claude_bare_session", { mode: "boolean" }).notNull().default(false),
+    // Where this session's agent last reported working, from its lifecycle
+    // hook. The session header resolves this against the project's worktrees;
+    // null until the first event, and for sessions that predate the column.
+    agentCwd: text("agent_cwd"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
@@ -471,26 +469,6 @@ export const graphFiles = sqliteTable(
   })
 );
 
-// Scratch pads — per-project temporary text buffers. A lightweight place to
-// paste text while working; listed newest-first in the top-bar dropdown and
-// cascades away with the project. Title is derived client-side from content.
-export const scratchPads = sqliteTable(
-  "scratch_pads",
-  {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    content: text("content").notNull().default(""),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (t) => ({
-    projectIdx: index("scratch_pads_project_idx").on(t.projectId),
-    projectUpdatedIdx: index("scratch_pads_project_updated_idx").on(t.projectId, t.updatedAt),
-  })
-);
-
 export const groupsRelations = relations(groups, ({ many }) => ({
   projects: many(projects),
 }));
@@ -529,10 +507,6 @@ export const projectMemoryRelations = relations(projectMemory, ({ one }) => ({
   sourceTask: one(tasks, { fields: [projectMemory.sourceTaskId], references: [tasks.id] }),
 }));
 
-export const scratchPadsRelations = relations(scratchPads, ({ one }) => ({
-  project: one(projects, { fields: [scratchPads.projectId], references: [projects.id] }),
-}));
-
 export const graphNodesRelations = relations(graphNodes, ({ one }) => ({
   project: one(projects, { fields: [graphNodes.projectId], references: [projects.id] }),
 }));
@@ -568,8 +542,6 @@ export type Prompt = typeof prompts.$inferSelect;
 export type NewPrompt = typeof prompts.$inferInsert;
 export type ProjectMemory = typeof projectMemory.$inferSelect;
 export type NewProjectMemory = typeof projectMemory.$inferInsert;
-export type ScratchPad = typeof scratchPads.$inferSelect;
-export type NewScratchPad = typeof scratchPads.$inferInsert;
 export type GraphNode = typeof graphNodes.$inferSelect;
 export type NewGraphNode = typeof graphNodes.$inferInsert;
 export type GraphEdge = typeof graphEdges.$inferSelect;
@@ -579,13 +551,9 @@ export type NewGraphFile = typeof graphFiles.$inferInsert;
 export {
   DEFAULT_BRANCH,
   DEFAULT_TASK_STATUS,
-  LAUNCH_COMMANDS_MAX,
-  CUSTOM_SCRIPTS_MAX,
   TASK_AGENTS,
   TASK_STATUSES,
-  parseLaunchCommands,
-  parseCustomScripts,
   isActiveStatus,
   isTerminalStatus,
 };
-export type { LaunchCommand, CustomScript, TaskAgent, TaskStatus };
+export type { TaskAgent, TaskStatus };

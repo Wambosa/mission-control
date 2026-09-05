@@ -138,7 +138,6 @@ run(process.execPath, [join(REPO_ROOT, "scripts", "publish-release.mjs"), "prepa
 
 if (!skipBuild) {
   // Common build steps once.
-  run("pnpm", ["setup:whisper"]);
   run("pnpm", ["build"]);
   run("pnpm", ["native:electron"]);
 }

@@ -51,9 +51,11 @@ export function UserTerminalPanel() {
     hiddenIds,
     toggleHidden,
     renameTerminal,
-    updateLaunchUrl,
     setPtyId,
   } = useUserTerminals();
+  // Which machine these terminals open on: the project's own host. A dashboard
+  // terminal has no project, so it opens on this machine.
+  const terminalScopeId = homeActive ? null : project?.sandboxId ?? null;
 
   // The panel is shared by project terminals and project-less "home" (dashboard)
   // terminals; `active` is true whenever either scope is current.
@@ -544,12 +546,13 @@ export function UserTerminalPanel() {
                     terminal={s.terminal}
                     ptyId={s.ptyId}
                     cwd={s.terminal.cwd || project?.path || ""}
+                    sandboxId={terminalScopeId}
+                    remoteDirectory={project?.remoteDirectory ?? null}
                     isHome={homeActive}
                     focused={focusedId === s.terminal.id}
                     onFocus={() => focusTerminal(s.terminal.id)}
                     onPtyReady={(ptyId) => setPtyId(s.terminal.id, ptyId)}
                     onPtyExit={() => setPtyId(s.terminal.id, null)}
-                    onLaunchUrlDetected={updateLaunchUrl}
                     onHide={() => toggleHidden(s.terminal.id)}
                     onDelete={() => void killTerminal(s.terminal.id)}
                     onRename={(name) => void renameTerminal(s.terminal.id, name)}

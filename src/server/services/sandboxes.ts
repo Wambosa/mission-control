@@ -3,7 +3,6 @@ import { MAX_TCP_PORT } from "~/shared/tcp-port";
 import { safeJsonParse } from "~/shared/safe-json";
 import {
   DEFAULT_SSH_IDLE_WINDOW_MINUTES,
-  LOCAL_SCOPE_ID,
   normalizeRemoteAgentUrl,
   parseSandboxImageProvenance,
   parseSshHostConfig,
@@ -12,7 +11,7 @@ import {
   type SandboxRemoteConfig,
 } from "~/shared/sandbox";
 import type { SshHostPlatform } from "~/shared/ssh-provision";
-import { ACTIVE_SCOPE_KEY, SANDBOXES_ENABLED_KEY } from "~/db/migrate-multi-sandbox";
+import { SANDBOXES_ENABLED_KEY } from "~/db/migrate-multi-sandbox";
 import { randomUUID } from "node:crypto";
 import {
   deleteSandboxRow,
@@ -21,22 +20,22 @@ import {
   insertSandbox,
   updateSandboxRow,
 } from "../repositories/sandboxes.repo";
-import { findProjectIdsBySandboxId } from "../repositories/projects.repo";
+import { findProjectIdsBySandboxId, updateProjectRow } from "../repositories/projects.repo";
 import { deleteTasksByScope } from "../repositories/tasks.repo";
 import { deleteUserTerminalsByScope } from "../repositories/user-terminals.repo";
 import { deleteHomeTerminalsByScope } from "../repositories/home-terminals.repo";
 import { events } from "../events";
 import { deleteAllProjectImagesFor } from "./project-images";
-import { getSetting, setBooleanSetting, setSetting } from "./settings";
+import { setBooleanSetting } from "./settings";
 
 // CRUD + scope-selection for sandboxes (isolated execution environments). The
-// container lifecycle is owned by the Electron main; Phase 1 manages only the
-// model + the active-scope/enabled UI state. See docs/multi-sandbox-plan.md.
+// container lifecycle is owned by the Electron main; this layer manages only
+// the model. A project names its own host, so there is no application-wide
+// scope for it to keep.
 
 export type SandboxState = {
   sandboxes: SandboxPublicView[];
   enabled: boolean;
-  activeScopeId: string;
 };
 
 const CONFIG_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -110,12 +109,7 @@ function toPublicSandbox(row: Sandbox): SandboxPublicView {
  *  selected scope (self-heals a dangling scope whose sandbox was deleted). */
 export function getSandboxState(): SandboxState {
   const list = findAllSandboxes();
-  let activeScopeId = getSetting(ACTIVE_SCOPE_KEY) ?? LOCAL_SCOPE_ID;
-  if (activeScopeId !== LOCAL_SCOPE_ID && !list.some((s) => s.id === activeScopeId)) {
-    activeScopeId = LOCAL_SCOPE_ID;
-    setSetting(ACTIVE_SCOPE_KEY, activeScopeId);
-  }
-  return { sandboxes: list.map(toPublicSandbox), enabled: true, activeScopeId };
+  return { sandboxes: list.map(toPublicSandbox), enabled: true };
 }
 
 export type ConnectRemoteSandboxInput = {
@@ -176,8 +170,8 @@ export function connectRemoteSandbox(
       updatedAt: now,
     });
   }
-  // Mirror the deploy CLI: registering a sandbox turns the scope switcher on so
-  // the new row is immediately reachable.
+  // Mirror the deploy CLI: registering a sandbox turns sandbox support on so
+  // the new row is immediately selectable as a project's host.
   setBooleanSetting(SANDBOXES_ENABLED_KEY, true);
   const row = findSandboxById(id);
   // The row was just written; a miss is a server fault, not a bad request.
@@ -299,32 +293,53 @@ export function updateSandbox(id: string, patch: UpdateSandboxPatch): SandboxPub
   return next ? toPublicSandbox(next) : null;
 }
 
-/** Destroys the sandbox row (cascade-deleting its projects). Call
- *  `electron.sandbox.destroy` before this so container/volume teardown still
- *  has the persisted config. */
+/**
+ * Removes a sandbox. What that means to its projects depends on what the
+ * sandbox is:
+ *
+ * - A managed remote VM *contains* the project — Mission Control created it in
+ *   there — so tearing the VM down takes the project with it (the FK cascades).
+ * - An SSH host merely *runs* a project the user already had on disk. Removing
+ *   the host must not take their project with it, so the binding is cleared
+ *   first: the project falls back to Local, stated plainly, with no dangling
+ *   reference to a machine that is gone.
+ *
+ * Call `electron.sandbox.destroy` before this so container/volume teardown
+ * still has the persisted config.
+ */
 export function deleteSandbox(id: string): boolean {
-  if (!findSandboxById(id)) return false;
+  const sandbox = findSandboxById(id);
+  if (!sandbox) return false;
 
-  for (const projectId of findProjectIdsBySandboxId(id)) {
-    deleteAllProjectImagesFor(projectId);
-    events.emit("project:deleted", { id: projectId });
+  if (sandbox.kind === "ssh-host") {
+    for (const projectId of findProjectIdsBySandboxId(id)) {
+      updateProjectRow(projectId, {
+        sandboxId: null,
+        remoteDirectory: null,
+        updatedAt: Date.now(),
+      });
+      events.emit("project:updated", { id: projectId });
+    }
+    // The project survives, so its history survives with it. A session's
+    // scope_id is the record of where it ran, not a pointer that has to
+    // resolve — the session list stopped filtering by it, and there is no
+    // foreign key to cascade. Deleting the rows here would keep the project
+    // and silently destroy every session ever run on the host.
+  } else {
+    for (const projectId of findProjectIdsBySandboxId(id)) {
+      deleteAllProjectImagesFor(projectId);
+      events.emit("project:deleted", { id: projectId });
+    }
+    // A managed VM contained its projects, and they go with it, so their
+    // sessions and terminals have nothing left to belong to.
+    deleteTasksByScope(id);
+    deleteUserTerminalsByScope(id);
   }
-  deleteTasksByScope(id);
-  deleteUserTerminalsByScope(id);
+  // Home terminals belong to no project either way: they are shells opened on
+  // the machine itself, and the machine is going.
   deleteHomeTerminalsByScope(id);
 
-  const removed = deleteSandboxRow(id) > 0;
-  if (removed && getSetting(ACTIVE_SCOPE_KEY) === id) {
-    setSetting(ACTIVE_SCOPE_KEY, LOCAL_SCOPE_ID);
-  }
-  return removed;
-}
-
-export function setActiveScope(scopeId: string): string {
-  const resolved =
-    scopeId === LOCAL_SCOPE_ID || findSandboxById(scopeId) ? scopeId : LOCAL_SCOPE_ID;
-  setSetting(ACTIVE_SCOPE_KEY, resolved);
-  return resolved;
+  return deleteSandboxRow(id) > 0;
 }
 
 export function setSandboxesEnabled(_enabled: boolean): void {

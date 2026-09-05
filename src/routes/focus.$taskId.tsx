@@ -179,7 +179,6 @@ function FocusSessionPage() {
             void queryClient.invalidateQueries({
               queryKey: queryKeys.tasks(
                 p.id,
-                p.activeWorktreeId ?? null,
                 p.activeRuntimeScopeId ?? LOCAL_SCOPE_ID,
               ),
             });
@@ -455,7 +454,6 @@ function ScopeTaskSync({
 }) {
   const { data: tasks } = useTasks(
     project.id,
-    project.activeWorktreeId ?? null,
     project.activeRuntimeScopeId ?? LOCAL_SCOPE_ID,
   );
   useEffect(() => {

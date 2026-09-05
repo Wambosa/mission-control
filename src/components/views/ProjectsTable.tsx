@@ -15,7 +15,6 @@ import {
   type ProjectSortColumn,
   type ProjectSortState,
 } from "~/lib/sort-projects";
-import { useUserTerminals } from "~/lib/user-terminal-store";
 import {
   getProjectActivity,
   isProjectActive,
@@ -43,21 +42,11 @@ export function ProjectsTable({
   onOpen: (id: string) => void;
   onTogglePin: (id: string) => void;
 }) {
-  const { hasRunningLaunchForProject } = useUserTerminals();
   const [sort, setSort] = useState<ProjectSortState>(DEFAULT_PROJECT_SORT);
   const groupById = useMemo(() => new Map(groups.map((group) => [group.id, group])), [groups]);
-  const launchRunningProjectIds = useMemo(
-    () =>
-      new Set(
-        projects
-          .filter((project) => hasRunningLaunchForProject(project.id, project.launchCommands))
-          .map((project) => project.id),
-      ),
-    [projects, hasRunningLaunchForProject],
-  );
   const sortedProjects = useMemo(
-    () => sortProjects(projects, groups, sort, launchRunningProjectIds),
-    [projects, groups, sort, launchRunningProjectIds],
+    () => sortProjects(projects, groups, sort),
+    [projects, groups, sort],
   );
 
   const handleSort = (column: ProjectSortColumn) => {
@@ -94,7 +83,7 @@ export function ProjectsTable({
           </thead>
           <tbody>
             {sortedProjects.map((project) => {
-              const activity = getProjectActivity(project, launchRunningProjectIds);
+              const activity = getProjectActivity(project);
               const active = isProjectActive(activity);
               const group = project.groupId ? groupById.get(project.groupId) : null;
               const totalShown = TASK_STATUSES.reduce(

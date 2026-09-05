@@ -2,6 +2,7 @@ import type { HomeTerminal, UserTerminal } from "~/db/schema";
 import {
   deleteHomeTerminalRow,
   findHomeTerminalById,
+  findAllHomeTerminals,
   findHomeTerminalsByScope,
   insertHomeTerminal,
   toUserTerminal,
@@ -12,8 +13,8 @@ import { normalizeScopeId } from "~/shared/sandbox";
 import { newId } from "./_ids";
 import { nextTerminalName } from "./_terminal-names";
 
-export function listHomeTerminals(scopeId?: string | null): UserTerminal[] {
-  return findHomeTerminalsByScope(normalizeScopeId(scopeId)).map(toUserTerminal);
+export function listHomeTerminals(): UserTerminal[] {
+  return findAllHomeTerminals().map(toUserTerminal);
 }
 
 export function createHomeTerminal(input: {

@@ -2,7 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { api } from "~/lib/api";
 import { queryKeys } from "~/queries";
 import type { RemoteVmDeployInput, RemoteVmDeployJobSnapshot } from "~/shared/electron-contract";
-import { LOCAL_SCOPE_ID, type RemoteVmLifecycleStatus, type SandboxPublicView } from "~/shared/sandbox";
+import type { RemoteVmLifecycleStatus, SandboxPublicView } from "~/shared/sandbox";
 
 export type SandboxesQueryData = Awaited<ReturnType<typeof api.listSandboxes>>;
 
@@ -109,18 +109,13 @@ export function buildOptimisticRemoteVmSandboxFromDeployJob(
   });
 }
 
-export function upsertSandboxInCache(
-  queryClient: QueryClient,
-  sandbox: SandboxPublicView,
-  options: { activate?: boolean } = {},
-) {
+export function upsertSandboxInCache(queryClient: QueryClient, sandbox: SandboxPublicView) {
   queryClient.setQueryData<SandboxesQueryData>(queryKeys.sandboxes, (current) => {
-    const base = current ?? { sandboxes: [], enabled: true, activeScopeId: LOCAL_SCOPE_ID };
+    const base = current ?? { sandboxes: [], enabled: true };
     const exists = base.sandboxes.some((item) => item.id === sandbox.id);
     return {
       ...base,
       enabled: true,
-      activeScopeId: options.activate ? sandbox.id : base.activeScopeId,
       sandboxes: exists
         ? base.sandboxes.map((item) =>
             item.id === sandbox.id ? mergeSandboxPublicView(item, sandbox) : item,
@@ -130,20 +125,12 @@ export function upsertSandboxInCache(
   });
 }
 
-export function removeSandboxFromCache(
-  queryClient: QueryClient,
-  sandboxId: string,
-  options: { switchActiveToLocal?: boolean } = {},
-) {
+export function removeSandboxFromCache(queryClient: QueryClient, sandboxId: string) {
   queryClient.setQueryData<SandboxesQueryData>(queryKeys.sandboxes, (current) => {
     if (!current) return current;
-    const sandboxes = current.sandboxes.filter((sandbox) => sandbox.id !== sandboxId);
-    const switchActive =
-      options.switchActiveToLocal && current.activeScopeId === sandboxId;
     return {
       ...current,
-      activeScopeId: switchActive ? LOCAL_SCOPE_ID : current.activeScopeId,
-      sandboxes,
+      sandboxes: current.sandboxes.filter((sandbox) => sandbox.id !== sandboxId),
     };
   });
 }
@@ -167,7 +154,6 @@ export function updateSandboxRemoteStatusInCache(
     remoteStatusMessage?: string | null;
     remotePublicAddress?: string | null;
   },
-  options: { switchActiveToLocal?: boolean } = {},
 ) {
   queryClient.setQueryData<SandboxesQueryData>(queryKeys.sandboxes, (current) => {
     if (!current) return current;
@@ -190,28 +176,15 @@ export function updateSandboxRemoteStatusInCache(
       };
     });
     if (!found) return current;
-    return {
-      ...current,
-      activeScopeId:
-        options.switchActiveToLocal && current.activeScopeId === sandboxId
-          ? LOCAL_SCOPE_ID
-          : current.activeScopeId,
-      sandboxes,
-    };
+    return { ...current, sandboxes };
   });
 }
 
-export function markSandboxStoppingInCache(
-  queryClient: QueryClient,
-  sandboxId: string,
-  options: { switchActiveToLocal?: boolean } = {},
-) {
-  updateSandboxRemoteStatusInCache(
-    queryClient,
-    sandboxId,
-    { remoteStatus: "pausing", remoteStatusMessage: null },
-    options,
-  );
+export function markSandboxStoppingInCache(queryClient: QueryClient, sandboxId: string) {
+  updateSandboxRemoteStatusInCache(queryClient, sandboxId, {
+    remoteStatus: "pausing",
+    remoteStatusMessage: null,
+  });
 }
 
 export function markSandboxStoppedInCache(queryClient: QueryClient, sandboxId: string) {
@@ -226,17 +199,14 @@ export function markSandboxStoppedInCache(queryClient: QueryClient, sandboxId: s
  * Merge a fresh server read with the optimistic rows of in-flight deploys.
  *
  * A managed-remote deploy only writes its sandbox row to SQLite partway through
- * (after the cloud instance is running), and never switches the *server's* active
- * scope until it succeeds. So a plain refetch mid-deploy would drop the optimistic
- * row and reset the active scope back to Local — making the just-created sandbox
- * vanish from the dropdown and closing its logs modal. This keeps any pending
- * sandbox visible (and selected, if it was the optimistic active scope) until the
- * server catches up.
+ * (after the cloud instance is running), so a plain refetch mid-deploy would
+ * drop the optimistic row — making the just-created sandbox vanish from the
+ * list and closing its logs modal. This keeps any pending sandbox visible until
+ * the server catches up.
  */
 export function mergeServerSandboxesPreservingPending(
   server: SandboxesQueryData,
   pending: SandboxPublicView[],
-  clientActiveScopeId: string | null | undefined,
 ): SandboxesQueryData {
   const pendingById = new Map(pending.map((p) => [p.id, p]));
   const serverIds = new Set(server.sandboxes.map((s) => s.id));
@@ -250,15 +220,9 @@ export function mergeServerSandboxesPreservingPending(
     // Rows the deploy hasn't persisted yet stay visible as optimistic placeholders.
     ...pending.filter((p) => !serverIds.has(p.id)),
   ];
-  const sandboxIds = new Set(sandboxes.map((s) => s.id));
-  const preserveActive =
-    clientActiveScopeId != null &&
-    clientActiveScopeId !== LOCAL_SCOPE_ID &&
-    (pendingById.has(clientActiveScopeId) || sandboxIds.has(clientActiveScopeId));
   return {
     ...server,
     enabled: server.enabled || pending.length > 0,
     sandboxes,
-    activeScopeId: preserveActive ? clientActiveScopeId : server.activeScopeId,
   };
 }

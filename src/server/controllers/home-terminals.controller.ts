@@ -19,9 +19,8 @@ const renameHomeTerminalBody = z.object({
   name: z.string().min(1, "name required"),
 });
 
-export async function listAll(request: Request): Promise<Response> {
-  const scopeId = new URL(request.url).searchParams.get("scopeId");
-  return json({ terminals: listHomeTerminals(scopeId) });
+export async function listAll(): Promise<Response> {
+  return json({ terminals: listHomeTerminals() });
 }
 
 export async function create(request: Request): Promise<Response> {

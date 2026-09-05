@@ -8,7 +8,6 @@ import { ShimmerBar } from "~/components/ui/ShimmerBar";
 import { StatusDot, StatusPill } from "~/components/ui/StatusDot";
 import { ProjectStatusBadge } from "~/components/ui/ProjectStatusBadge";
 import { TASK_STATUSES } from "~/shared/domain";
-import { useUserTerminals } from "~/lib/user-terminal-store";
 import { getProjectActivity, isProjectActive, type ProjectWithCounts } from "~/shared/projects";
 import type { Group } from "~/db/schema";
 
@@ -33,11 +32,7 @@ export function ProjectCard({
   onMoveToGroup: (groupId: string | null) => void | Promise<void>;
 }) {
   const counts = project.taskCounts;
-  const { hasRunningLaunchForProject } = useUserTerminals();
-  const launchRunningProjectIds = hasRunningLaunchForProject(project.id, project.launchCommands)
-    ? new Set([project.id])
-    : new Set<string>();
-  const activity = getProjectActivity(project, launchRunningProjectIds);
+  const activity = getProjectActivity(project);
   const hasActivity = isProjectActive(activity);
   const totalShown = TASK_STATUSES.reduce((a, s) => a + counts[s], 0);
   const [hovered, setHovered] = useState(false);

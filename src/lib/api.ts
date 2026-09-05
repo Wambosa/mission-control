@@ -2,19 +2,7 @@ import type { Group, Project, Task, UserTerminal } from "~/db/schema";
 import type { TaskAgent, TaskStatus } from "~/shared/domain";
 import type { ProjectPathStatus, ProjectWithCounts } from "~/shared/projects";
 import { DEV_SERVER_ORIGIN } from "~/shared/dev-server";
-import type {
-  CommitResult,
-  CreatePullRequestResult,
-  FetchResult,
-  GitBranch,
-  GitBranchesResult,
-  GitCheckoutResult,
-  GitDiff,
-  GitStatus,
-  PullResult,
-  PushResult,
-} from "~/server/services/git";
-export type { GitBranch, GitBranchesResult, GitCheckoutResult };
+import type { GitDiff, GitStatus } from "~/server/services/git";
 import type { Binding, BindingMap, HotkeyAction } from "~/lib/keybindings/types";
 import type { AccentColorId } from "~/lib/accent-colors";
 import type { UsageSummary } from "~/shared/token-usage";
@@ -25,7 +13,6 @@ import type { AgentAccountStatus, AgentLatestVersion } from "~/shared/agent-laun
 import type { PendingQuestion } from "~/shared/agent-questions";
 import type { PromptSearchResponse } from "~/shared/prompts";
 import type { WorktreeInfo } from "~/shared/worktrees";
-import type { CommitCli, CommitCliDetection } from "~/shared/commit-cli";
 import type {
   AiModelId,
   AiRuntimeHarness,
@@ -34,7 +21,6 @@ import type {
 import type {
   GitDiffChangedFilesView,
   ProjectsDashboardView,
-  SelectedWorktreeByProject,
 } from "~/shared/ui-preferences";
 import type { TerminalZoomLevel } from "~/shared/terminal-zoom";
 import type {
@@ -63,8 +49,6 @@ import type {
   GraphStatus,
   GraphSummary,
 } from "~/shared/code-graph";
-import type { ScratchPadView } from "~/shared/scratch-pads";
-import type { VoiceCommandAliases } from "~/shared/voice-command-aliases";
 import type { SessionHeaderButtonVisibility } from "~/shared/session-header-buttons";
 import type { HeaderButtonVisibility } from "~/shared/header-buttons";
 import type { PetHomeSide, PetPersistentState } from "~/shared/pet";
@@ -120,8 +104,6 @@ export type AppSettings = {
   automaticUpdateInstallOnQuitEnabled: boolean;
   /** Git worktrees per project (always on). */
   worktreesEnabled: boolean;
-  /** Legacy compatibility field; push-to-talk is always enabled on desktop. */
-  voiceControlEnabled: boolean;
   /** Legacy compatibility field; native Claude Code question popups are always enabled. */
   questionOverlayEnabled: boolean;
   gitDiffChangedFilesView: GitDiffChangedFilesView | null;
@@ -135,12 +117,6 @@ export type AppSettings = {
   activeProjectGroup: string | null;
   /** Collapsed dashboard section keys — group ids plus "pinned"/"ungrouped". */
   collapsedProjectGroups: string[] | null;
-  selectedWorktreeByProject: SelectedWorktreeByProject | null;
-  /**
-   * Which CLI generates Ship's commit message. `null` means "not set yet" —
-   * the server auto-detects and seeds it on the first ship attempt.
-   */
-  commitCli: CommitCli | null;
   /** Default terminal text zoom (-2 … +2). Per-pane overrides live in localStorage. */
   terminalZoomLevel: TerminalZoomLevel;
   /** Terminal font face; `null` = the active theme's bundled face. */
@@ -168,43 +144,18 @@ export type AppSettings = {
    */
   headerButtons: HeaderButtonVisibility;
   /**
-   * Default harness/model for voice-started agents when the command doesn't name one.
-   * `null` means "not set" — don't pass a model flag, so the CLI uses its own default.
+   * Default harness/model applied to a new agent session. `null` means
+   * "not set" — don't pass a model flag, so the CLI uses its own default.
    */
   defaultAgent: AiRuntimeHarness;
   defaultModel: AiModelId | null;
   /**
    * Model used by the markdown-preview "Refine" action (rewrites a .md file from
    * reviewer annotations). `null` means "not set" — the selected CLI uses its own
-   * default. Independent from `defaultModel` (voice agents).
+   * default. Independent from `defaultModel`.
    */
   annotationAgent: AiRuntimeHarness;
   annotationModel: AiModelId | null;
-  /**
-   * Harness/model/prompt for the Ship button, which opens an AI session to push
-   * and sync with remote (pull/rebase/conflict fix when needed).
-   */
-  shipAgent: AiRuntimeHarness;
-  shipModel: AiModelId | null;
-  shipPrompt: string;
-  /**
-   * Harness/model/prompt for the branch Sync split-button, which opens an AI
-   * session to pull upstream changes into the current branch (stash/commit,
-   * conflict resolution, stash-pop). Mirrors the Ship trio.
-   */
-  syncAgent: AiRuntimeHarness;
-  syncModel: AiModelId | null;
-  syncPrompt: string;
-  /**
-   * Harness/model/prompt for the Ship split-button's Create PR action, which
-   * opens an AI session to commit/push, sync with upstream, then open a pull
-   * request in the browser. Mirrors the Ship trio.
-   */
-  pullRequestAgent: AiRuntimeHarness;
-  pullRequestModel: AiModelId | null;
-  pullRequestPrompt: string;
-  /** User-defined phrases that map to built-in voice commands. */
-  voiceCommandAliases: VoiceCommandAliases;
   /**
    * Show Claude Code's live session (5h) + weekly usage limits in the top bar.
    * Off by default — enabling it makes the app fetch usage from Anthropic using
@@ -397,11 +348,6 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  updateProjectLaunchUrl: (id: string, launchUrl: string | null) =>
-    req<{ project: Project }>(`/api/projects/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ launchUrl }),
-    }),
   togglePin: (id: string) =>
     req<{ project: Project }>(`/api/projects/${id}`, {
       method: "PATCH",
@@ -420,7 +366,7 @@ export const api = {
   // Sandboxes (isolated execution scopes). Desktop-only; on web this returns a
   // disabled, empty state.
   listSandboxes: () =>
-    req<{ sandboxes: SandboxPublicView[]; enabled: boolean; activeScopeId: string }>("/api/sandboxes"),
+    req<{ sandboxes: SandboxPublicView[]; enabled: boolean }>("/api/sandboxes"),
   connectSandbox: (input: {
     name: string;
     agentUrl: string;
@@ -457,11 +403,6 @@ export const api = {
   },
   revealSandboxApiKey: (id: string) =>
     req<{ apiKey: string }>(`/api/sandboxes/${id}/api-key`),
-  setActiveScope: (scopeId: string) =>
-    req<{ activeScopeId: string }>("/api/sandboxes/active", {
-      method: "PUT",
-      body: JSON.stringify({ scopeId }),
-    }),
   setSandboxesEnabled: (enabled: boolean) =>
     req<{ enabled: boolean }>("/api/sandboxes/enabled", {
       method: "PUT",
@@ -470,34 +411,9 @@ export const api = {
 
   listWorktrees: (projectId: string) =>
     req<{ worktrees: WorktreeInfo[] }>(`/api/projects/${projectId}/worktrees`),
-  createWorktree: (projectId: string) =>
-    req<{ worktree: WorktreeInfo; setupCommand: string | null }>(
-      `/api/projects/${projectId}/worktrees`,
-      { method: "POST" },
-    ),
-  deleteWorktree: async (
-    projectId: string,
-    worktreeId: string,
-    opts: { force?: boolean; stashChanges?: boolean } = {},
-  ) => {
-    const params = new URLSearchParams();
-    if (opts.force) params.set("force", "true");
-    if (opts.stashChanges) params.set("stashChanges", "true");
-    const queryString = params.toString();
-    const query = queryString ? `?${queryString}` : "";
-    await req<void>(
-      `/api/projects/${projectId}/worktrees/${encodeURIComponent(worktreeId)}${query}`,
-      {
-        method: "DELETE",
-        body: JSON.stringify(opts),
-      },
-    );
-    pruneStoredSessionFinishNotifications({
-      type: "worktree",
-      projectId,
-      worktreeId,
-    });
-  },
+  // Creating and deleting worktrees is the agent's job now — the interface
+  // offers no control for it, so the client keeps no wrapper. The HTTP routes
+  // stay: they are the API, not the interface.
 
   // Recall — project memory.
   listMemory: (projectId: string, opts: { includeArchived?: boolean } = {}) =>
@@ -541,22 +457,6 @@ export const api = {
   // Preview the brief a new session in this project would get (no usage bump).
   getProjectBrief: (projectId: string) =>
     req<{ brief: string; memoryIds: string[] }>(`/api/projects/${projectId}/brief`),
-
-  // Scratch pads — per-project temporary text buffers.
-  listScratchPads: (projectId: string) =>
-    req<{ scratchPads: ScratchPadView[] }>(`/api/projects/${projectId}/scratch-pads`),
-  createScratchPad: (projectId: string, body: { content?: string } = {}) =>
-    req<{ scratchPad: ScratchPadView }>(`/api/projects/${projectId}/scratch-pads`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  updateScratchPad: (projectId: string, padId: string, body: { content: string }) =>
-    req<{ scratchPad: ScratchPadView }>(`/api/projects/${projectId}/scratch-pads/${padId}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    }),
-  deleteScratchPad: (projectId: string, padId: string) =>
-    req<void>(`/api/projects/${projectId}/scratch-pads/${padId}`, { method: "DELETE" }),
 
   // Recall — code graph.
   getGraphStatus: (projectId: string) =>
@@ -604,10 +504,8 @@ export const api = {
   deleteGroup: (id: string) =>
     req<void>(`/api/groups/${id}`, { method: "DELETE" }),
 
-  listTasks: (projectId: string, worktreeId?: string | null, scopeId?: string | null) =>
-    req<{ tasks: Task[] }>(
-      `/api/projects/${projectId}/tasks${scopedWorktreeQuery(worktreeId, scopeId)}`,
-    ),
+  listTasks: (projectId: string, scopeId?: string | null) =>
+    req<{ tasks: Task[] }>(`/api/projects/${projectId}/tasks${scopeQuery(scopeId)}`),
   getTask: (id: string) => req<{ task: Task }>(`/api/tasks/${id}`),
   getTaskQuestion: (id: string) =>
     req<{ question: PendingQuestion | null }>(`/api/tasks/${id}/question`),
@@ -687,10 +585,7 @@ export const api = {
 
   // Project-less "home" terminals (the dashboard terminals). Returned shaped as
   // UserTerminal (sentinel projectId) so the same terminal store/panel render them.
-  listHomeTerminals: (scopeId: string) =>
-    req<{ terminals: UserTerminal[] }>(
-      `/api/home/user-terminals?scopeId=${encodeURIComponent(scopeId)}`,
-    ),
+  listHomeTerminals: () => req<{ terminals: UserTerminal[] }>("/api/home/user-terminals"),
   createHomeTerminal: (body: {
     id?: string;
     name?: string;
@@ -747,15 +642,12 @@ export const api = {
         | "automaticUpdateDownloadsEnabled"
         | "automaticUpdateInstallOnQuitEnabled"
         | "worktreesEnabled"
-        | "voiceControlEnabled"
         | "questionOverlayEnabled"
         | "gitDiffChangedFilesView"
         | "gitDiffChangedFilesWidth"
         | "projectsDashboardView"
         | "activeProjectGroup"
         | "collapsedProjectGroups"
-        | "selectedWorktreeByProject"
-        | "commitCli"
         | "terminalZoomLevel"
         | "terminalFontFamily"
         | "terminalFontWeight"
@@ -770,16 +662,6 @@ export const api = {
         | "defaultModel"
         | "annotationAgent"
         | "annotationModel"
-        | "shipAgent"
-        | "shipModel"
-        | "shipPrompt"
-        | "syncAgent"
-        | "syncModel"
-        | "syncPrompt"
-        | "pullRequestAgent"
-        | "pullRequestModel"
-        | "pullRequestPrompt"
-        | "voiceCommandAliases"
         | "claudeUsageLimitsEnabled"
         | "claudeUsageLimitsShowSession"
         | "claudeUsageLimitsShowWeekly"
@@ -816,8 +698,6 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  detectCommitCli: () =>
-    req<{ detected: CommitCliDetection }>("/api/commit-cli/detect"),
   listAiRuntimeModels: (agent: AiRuntimeHarness) =>
     req<AiRuntimeModelsResponse>(
       `/api/ai-runtime/models?agent=${encodeURIComponent(agent)}`,
@@ -825,21 +705,6 @@ export const api = {
 
   getGitStatus: (projectId: string, worktreeId?: string | null) =>
     req<GitStatus>(`/api/projects/${projectId}/git/status${worktreeQuery(worktreeId)}`),
-  getGitBranches: (projectId: string, worktreeId?: string | null) =>
-    req<GitBranchesResult>(`/api/projects/${projectId}/git/branches${worktreeQuery(worktreeId)}`),
-  gitCheckout: (
-    projectId: string,
-    branch: string,
-    opts: { create?: boolean; worktreeId?: string | null } = {},
-  ) =>
-    req<GitCheckoutResult>(`/api/projects/${projectId}/git/checkout`, {
-      method: "POST",
-      body: JSON.stringify({
-        branch,
-        create: opts.create,
-        worktreeId: opts.worktreeId ?? null,
-      }),
-    }),
   getGitDiff: (projectId: string, file: string, staged: boolean, worktreeId?: string | null) =>
     req<GitDiff>(
       `/api/projects/${projectId}/git/diff?file=${encodeURIComponent(file)}&staged=${staged ? "1" : "0"}${worktreeId ? `&worktreeId=${encodeURIComponent(worktreeId)}` : ""}`,
@@ -853,47 +718,6 @@ export const api = {
     req<{ ok: true }>(`/api/projects/${projectId}/git/unstage`, {
       method: "POST",
       body: JSON.stringify({ files, worktreeId: worktreeId ?? null }),
-    }),
-  gitCommit: (
-    projectId: string,
-    opts: {
-      autoStage?: boolean;
-      worktreeId?: string | null;
-      /**
-       * When supplied, the server skips CLI generation entirely and commits
-       * with this literal message. Used by the ship-failed dialog's manual
-       * recovery path.
-       */
-      message?: string;
-    } = {},
-  ) =>
-    req<CommitResult>(`/api/projects/${projectId}/git/commit`, {
-      method: "POST",
-      body: JSON.stringify(opts),
-    }),
-  gitPush: (projectId: string, worktreeId?: string | null) =>
-    req<PushResult>(`/api/projects/${projectId}/git/push`, {
-      method: "POST",
-      body: JSON.stringify({ worktreeId: worktreeId ?? null }),
-    }),
-  gitFetch: (projectId: string, worktreeId?: string | null) =>
-    req<FetchResult>(`/api/projects/${projectId}/git/fetch`, {
-      method: "POST",
-      body: JSON.stringify({ worktreeId: worktreeId ?? null }),
-    }),
-  gitPull: (
-    projectId: string,
-    worktreeId?: string | null,
-    mode: "ff-only" | "rebase" | "merge" = "ff-only",
-  ) =>
-    req<PullResult>(`/api/projects/${projectId}/git/pull`, {
-      method: "POST",
-      body: JSON.stringify({ worktreeId: worktreeId ?? null, mode }),
-    }),
-  gitCreatePullRequest: (projectId: string, worktreeId?: string | null) =>
-    req<CreatePullRequestResult>(`/api/projects/${projectId}/git/create-pr`, {
-      method: "POST",
-      body: JSON.stringify({ worktreeId: worktreeId ?? null }),
     }),
   getUsage: (days: number = 30) =>
     req<UsageSummary>(`/api/usage?days=${days}`),
@@ -942,6 +766,13 @@ export const api = {
 function worktreeQuery(worktreeId?: string | null): string {
   if (worktreeId === undefined) return "";
   return `?worktreeId=${encodeURIComponent(worktreeId || "main")}`;
+}
+
+function scopeQuery(scopeId?: string | null): string {
+  const params = new URLSearchParams();
+  if (scopeId) params.set("scopeId", scopeId);
+  const query = params.toString();
+  return query ? `?${query}` : "";
 }
 
 function scopedWorktreeQuery(worktreeId?: string | null, scopeId?: string | null): string {

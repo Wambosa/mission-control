@@ -26,10 +26,9 @@ export type AgentSpawnRequest = BaseSpawnRequest & {
   agent: TaskAgentSpawn;
   dangerouslySkipPermissions?: boolean;
   shell?: never;
-  // Optional starting prompt written to the agent's stdin once its TUI is ready
-  // (used by voice control to seed a session). This is input DATA, not part of
-  // the spawn command — it never passes through the argv allow-list, exactly
-  // like a user typing into the terminal.
+  // Optional starting prompt written to the agent's stdin once its TUI is
+  // ready. This is input DATA, not part of the spawn command — it never passes
+  // through the argv allow-list, exactly like a user typing into the terminal.
   initialInput?: string;
 };
 

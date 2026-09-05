@@ -12,11 +12,6 @@ import {
   type AccentColorId,
 } from "~/lib/accent-colors";
 import {
-  COMMIT_CLI_VALUES,
-  isCommitCli,
-  type CommitCli,
-} from "~/shared/commit-cli";
-import {
   AI_MODEL_ID_HELP,
   AI_RUNTIME_HARNESS_VALUES,
   isAiRuntimeHarness,
@@ -35,7 +30,6 @@ import {
   normalizeGitDiffChangedFilesView,
   normalizeGitDiffChangedFilesWidth,
   normalizeProjectsDashboardView,
-  normalizeSelectedWorktreeByProject,
 } from "~/shared/ui-preferences";
 import { safeJsonParse } from "~/shared/safe-json";
 import {
@@ -83,11 +77,6 @@ import {
   normalizeTerminalLineHeight,
 } from "~/shared/terminal-appearance";
 import {
-  emptyVoiceCommandAliases,
-  normalizeVoiceCommandAliases,
-  type VoiceCommandAliases,
-} from "~/shared/voice-command-aliases";
-import {
   normalizeSessionHeaderButtonVisibility,
   type SessionHeaderButtonVisibility,
 } from "~/shared/session-header-buttons";
@@ -96,7 +85,6 @@ import {
   type HeaderButtonVisibility,
 } from "~/shared/header-buttons";
 import { readRecallSettings, writeRecallSettings } from "../services/recall-settings";
-import { DEFAULT_SHIP_PROMPT, normalizeShipPrompt } from "~/shared/ship-defaults";
 import {
   DEFAULT_PET_HOME_SIDE,
   isPetHomeSide,
@@ -106,30 +94,14 @@ import {
   type PetHomeSide,
 } from "~/shared/pet";
 import { HTTP_BAD_REQUEST } from "~/shared/http-status";
-import { DEFAULT_SYNC_PROMPT, normalizeSyncPrompt } from "~/shared/sync-defaults";
-import {
-  DEFAULT_PULL_REQUEST_PROMPT,
-  normalizePullRequestPrompt,
-} from "~/shared/pull-request-defaults";
 import { json, jsonError, parseJsonBody } from "./_helpers";
 
-const COMMIT_CLI_SETTING_KEY = "commit_cli";
 const DEFAULT_AGENT_SETTING_KEY = "default_agent";
 const DEFAULT_MODEL_SETTING_KEY = "default_model";
 const ANNOTATION_AGENT_SETTING_KEY = "annotation_agent";
 const ANNOTATION_MODEL_SETTING_KEY = "annotation_model";
-const SHIP_AGENT_SETTING_KEY = "ship_agent";
-const SHIP_MODEL_SETTING_KEY = "ship_model";
-const SHIP_PROMPT_SETTING_KEY = "ship_prompt";
-const SYNC_AGENT_SETTING_KEY = "sync_agent";
-const SYNC_MODEL_SETTING_KEY = "sync_model";
-const SYNC_PROMPT_SETTING_KEY = "sync_prompt";
-const PULL_REQUEST_AGENT_SETTING_KEY = "pull_request_agent";
-const PULL_REQUEST_MODEL_SETTING_KEY = "pull_request_model";
-const PULL_REQUEST_PROMPT_SETTING_KEY = "pull_request_prompt";
 const GIT_DIFF_CHANGED_FILES_VIEW_KEY = "git_diff_changed_files_view";
 const GIT_DIFF_CHANGED_FILES_WIDTH_KEY = "git_diff_changed_files_width";
-const SELECTED_WORKTREE_BY_PROJECT_KEY = "selected_worktree_by_project";
 const PROJECTS_DASHBOARD_VIEW_KEY = "projects_dashboard_view";
 const ACTIVE_PROJECT_GROUP_KEY = "active_project_group";
 const COLLAPSED_PROJECT_GROUPS_KEY = "collapsed_project_groups";
@@ -140,7 +112,6 @@ const THEME_STYLE_KEY = "theme_style";
 const MINIMAL_THEME_KEY = "minimal_theme";
 const SURFACE_TINT_KEY = "surface_tint";
 const BACKGROUND_IMAGE_KEY = "background_image";
-const VOICE_COMMAND_ALIASES_KEY = "voice_command_aliases";
 const CLAUDE_USAGE_LIMITS_ENABLED_KEY = "claude_usage_limits_enabled";
 const CLAUDE_USAGE_LIMITS_SHOW_SESSION_KEY = "claude_usage_limits_show_session";
 const CLAUDE_USAGE_LIMITS_SHOW_WEEKLY_KEY = "claude_usage_limits_show_weekly";
@@ -163,18 +134,6 @@ const INTERFACE_FONT_SCALE_KEY = "interface_font_scale";
 const SHOW_GROUP_SWITCHER_KEY = "show_group_switcher";
 const SHOW_PROJECT_HEADER_GROUP_KEY = "show_project_header_group";
 const SHOW_BACKGROUND_GRID_KEY = "show_background_grid";
-
-const voiceCommandAliasesBody = z.unknown().transform((value, ctx): VoiceCommandAliases => {
-  try {
-    return normalizeVoiceCommandAliases(value);
-  } catch (error) {
-    ctx.addIssue({
-      code: "custom",
-      message: error instanceof Error ? error.message : "invalid voiceCommandAliases",
-    });
-    return z.NEVER;
-  }
-});
 
 const aiModelBody = z.union([z.string(), z.null()]).transform((value, ctx): AiModelId | null => {
   const normalized = normalizeAiModelId(value);
@@ -219,7 +178,6 @@ const updateSettingsBody = z
     automaticUpdateDownloadsEnabled: z.boolean(),
     automaticUpdateInstallOnQuitEnabled: z.boolean(),
     worktreesEnabled: z.boolean(),
-    voiceControlEnabled: z.boolean(),
     questionOverlayEnabled: z.boolean(),
     gitDiffChangedFilesView: z.enum(GIT_DIFF_CHANGED_FILES_VIEWS).nullable(),
     gitDiffChangedFilesWidth: z
@@ -234,8 +192,6 @@ const updateSettingsBody = z
     // live group list and falls back to "all".
     activeProjectGroup: z.string().trim().min(1).max(ACTIVE_PROJECT_GROUP_MAX_LENGTH).nullable(),
     collapsedProjectGroups: z.array(z.string().trim().min(1).max(ACTIVE_PROJECT_GROUP_MAX_LENGTH)).max(500).nullable(),
-    selectedWorktreeByProject: z.record(z.string(), z.string()).nullable(),
-    commitCli: z.union([z.enum(COMMIT_CLI_VALUES), z.null()]),
     terminalZoomLevel: z.number().int().min(TERMINAL_ZOOM_MIN).max(TERMINAL_ZOOM_MAX),
     terminalFontFamily: z
       .string()
@@ -286,18 +242,6 @@ const updateSettingsBody = z
     defaultModel: aiModelBody,
     annotationAgent: z.enum(AI_RUNTIME_HARNESS_VALUES),
     annotationModel: aiModelBody,
-    shipAgent: z.enum(AI_RUNTIME_HARNESS_VALUES),
-    shipModel: aiModelBody,
-    shipPrompt: z.string().transform((value) => normalizeShipPrompt(value)),
-    syncAgent: z.enum(AI_RUNTIME_HARNESS_VALUES),
-    syncModel: aiModelBody,
-    syncPrompt: z.string().transform((value) => normalizeSyncPrompt(value)),
-    pullRequestAgent: z.enum(AI_RUNTIME_HARNESS_VALUES),
-    pullRequestModel: aiModelBody,
-    pullRequestPrompt: z
-      .string()
-      .transform((value) => normalizePullRequestPrompt(value)),
-    voiceCommandAliases: voiceCommandAliasesBody,
     claudeUsageLimitsEnabled: z.boolean(),
     claudeUsageLimitsShowSession: z.boolean(),
     claudeUsageLimitsShowWeekly: z.boolean(),
@@ -355,11 +299,6 @@ function getBackgroundImageSetting(): string | null {
   return isBackgroundImage(value) ? value : null;
 }
 
-function getCommitCliSetting(): CommitCli | null {
-  const value = getSetting(COMMIT_CLI_SETTING_KEY);
-  return isCommitCli(value) ? value : null;
-}
-
 function getDefaultAgentSetting(): AiRuntimeHarness {
   const value = getSetting(DEFAULT_AGENT_SETTING_KEY);
   return isAiRuntimeHarness(value) ? value : "claude-code";
@@ -378,53 +317,6 @@ function getAnnotationAgentSetting(): AiRuntimeHarness {
 function getAnnotationModelSetting(): AiModelId | null {
   const value = getSetting(ANNOTATION_MODEL_SETTING_KEY);
   return normalizeAiModelId(value);
-}
-
-function getShipAgentSetting(): AiRuntimeHarness {
-  const value = getSetting(SHIP_AGENT_SETTING_KEY);
-  return isAiRuntimeHarness(value) ? value : "claude-code";
-}
-
-function getShipModelSetting(): AiModelId | null {
-  const value = getSetting(SHIP_MODEL_SETTING_KEY);
-  return normalizeAiModelId(value);
-}
-
-function getShipPromptSetting(): string {
-  const value = getSetting(SHIP_PROMPT_SETTING_KEY);
-  return value === null ? DEFAULT_SHIP_PROMPT : normalizeShipPrompt(value);
-}
-
-function getSyncAgentSetting(): AiRuntimeHarness {
-  const value = getSetting(SYNC_AGENT_SETTING_KEY);
-  return isAiRuntimeHarness(value) ? value : "claude-code";
-}
-
-function getSyncModelSetting(): AiModelId | null {
-  const value = getSetting(SYNC_MODEL_SETTING_KEY);
-  return normalizeAiModelId(value);
-}
-
-function getSyncPromptSetting(): string {
-  const value = getSetting(SYNC_PROMPT_SETTING_KEY);
-  return value === null ? DEFAULT_SYNC_PROMPT : normalizeSyncPrompt(value);
-}
-
-function getPullRequestAgentSetting(): AiRuntimeHarness {
-  const value = getSetting(PULL_REQUEST_AGENT_SETTING_KEY);
-  return isAiRuntimeHarness(value) ? value : "claude-code";
-}
-
-function getPullRequestModelSetting(): AiModelId | null {
-  const value = getSetting(PULL_REQUEST_MODEL_SETTING_KEY);
-  return normalizeAiModelId(value);
-}
-
-function getPullRequestPromptSetting(): string {
-  const value = getSetting(PULL_REQUEST_PROMPT_SETTING_KEY);
-  return value === null
-    ? DEFAULT_PULL_REQUEST_PROMPT
-    : normalizePullRequestPrompt(value);
 }
 
 function getGitDiffChangedFilesViewSetting() {
@@ -447,11 +339,6 @@ function getCollapsedProjectGroupsSetting() {
   return normalizeCollapsedProjectGroups(
     safeJsonParse<unknown>(getSetting(COLLAPSED_PROJECT_GROUPS_KEY), null),
   );
-}
-
-function getSelectedWorktreeByProjectSetting() {
-  const raw = getSetting(SELECTED_WORKTREE_BY_PROJECT_KEY);
-  return normalizeSelectedWorktreeByProject(safeJsonParse<unknown>(raw, null));
 }
 
 function getTerminalZoomLevelSetting() {
@@ -511,15 +398,6 @@ function getAgentLauncherConfigSetting(): AgentLauncherConfig {
   );
 }
 
-function getVoiceCommandAliasesSetting() {
-  const raw = getSetting(VOICE_COMMAND_ALIASES_KEY);
-  try {
-    return normalizeVoiceCommandAliases(safeJsonParse<unknown>(raw, null));
-  } catch {
-    return emptyVoiceCommandAliases();
-  }
-}
-
 function getShowGroupSwitcherSetting(): boolean {
   return getBooleanSetting(SHOW_GROUP_SWITCHER_KEY, true);
 }
@@ -576,17 +454,14 @@ function settingsPayload() {
     ),
     // Always on — worktrees graduated from experimental; ignore any stored preference.
     worktreesEnabled: true,
-    // These features graduated from experimental; retained in the payload for
-    // compatibility with older renderers, but stored preferences no longer gate them.
-    voiceControlEnabled: true,
+    // Graduated from experimental; retained in the payload for compatibility
+    // with older renderers, but stored preferences no longer gate it.
     questionOverlayEnabled: true,
     gitDiffChangedFilesView: getGitDiffChangedFilesViewSetting(),
     gitDiffChangedFilesWidth: getGitDiffChangedFilesWidthSetting(),
     projectsDashboardView: getProjectsDashboardViewSetting(),
     activeProjectGroup: getActiveProjectGroupSetting(),
     collapsedProjectGroups: getCollapsedProjectGroupsSetting(),
-    selectedWorktreeByProject: getSelectedWorktreeByProjectSetting(),
-    commitCli: getCommitCliSetting(),
     terminalZoomLevel: getTerminalZoomLevelSetting(),
     terminalFontFamily: getTerminalFontFamilySetting(),
     terminalFontWeight: getTerminalFontWeightSetting(),
@@ -601,16 +476,6 @@ function settingsPayload() {
     defaultModel: getDefaultModelSetting(),
     annotationAgent: getAnnotationAgentSetting(),
     annotationModel: getAnnotationModelSetting(),
-    shipAgent: getShipAgentSetting(),
-    shipModel: getShipModelSetting(),
-    shipPrompt: getShipPromptSetting(),
-    syncAgent: getSyncAgentSetting(),
-    syncModel: getSyncModelSetting(),
-    syncPrompt: getSyncPromptSetting(),
-    pullRequestAgent: getPullRequestAgentSetting(),
-    pullRequestModel: getPullRequestModelSetting(),
-    pullRequestPrompt: getPullRequestPromptSetting(),
-    voiceCommandAliases: getVoiceCommandAliasesSetting(),
     // Off by default: usage reaches out to provider APIs using local logins.
     claudeUsageLimitsEnabled: getBooleanSetting(CLAUDE_USAGE_LIMITS_ENABLED_KEY, false),
     claudeUsageLimitsShowSession: getBooleanSetting(CLAUDE_USAGE_LIMITS_SHOW_SESSION_KEY, true),
@@ -746,9 +611,9 @@ export async function update(request: Request): Promise<Response> {
       body.automaticUpdateInstallOnQuitEnabled,
     );
   }
-  // worktreesEnabled is always on; ignore writes so old clients can't turn it off.
-  // Voice control and native question popups are also always on; their legacy
-  // fields remain accepted so older clients can update other settings safely.
+  // worktreesEnabled is always on; ignore writes so old clients can't turn it
+  // off. Native question popups are the same; their legacy fields remain
+  // accepted so older clients can update other settings safely.
   if (body.gitDiffChangedFilesView !== undefined) {
     if (body.gitDiffChangedFilesView === null) {
       deleteSetting(GIT_DIFF_CHANGED_FILES_VIEW_KEY);
@@ -782,23 +647,6 @@ export async function update(request: Request): Promise<Response> {
       deleteSetting(COLLAPSED_PROJECT_GROUPS_KEY);
     } else {
       setSetting(COLLAPSED_PROJECT_GROUPS_KEY, JSON.stringify(body.collapsedProjectGroups));
-    }
-  }
-  if (body.selectedWorktreeByProject !== undefined) {
-    if (body.selectedWorktreeByProject === null) {
-      deleteSetting(SELECTED_WORKTREE_BY_PROJECT_KEY);
-    } else {
-      setSetting(
-        SELECTED_WORKTREE_BY_PROJECT_KEY,
-        JSON.stringify(body.selectedWorktreeByProject),
-      );
-    }
-  }
-  if (body.commitCli !== undefined) {
-    if (body.commitCli === null) {
-      deleteSetting(COMMIT_CLI_SETTING_KEY);
-    } else {
-      setSetting(COMMIT_CLI_SETTING_KEY, body.commitCli);
     }
   }
   if (body.terminalZoomLevel !== undefined) {
@@ -858,48 +706,6 @@ export async function update(request: Request): Promise<Response> {
     } else {
       setSetting(ANNOTATION_MODEL_SETTING_KEY, body.annotationModel);
     }
-  }
-  if (body.shipAgent !== undefined) {
-    setSetting(SHIP_AGENT_SETTING_KEY, body.shipAgent);
-  }
-  if (body.shipModel !== undefined) {
-    if (body.shipModel === null) {
-      deleteSetting(SHIP_MODEL_SETTING_KEY);
-    } else {
-      setSetting(SHIP_MODEL_SETTING_KEY, body.shipModel);
-    }
-  }
-  if (body.shipPrompt !== undefined) {
-    setSetting(SHIP_PROMPT_SETTING_KEY, body.shipPrompt);
-  }
-  if (body.syncAgent !== undefined) {
-    setSetting(SYNC_AGENT_SETTING_KEY, body.syncAgent);
-  }
-  if (body.syncModel !== undefined) {
-    if (body.syncModel === null) {
-      deleteSetting(SYNC_MODEL_SETTING_KEY);
-    } else {
-      setSetting(SYNC_MODEL_SETTING_KEY, body.syncModel);
-    }
-  }
-  if (body.syncPrompt !== undefined) {
-    setSetting(SYNC_PROMPT_SETTING_KEY, body.syncPrompt);
-  }
-  if (body.pullRequestAgent !== undefined) {
-    setSetting(PULL_REQUEST_AGENT_SETTING_KEY, body.pullRequestAgent);
-  }
-  if (body.pullRequestModel !== undefined) {
-    if (body.pullRequestModel === null) {
-      deleteSetting(PULL_REQUEST_MODEL_SETTING_KEY);
-    } else {
-      setSetting(PULL_REQUEST_MODEL_SETTING_KEY, body.pullRequestModel);
-    }
-  }
-  if (body.pullRequestPrompt !== undefined) {
-    setSetting(PULL_REQUEST_PROMPT_SETTING_KEY, body.pullRequestPrompt);
-  }
-  if (body.voiceCommandAliases !== undefined) {
-    setSetting(VOICE_COMMAND_ALIASES_KEY, JSON.stringify(body.voiceCommandAliases));
   }
   if (body.claudeUsageLimitsEnabled !== undefined) {
     setBooleanSetting(CLAUDE_USAGE_LIMITS_ENABLED_KEY, body.claudeUsageLimitsEnabled);
@@ -976,14 +782,4 @@ export async function update(request: Request): Promise<Response> {
     learnedToastEnabled: body.recallLearnedToastEnabled,
   });
   return json(settingsPayload());
-}
-
-/** Used by the commit service to read the persisted CLI choice without an HTTP round-trip. */
-export function readCommitCliSetting(): CommitCli | null {
-  return getCommitCliSetting();
-}
-
-/** Persist a CLI choice from the server side (used when auto-detection seeds a value). */
-export function writeCommitCliSetting(cli: CommitCli): void {
-  setSetting(COMMIT_CLI_SETTING_KEY, cli);
 }

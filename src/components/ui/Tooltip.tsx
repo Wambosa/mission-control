@@ -184,7 +184,10 @@ export function HotkeyTooltip({
   return (
     <Tooltip
       placement={placement}
-      disabled={disabled}
+      // Most actions are unbound by default. With no chord to show and no
+      // label to fall back on there is nothing to say, so say nothing rather
+      // than opening an empty bubble.
+      disabled={disabled || (!binding && label == null)}
       content={
         <span className="mc-tooltip-row">
           {label != null && <span className="mc-tooltip-label">{label}</span>}

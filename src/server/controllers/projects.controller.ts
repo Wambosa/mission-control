@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SCRIPT_ARGS_MAX, TASK_AGENTS } from "~/shared/domain";
+import { TASK_AGENTS } from "~/shared/domain";
 import {
   createProject,
   deleteProject,
@@ -21,27 +21,6 @@ import {
   parseJsonBody,
 } from "./_helpers";
 import { HTTP_BAD_REQUEST, HTTP_CREATED } from "~/shared/http-status";
-
-const launchCommandSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  command: z.string().min(1),
-});
-
-const scriptArgSchema = z.object({
-  name: z
-    .string()
-    .min(1)
-    .max(64)
-    .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "arg name must be a valid identifier"),
-  description: z.string().max(200).optional(),
-});
-
-// Custom scripts are launch commands plus optional fill-in-the-blank args; the
-// args field must be declared here or zod strips it from the persisted payload.
-const customScriptSchema = launchCommandSchema.extend({
-  args: z.array(scriptArgSchema).max(SCRIPT_ARGS_MAX).optional(),
-});
 
 const createProjectBody = z.object({
   name: z.string().optional(),
@@ -66,16 +45,14 @@ const updateProjectBody = z
     iconColor: z.string(),
     imagePath: z.string().nullable(),
     groupId: z.string().nullable(),
+    sandboxId: z.string().nullable(),
+    remoteDirectory: z.string().max(500).nullable(),
     pinned: z.boolean(),
     branch: z.string(),
-    launchUrl: z.string().nullable(),
-    worktreeSetupCommand: z.string().max(500).nullable(),
     rememberAgentSettings: z.boolean(),
     savedAgent: z.enum(TASK_AGENTS).nullable(),
     savedSkipPermissions: z.boolean(),
     savedBareSession: z.boolean(),
-    launchCommands: z.array(launchCommandSchema).nullable(),
-    customScripts: z.array(customScriptSchema).nullable(),
     togglePin: z.literal(true).optional(),
   })
   .partial();

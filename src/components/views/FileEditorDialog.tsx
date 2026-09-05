@@ -22,6 +22,7 @@ import { ConfirmDialog } from "~/components/ui/ConfirmDialog";
 import { useHotkey } from "~/lib/use-hotkey";
 import { languageForFilename } from "~/lib/file-language";
 import { isHtmlFilename, isMarkdownFilename } from "~/lib/file-preview";
+import type { ProjectFsScope } from "~/lib/project-fs";
 import {
   readProjectFile,
   writeProjectFile,
@@ -53,11 +54,14 @@ type EditorMode = "edit" | "preview";
 
 export function FileEditorDialog({
   projectRoot,
+  scope,
   relPath,
   onClose,
   onBack,
 }: {
   projectRoot: string;
+  /** Which machine this project's files live on, and where. */
+  scope: ProjectFsScope;
   relPath: string | null;
   onClose: () => void;
   onBack?: () => void;
@@ -101,7 +105,7 @@ export function FileEditorDialog({
     setExternalChanged(false);
     setSaveError(null);
     void (async () => {
-      const r = await readProjectFile(projectRoot, relPath);
+      const r = await readProjectFile(projectRoot, relPath, scope);
       if (cancelled) return;
       if (r.ok) {
         const next = toLoadedFile(r);
@@ -130,7 +134,7 @@ export function FileEditorDialog({
     let unsub: (() => void) | undefined;
     let activeWatch: ProjectFileWatch | null = null;
     void (async () => {
-      const r = await watchProjectFile(projectRoot, relPath);
+      const r = await watchProjectFile(projectRoot, relPath, scope);
       if (!active) {
         if (r.ok) r.watch.unwatch();
         return;
@@ -158,7 +162,7 @@ export function FileEditorDialog({
 
   const handleExternalChange = useCallback(async () => {
     if (!relPath || !window.electronAPI) return;
-    const r = await readProjectFile(projectRoot, relPath);
+    const r = await readProjectFile(projectRoot, relPath, scope);
     if (!r.ok) return;
     const next = toLoadedFile(r);
     // Our own save can race the watcher: disk already matches the editor.
@@ -202,14 +206,14 @@ export function FileEditorDialog({
       setSaving(true);
       setSaveError(null);
       const expectedMtime = forceOverwrite ? null : loaded.mtimeMs;
-      let r = await writeProjectFile(projectRoot, relPath, content, expectedMtime);
+      let r = await writeProjectFile(projectRoot, relPath, content, expectedMtime, scope);
       // Sensitive paths (.claude/settings.local.json, .git/hooks/*, package.json,
       // .vscode/tasks.json, etc.) are rejected by `files:write` and must go
       // through `files:writeSensitive`, which surfaces a native OS confirm
       // dialog in the main process. The retry is silent — the user sees one
       // dialog, not an error followed by a re-click.
       if (!r.ok && r.error === "protected-path") {
-        r = await writeProjectFileSensitive(projectRoot, relPath, content, expectedMtime);
+        r = await writeProjectFileSensitive(projectRoot, relPath, content, expectedMtime, scope);
       }
       if (r.ok) {
         mtimeRef.current = r.mtimeMs;
@@ -258,9 +262,9 @@ export function FileEditorDialog({
       if (!relPath || !window.electronAPI) throw new Error("Not running in Electron");
       savingRef.current = true;
       try {
-        let r = await writeProjectFile(projectRoot, relPath, refined, null);
+        let r = await writeProjectFile(projectRoot, relPath, refined, null, scope);
         if (!r.ok && r.error === "protected-path") {
-          r = await writeProjectFileSensitive(projectRoot, relPath, refined, null);
+          r = await writeProjectFileSensitive(projectRoot, relPath, refined, null, scope);
         }
         if (r.ok) {
           mtimeRef.current = r.mtimeMs;
@@ -293,7 +297,7 @@ export function FileEditorDialog({
 
   const discardAndReload = useCallback(async () => {
     if (!relPath || !window.electronAPI) return;
-    const r = await readProjectFile(projectRoot, relPath);
+    const r = await readProjectFile(projectRoot, relPath, scope);
     if (!r.ok) return;
     const next = toLoadedFile(r);
     setLoaded(next);
@@ -538,6 +542,7 @@ export function FileEditorDialog({
             />
           ) : showHtmlPreview ? (
             <HtmlPreview
+              sandboxId={scope.sandboxId}
               projectRoot={projectRoot}
               relPath={relPath ?? ""}
               source={content}

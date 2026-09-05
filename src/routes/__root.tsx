@@ -27,7 +27,6 @@ import {
   useTerminals,
   useTerminalActions,
   useGridView,
-  useHasActiveSession,
 } from "~/lib/terminal-store";
 import { Z_INDEX } from "~/lib/z-index";
 import { DEFAULT_PET_HOME_SIDE } from "~/shared/pet";
@@ -46,16 +45,16 @@ import { GroupsDialogProvider } from "~/lib/groups-dialog-store";
 import { ACTIVE_GROUP_ALL, ACTIVE_GROUP_UNGROUPED, useActiveGroup } from "~/lib/active-group";
 import { GroupSwitcher } from "~/components/views/GroupSwitcher";
 import { PromptSearchProvider } from "~/lib/prompt-search-store";
-import { ScratchPadProvider } from "~/lib/scratch-pad-store";
-import { HeaderToolsCluster } from "~/components/views/HeaderToolsCluster";
+import { PromptSearchButton } from "~/components/views/PromptSearchButton";
+import { useHideableMenu } from "~/lib/hideable-elements";
+import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
 import { projectIdFromPath } from "~/lib/project-id-from-path";
 import {
   HeaderActionsProvider,
   HeaderActionsSlot,
 } from "~/components/ui/HeaderActionsSlot";
-import { apiTokenQueryOptions, useSettings, useScopedProjects, useSandboxes } from "~/queries";
+import { apiTokenQueryOptions, useSettings, useProjects, useSandboxes } from "~/queries";
 import { SandboxResumingOverlay } from "~/components/views/SandboxResumingOverlay";
-import { ScopeDropdown } from "~/components/views/ScopeDropdown";
 import { UpdateAvailableButton } from "~/components/ui/UpdateAvailableButton";
 import { ProviderUsageIndicator } from "~/components/views/ProviderUsageIndicator";
 import {
@@ -94,7 +93,6 @@ import {
 } from "~/lib/settings-navigation";
 
 import { UsagePanel } from "~/components/views/UsagePanel";
-import { VoiceController } from "~/components/views/VoiceController";
 import { SessionNotificationsButton } from "~/components/views/SessionNotificationsButton";
 import { Toaster } from "sonner";
 import { MC_TOAST_CLASS_NAMES, MC_TOAST_CLOSE_ICON } from "~/lib/mc-toast";
@@ -118,7 +116,6 @@ import { isUserTerminalXtermFocused, isTerminalXtermFocused, terminalZoomIntentF
 import { useWarmCliAvailability } from "~/lib/cli-availability";
 import {
   CLEAR_USER_TERMINAL_EVENT,
-  GRID_EXPAND_TOGGLE_EVENT,
   TERMINAL_ZOOM_IN_EVENT,
   TERMINAL_ZOOM_OUT_EVENT,
   TERMINAL_ZOOM_RESET_EVENT,
@@ -245,7 +242,6 @@ function RootComponent() {
               <AddProjectProvider>
                 <GroupsDialogProvider>
                 <PromptSearchProvider>
-                <ScratchPadProvider>
                   <HeaderActionsProvider>
                     <DiagramDialogHost>
                       {/*
@@ -271,7 +267,6 @@ function RootComponent() {
                       </ClientOnly>
                     </DiagramDialogHost>
                   </HeaderActionsProvider>
-                </ScratchPadProvider>
                 </PromptSearchProvider>
                 </GroupsDialogProvider>
               </AddProjectProvider>
@@ -319,15 +314,11 @@ const ProjectTerminalPanel = memo(function ProjectTerminalPanel({
   onClose,
   onHide,
   onPtyReady,
-  expanded,
-  onToggleExpanded,
 }: {
   projectId: string;
   onClose: (taskId: string, opts?: { activateTaskId?: string | null }) => Promise<void>;
   onHide: (projectId: string) => void;
   onPtyReady: (taskId: string, ptyId: string | null, scopeKey?: string) => void;
-  expanded: boolean;
-  onToggleExpanded: () => void;
 }) {
   const { activeFor } = useTerminals();
   return (
@@ -336,8 +327,6 @@ const ProjectTerminalPanel = memo(function ProjectTerminalPanel({
       onClose={onClose}
       onHide={() => onHide(projectId)}
       onPtyReady={onPtyReady}
-      expanded={expanded}
-      onToggleExpanded={onToggleExpanded}
     />
   );
 });
@@ -368,7 +357,7 @@ function Shell() {
     return () => setSettingsOverlayOpen(false);
   }, [settingsOpen]);
 
-  // Leaf components (e.g. ShipFailedDialog) dispatch OPEN_SETTINGS_EVENT to
+  // Leaf components dispatch OPEN_SETTINGS_EVENT to
   // request the Settings panel without prop-drilling through every parent.
   useEffect(() => {
     const handler = (e: Event) => {
@@ -386,16 +375,11 @@ function Shell() {
   // blurred/hidden (see src/lib/window-idle.ts).
   useWindowIdleController();
   const { data: settings } = useSettings();
-  const { data: projects } = useScopedProjects();
+  const headerButtons = settings?.headerButtons ?? DEFAULT_HEADER_BUTTON_VISIBILITY;
+  const { hideElementContextMenu, hideableMenu } = useHideableMenu();
+  const { data: projects } = useProjects();
   const { activeGroup, setActiveGroup, groups } = useActiveGroup();
-  // While the active sandbox's remote VM is resuming, the workspace isn't usable
-  // yet: cover the route with a spinner and disable project navigation.
   const { data: sandboxState } = useSandboxes();
-  const activeSandbox =
-    sandboxState?.enabled
-      ? sandboxState.sandboxes.find((s) => s.id === sandboxState.activeScopeId) ?? null
-      : null;
-  const activeResuming = activeSandbox?.remoteStatus === "resuming";
   // Pure actions (stable identity) + narrow flip-only subscriptions, so a
   // background session-status tick doesn't re-render the whole shell. The active
   // session itself lives in the ProjectTerminalPanel leaf below.
@@ -456,9 +440,14 @@ function Shell() {
 
   const path = useRouterState({ select: (state) => state.location.pathname });
   const projectId = projectIdFromPath(path);
-  // Flip-only: true iff this project has a materialized active session. Gates
-  // the expanded-terminal layout without subscribing to the churning data slice.
-  const hasActiveSession = useHasActiveSession(projectId);
+  // While the open project's remote VM is resuming, its workspace isn't usable
+  // yet: cover the route with a spinner and disable project navigation.
+  const activeSandboxId = projects?.find((p) => p.id === projectId)?.sandboxId ?? null;
+  const activeSandbox =
+    sandboxState?.enabled && activeSandboxId
+      ? sandboxState.sandboxes.find((s) => s.id === activeSandboxId) ?? null
+      : null;
+  const activeResuming = activeSandbox?.remoteStatus === "resuming";
   // Focused Session Mode strips the whole shell: the /focus route renders the
   // only visible chrome, and the Electron window is a small floating card.
   const focusActive = isFocusPath(path);
@@ -485,33 +474,6 @@ function Shell() {
     // Once per app boot, not on navigation.
   }, []);
 
-  const expandedKey = projectId ? `mc:terminalExpanded:${projectId}` : null;
-  const [terminalExpanded, setTerminalExpanded] = useState<boolean>(false);
-  useEffect(() => {
-    if (!expandedKey) {
-      setTerminalExpanded(false);
-      return;
-    }
-    try {
-      setTerminalExpanded(window.localStorage.getItem(expandedKey) === "1");
-    } catch {
-      setTerminalExpanded(false);
-    }
-  }, [expandedKey]);
-  const toggleTerminalExpanded = useCallback(() => {
-    if (!expandedKey) return;
-    setTerminalExpanded((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem(expandedKey, next ? "1" : "0");
-      } catch {
-        // ignore quota / privacy-mode errors
-      }
-      return next;
-    });
-  }, [expandedKey]);
-  const sessionExpanded =
-    !!projectId && terminalExpanded && hasActiveSession;
   // Grid view takes over the whole workspace: the Outlet (which renders the
   // grid below the project header) spans full width and the single right-hand
   // terminal panel is hidden.
@@ -686,19 +648,11 @@ function Shell() {
 
   useHotkey("terminal.toggle", () => togglePanel());
   useHotkey(
-    "terminal.expandToggle",
+    "terminal.clear",
     () => {
       if (userTerminalPanelOpen && isUserTerminalXtermFocused()) {
         window.dispatchEvent(new Event(CLEAR_USER_TERMINAL_EVENT));
-        return;
       }
-      // While the grid owns the workspace there's no single-session panel; hand
-      // the shortcut to SessionGrid so it expands/collapses the focused cell.
-      if (gridActive) {
-        window.dispatchEvent(new Event(GRID_EXPAND_TOGGLE_EVENT));
-        return;
-      }
-      if (projectId && hasActiveSession) toggleTerminalExpanded();
     },
     { capture: true },
   );
@@ -879,18 +833,7 @@ function Shell() {
         <TopBar
           crumbs={crumbs}
           onHome={goHome}
-          centerActions={
-            <>
-              {/* Project cockpit, one grouped band: context (which project /
-               * which scope) then the project actions (run, branch/changes/
-               * ship, worktree, grid) portalled in by the project route. The
-               * sandbox switcher sits with the project as context; the single
-               * context→actions divider is the project route's leading action
-               * so it only appears when there are actions to separate. */}
-              <ScopeDropdown />
-              <HeaderActionsSlot />
-            </>
-          }
+          centerActions={<HeaderActionsSlot />}
           leadingInset={topBarLeadingInset}
           contentTopInset={topBarContentTopInset}
           // Keep the header draggable in every theme. In minimal mode #root
@@ -902,10 +845,14 @@ function Shell() {
             <>
               <UpdateAvailableButton />
               <ProviderUsageIndicator />
-              {/* Scratch pads / prompt search / voice collapse behind "…" so
-               * the rail stays at status + settings; grid view moved into the
-               * project header beside the session controls it acts on. */}
-              <HeaderToolsCluster />
+              {/* Prompt search sits in the bar itself; grid view moved into
+               * the project header beside the session controls it acts on. */}
+              {headerButtons.promptSearch && (
+                <PromptSearchButton
+                  onContextMenu={hideElementContextMenu("header-button:promptSearch")}
+                />
+              )}
+              {hideableMenu}
               <SessionNotificationsButton
                 notifications={appNotifications}
                 onClearNotification={clearAppNotificationItem}
@@ -939,10 +886,7 @@ function Shell() {
               style={{
                 position: "relative",
                 flex: 1,
-                // Grid view lives inside the Outlet, so the expanded-terminal
-                // flag must never hide it — both can be true at once (the
-                // expand flag persists per project, the grid flag globally).
-                display: sessionExpanded && !gridActive ? "none" : "flex",
+                display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
                 // On the project detail view the terminal panel sits to the
@@ -962,8 +906,6 @@ function Shell() {
                 onClose={close}
                 onHide={deselect}
                 onPtyReady={setPtyId}
-                expanded={sessionExpanded}
-                onToggleExpanded={toggleTerminalExpanded}
               />
             )}
           </div>
@@ -999,7 +941,6 @@ function Shell() {
             classNames: MC_TOAST_CLASS_NAMES,
           }}
         />
-        <VoiceController />
         {/* PetWidget + RemotePets render via the lazy PetHost (Shell sibling). */}
         <SessionFileDropZone />
       </div>

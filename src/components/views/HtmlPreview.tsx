@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { buildHtmlPreviewSrcDoc, detectUnrenderableTemplate } from "~/lib/file-preview";
-import { isSandboxRuntimeActive, startHtmlPreviewServer } from "~/lib/project-fs";
+import { startHtmlPreviewServer } from "~/lib/project-fs";
+import { isRemoteProjectRuntime } from "~/lib/sandbox-runtime";
 
 // Preview strategy:
 //  - "server":      load the file over a loopback http server rooted at the
@@ -20,6 +21,7 @@ type Strategy =
   | { kind: "error"; message: string };
 
 export function HtmlPreview({
+  sandboxId,
   projectRoot,
   relPath,
   source,
@@ -27,6 +29,9 @@ export function HtmlPreview({
   reloadKey,
   dirty,
 }: {
+  /** The machine this file lives on; null = Local (the only one the loopback
+   *  preview server can reach). */
+  sandboxId: string | null;
   projectRoot: string;
   relPath: string;
   source: string;
@@ -55,8 +60,8 @@ export function HtmlPreview({
         if (!cancelled) setStrategy({ kind: "unavailable" });
         return;
       }
-      // Files served from the container can't be reached by the host server.
-      if (await isSandboxRuntimeActive()) {
+      // Files that live on another machine can't be reached by the host server.
+      if (isRemoteProjectRuntime(sandboxId)) {
         if (!cancelled) setStrategy({ kind: "fallback" });
         return;
       }
@@ -71,7 +76,7 @@ export function HtmlPreview({
     return () => {
       cancelled = true;
     };
-  }, [fileDir, baseName]);
+  }, [fileDir, baseName, sandboxId]);
 
   const serverSrc =
     strategy.kind === "server"

@@ -73,13 +73,10 @@ function makeProject(id: string, sandboxId: string | null) {
     imagePath: null,
     groupId: null,
     sandboxId,
+    remoteDirectory: null,
     pinned: false,
     pinnedOrder: null,
     branch: "main",
-    launchCommands: null,
-    customScripts: null,
-    launchUrl: null,
-    worktreeSetupCommand: null,
     rememberAgentSettings: false,
     savedAgent: null,
     savedSkipPermissions: false,
@@ -118,19 +115,23 @@ describe("sandboxes API", () => {
     ).toBe(true);
   });
 
-  it("lists seeded sandboxes and selects the active scope", async () => {
+  it("lists seeded sandboxes without an active scope", async () => {
     const id = seedRemoteSandbox("Flexion");
 
     const list = await body(await handleApiRequest(electronRequest("/api/sandboxes")));
     expect(list.sandboxes.map((s: any) => s.id)).toContain(id);
+    // Scope is a property of each project, not of the application.
+    expect(list.activeScopeId).toBeUndefined();
+  });
 
-    const active = await body(
-      await handleApiRequest(
-        electronRequest("/api/sandboxes/active", { method: "PUT", body: JSON.stringify({ scopeId: id }) }),
-      ),
+  it("has no endpoint for selecting a global scope", async () => {
+    const res = await handleApiRequest(
+      electronRequest("/api/sandboxes/active", {
+        method: "PUT",
+        body: JSON.stringify({ scopeId: seedRemoteSandbox("Flexion") }),
+      }),
     );
-    expect(active.activeScopeId).toBe(id);
-    expect((await body(await handleApiRequest(electronRequest("/api/sandboxes")))).activeScopeId).toBe(id);
+    expect(res?.status).toBe(404);
   });
 
   it("updates per-sandbox config and returns only the public sandbox shape", async () => {
@@ -248,10 +249,6 @@ describe("sandboxes API", () => {
         updatedAt: now,
       })
       .run();
-    await handleApiRequest(
-      electronRequest("/api/sandboxes/active", { method: "PUT", body: JSON.stringify({ scopeId: id }) }),
-    );
-
     const del = await handleApiRequest(electronRequest(`/api/sandboxes/${id}`, { method: "DELETE" }));
     expect(del?.status).toBe(204);
 
@@ -264,7 +261,6 @@ describe("sandboxes API", () => {
     expect(
       getDb().select().from(homeTerminals).where(eq(homeTerminals.id, "ht-scoped")).get(),
     ).toBeUndefined();
-    expect((await body(await handleApiRequest(electronRequest("/api/sandboxes")))).activeScopeId).toBe("local");
   });
 
   it("registers a manually connected sandbox and enables the scope switcher", async () => {
@@ -477,11 +473,19 @@ IQDKgylx1t9VnHbg07id7TJtpRnwoMskXtbR9ffY6+5lqA==
     expect(secondConfig.agentCa).toBeUndefined();
   });
 
-  it("ignores an active scope pointing at a missing sandbox (self-heals to Local)", async () => {
-    await handleApiRequest(
-      electronRequest("/api/sandboxes/active", { method: "PUT", body: JSON.stringify({ scopeId: "sb-gone" }) }),
-    );
-    // setActiveScope rejects unknown ids → resolves to local
-    expect((await body(await handleApiRequest(electronRequest("/api/sandboxes")))).activeScopeId).toBe("local");
+  // The active-scope setting is gone from the database; a row left behind by an
+  // older build must not resurrect it or make the read fail.
+  it("resolves sandbox state without reading any active-scope setting", async () => {
+    const id = seedRemoteSandbox("Flexion");
+    getDb()
+      .insert(appSettings)
+      .values({ key: "multiSandbox.activeScope", value: "sb-gone" })
+      .onConflictDoUpdate({ target: appSettings.key, set: { value: "sb-gone" } })
+      .run();
+
+    const state = await body(await handleApiRequest(electronRequest("/api/sandboxes")));
+    expect(state.enabled).toBe(true);
+    expect(state.sandboxes.map((s: any) => s.id)).toContain(id);
+    expect(state.activeScopeId).toBeUndefined();
   });
 });

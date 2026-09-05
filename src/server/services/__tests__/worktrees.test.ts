@@ -18,7 +18,6 @@ const {
   resolveWorktreePath,
 } = await import("../worktrees");
 const { createProject, listProjects } = await import("../projects");
-const { BranchInWorktreeError, checkoutGitBranch, gitErrorPayload } = await import("../git");
 const { archiveTask, createTask } = await import("../tasks");
 const { remove: removeWorktree } = await import("~/server/controllers/worktrees.controller");
 const { getDb } = await import("~/db/client");
@@ -411,38 +410,6 @@ describe("worktree helpers", () => {
     const names = listed.filter((w) => !w.isMain).map((w) => w.name).sort();
 
     expect(names).toEqual(["dup", "dup-2"]);
-  });
-
-  it("refuses to checkout a branch that is checked out in another worktree", async () => {
-    const { project, worktree } = await createProjectWorktree();
-
-    const error = await checkoutGitBranch(project.id, worktree.branch, null).then(
-      () => null,
-      (e: unknown) => e,
-    );
-
-    expect(error).toBeInstanceOf(BranchInWorktreeError);
-    expect(gitErrorPayload(error)).toMatchObject({
-      kind: "branch-in-worktree",
-      worktreeId: worktree.id,
-      worktreeName: worktree.name,
-    });
-  });
-
-  it("reports the main worktree as the owner when checking out its branch from a worktree", async () => {
-    const { project, root, worktree } = await createProjectWorktree();
-    const mainBranch = git(root, ["branch", "--show-current"]).trim();
-
-    const error = await checkoutGitBranch(project.id, mainBranch, worktree.id).then(
-      () => null,
-      (e: unknown) => e,
-    );
-
-    expect(error).toBeInstanceOf(BranchInWorktreeError);
-    expect(gitErrorPayload(error)).toMatchObject({
-      kind: "branch-in-worktree",
-      worktreeId: "main",
-    });
   });
 
   it("parses git worktree list porcelain output", () => {

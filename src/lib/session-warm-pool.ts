@@ -9,7 +9,7 @@ import { buildOptimisticTask } from "~/lib/optimistic-task";
 import { commandForTask } from "~/lib/terminal-store";
 import { getElectron } from "~/lib/electron";
 import { api, resolveApiToken } from "~/lib/api";
-import { isDockerSandboxRuntime } from "~/lib/sandbox-runtime";
+import { isRemoteProjectRuntime } from "~/lib/sandbox-runtime";
 import { getTerminalColorScheme } from "~/lib/terminal-options";
 import { TITLE_WAITING } from "~/lib/task-sentinels";
 import { DEFAULT_PTY_COLS, DEFAULT_PTY_ROWS } from "~/shared/pty-size";
@@ -146,7 +146,7 @@ export async function prepareSessionWarmSlot(input: {
 }): Promise<SessionWarmSlot | null> {
   const electron = getElectron();
   if (!electron || !input.project.path) return null;
-  if (await isDockerSandboxRuntime(electron)) {
+  if (isRemoteProjectRuntime(input.project.sandboxId)) {
     await discardSessionWarmSlotQuiet();
     return null;
   }
@@ -221,7 +221,6 @@ export function replenishSessionWarmSlot(input: {
 export async function persistWarmSlotTask(
   projectId: string,
   slot: SessionWarmSlot,
-  worktreeId: string | null,
   scopeId: string | null = LOCAL_SCOPE_ID,
 ): Promise<Task> {
   const { task } = await api.createTaskInternal(projectId, {
@@ -235,7 +234,7 @@ export async function persistWarmSlotTask(
     claudeSkipPermissions: agentSupportsSkipPermissions(slot.payload.agent)
       ? slot.payload.skipPermissions
       : undefined,
-    worktreeId,
+    worktreeId: null,
     scopeId,
   });
   return task;

@@ -48,17 +48,6 @@ export type FileWriteResult =
   | { ok: false; error: FileWriteError | string; currentMtimeMs?: number };
 
 export type InstallDiagramSkillResult = import("~/shared/diagram-skill-install").DiagramSkillInstallResult;
-export type InstallShipSkillsResult = import("~/shared/ship-skill-install").ShipSkillInstallResult;
-
-export type LaunchProcessKillResult = {
-  ptyCount: number;
-  ports: Array<{
-    port: number;
-    pids: number[];
-    killed: number[];
-    errors: string[];
-  }>;
-};
 
 export type PtySpawnAgent = "claude-code" | "codex" | "cursor-cli" | "opencode";
 
@@ -98,7 +87,7 @@ export type AgentPtySpawnOptions = BasePtySpawnOptions & {
   agent: PtySpawnAgent;
   dangerouslySkipPermissions?: boolean;
   shell?: never;
-  /** Starting prompt written to the agent's stdin once its TUI is ready (voice control). */
+  /** Starting prompt written to the agent's stdin once its TUI is ready. */
   initialInput?: string;
 };
 
@@ -116,6 +105,9 @@ export type ShellPtySpawnOptions = BasePtySpawnOptions & {
 export type PtySpawnOptions = AgentPtySpawnOptions | ShellPtySpawnOptions;
 
 export type RemotePtySpawnOptions = {
+  /** The scope this session runs on — the owning project's sandbox id. Required:
+   *  nothing resolves a remote spawn from an application-wide "active" scope. */
+  sandboxId: string;
   taskId: string;
   /** Absolute in-container path (e.g. /workspace/<slug>). */
   cwd: string;
@@ -287,10 +279,6 @@ export type ScreenshotCaptureResult =
   | { cancelled: true }
   | { error: string };
 
-export type VoiceTranscribeResult =
-  | { ok: true; text: string }
-  | { ok: false; error: string; code?: "unavailable" };
-
 export type FocusModeStateBridge = {
   active: boolean;
   taskId: string | null;
@@ -325,12 +313,6 @@ export type ElectronBridge = {
   settings: {
     getToken: () => Promise<string>;
     regenerateToken: () => Promise<string>;
-  };
-  voice: {
-    available: () => Promise<boolean>;
-    prewarm: () => Promise<boolean>;
-    /** `prompt` biases the decoder toward expected words (e.g. project names). */
-    transcribe: (wav: ArrayBuffer, prompt?: string) => Promise<VoiceTranscribeResult>;
   };
   getPathForFile: (file: File) => string;
   browseFolder: () => Promise<string | null>;
@@ -415,11 +397,6 @@ export type ElectronBridge = {
     write: (ptyId: string, data: string) => Promise<boolean>;
     resize: (ptyId: string, cols: number, rows: number) => Promise<boolean>;
     kill: (ptyId: string) => Promise<boolean>;
-    killLaunchProcesses: (opts: {
-      cwd: string;
-      commands: string[];
-      ports?: number[];
-    }) => Promise<LaunchProcessKillResult>;
     /** Kill every PTY whose cwd is inside `cwd` (e.g. before deleting a worktree). */
     killUnderPath: (cwd: string) => Promise<{ ptyCount: number }>;
     onData: (cb: (msg: { ptyId: string; data: string; seq: number }) => void) => () => void;
@@ -480,7 +457,8 @@ export type ElectronBridge = {
     getState: (sandboxId?: string) => Promise<SandboxState>;
     getSettings: () => Promise<SandboxSettingsView>;
     /** Directory the active scope keeps its projects under; null when local. */
-    getRemoteRoot: (sandboxId?: string) => Promise<string | null>;
+    /** A scope's project root. null for Local, which has no remote root. */
+    getRemoteRoot: (sandboxId: string | null) => Promise<string | null>;
     updateSettings: (patch: SandboxSettingsPatch) => Promise<SandboxSettingsView>;
     up: (sandboxId?: string) => Promise<{ ok: true } | { ok: false; error: string }>;
     /** Tear down and restart with a forced default-image rebuild (update flow). */
@@ -489,7 +467,8 @@ export type ElectronBridge = {
     /** Destroy a sandbox's container + volumes. Call before deleting the DB row. */
     destroy: (sandboxId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
     /** Set the scope the renderer shows; routes remote PTY/fs/git. null = Local (host). */
-    setActive: (sandboxId: string | null) => Promise<{ ok: true }>;
+    /** Warm a sandbox's runtime. Nothing routes through a global scope. */
+    ensureStarted: (sandboxId: string) => Promise<{ ok: true }>;
     connect: (sandboxId?: string) => Promise<{ ok: true } | { ok: false; error: string }>;
     disconnect: (sandboxId?: string) => Promise<{ ok: true }>;
     status: () => Promise<{
@@ -568,10 +547,26 @@ export type ElectronBridge = {
   };
   remotePty: {
     spawn: (opts: RemotePtySpawnOptions) => Promise<{ ptyId: string }>;
-    write: (ptyId: string, data: string) => Promise<boolean>;
-    resize: (ptyId: string, cols: number, rows: number) => Promise<boolean>;
-    kill: (ptyId: string) => Promise<boolean>;
-    replay: (ptyId: string) => Promise<{ data: string; nextSeq: number }>;
+    /**
+     * Each op takes an optional trailing scope. The main process binds a pty to
+     * its owner at spawn, in memory — so after a restart the binding is gone
+     * while the session's pty id and the agent's process both survive. Naming
+     * the project's scope lets the owner be recovered instead of the session
+     * silently respawning a second agent. Optional so this stays shape-
+     * compatible with the local `pty` API.
+     */
+    write: (ptyId: string, data: string, sandboxId?: string | null) => Promise<boolean>;
+    resize: (
+      ptyId: string,
+      cols: number,
+      rows: number,
+      sandboxId?: string | null,
+    ) => Promise<boolean>;
+    kill: (ptyId: string, sandboxId?: string | null) => Promise<boolean>;
+    replay: (
+      ptyId: string,
+      sandboxId?: string | null,
+    ) => Promise<{ data: string; nextSeq: number }>;
     onData: (cb: (msg: { ptyId: string; data: string; seq: number }) => void) => () => void;
     // exitCode shape matches the local pty.onExit so components can treat the two
     // PTY APIs as one type (the manager coerces undefined → 0).
@@ -583,22 +578,34 @@ export type ElectronBridge = {
       cb: (msg: { ptyId: string; code: string; message: string }) => void,
     ) => () => void;
   };
+  // Every remote call names the scope it is for. There is no ambient "active"
+  // scope to fall back to: two projects on two machines are live at once.
   remoteFs: {
-    list: (path: string) => Promise<FileListResult>;
-    read: (path: string) => Promise<FileReadResult>;
+    list: (sandboxId: string | null, path: string) => Promise<FileListResult>;
+    read: (sandboxId: string | null, path: string) => Promise<FileReadResult>;
     write: (
+      sandboxId: string | null,
       path: string,
       content: string,
       expectedMtimeMs: number | null,
     ) => Promise<FileWriteResult>;
-    watch: (path: string) => Promise<{ ok: true; watchId: string } | { ok: false; error: string }>;
-    unwatch: (watchId: string) => Promise<{ ok: true }>;
+    watch: (
+      sandboxId: string | null,
+      path: string,
+    ) => Promise<{ ok: true; watchId: string } | { ok: false; error: string }>;
+    unwatch: (sandboxId: string | null, watchId: string) => Promise<{ ok: true }>;
     onChange: (cb: (msg: { watchId: string; path: string; mtimeMs: number }) => void) => () => void;
   };
   remoteGit: {
-    status: (repo: string) => Promise<GitStatus>;
-    diff: (repo: string, file: string, staged: boolean) => Promise<GitDiff>;
+    status: (sandboxId: string | null, repo: string) => Promise<GitStatus>;
+    diff: (
+      sandboxId: string | null,
+      repo: string,
+      file: string,
+      staged: boolean,
+    ) => Promise<GitDiff>;
     clone: (
+      sandboxId: string | null,
       remote: string,
       slug: string,
       branch?: string,

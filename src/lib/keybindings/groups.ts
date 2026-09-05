@@ -11,11 +11,11 @@ export const KEYBINDING_GROUPS: KeybindingGroup[] = [
   {
     id: "session",
     label: "Session management",
-    description: "Create, hide, expand, and duplicate agent sessions on a project.",
+    description: "Create, hide, and duplicate agent sessions on a project.",
     actions: [
       "agent.new",
       "terminal.close",
-      "terminal.expandToggle",
+      "terminal.clear",
       "session.closeWindow",
       "session.clone",
       "session.newRow",
@@ -39,8 +39,6 @@ export const KEYBINDING_GROUPS: KeybindingGroup[] = [
     label: "Project management",
     description: "Run projects, switch between them, and work with files.",
     actions: [
-      "project.runToggle",
-      "project.openBrowser",
       "project.picker",
       "project.add",
       "project.edit",
@@ -50,9 +48,7 @@ export const KEYBINDING_GROUPS: KeybindingGroup[] = [
       "file.finder",
       "file.save",
       "git.diff",
-      "project.ship",
       "prompt.search",
-      "scratch.toggle",
     ],
   },
   {
@@ -65,7 +61,7 @@ export const KEYBINDING_GROUPS: KeybindingGroup[] = [
     id: "general",
     label: "General",
     description: "Shared shortcuts that apply across dialogs and forms.",
-    actions: ["dialog.submit", "voice.pushToTalk"],
+    actions: ["dialog.submit"],
   },
 ];
 

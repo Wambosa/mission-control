@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseBranchList, parsePorcelainZ, parseGitBranchHeader } from "../git";
+import { parsePorcelainZ, parseGitBranchHeader } from "../git";
 
 /** Build a porcelain-z stream from {x, y, path} entries. Renamed/copied entries
  *  carry an extra `from` field that emits a paired NUL-terminated path. */
@@ -159,21 +159,5 @@ describe("parseGitBranchHeader", () => {
       ahead: null,
       behind: null,
     });
-  });
-});
-
-describe("parseBranchList", () => {
-  it("merges local and remote branches by short name", () => {
-    expect(
-      parseBranchList("main\nfeat/foo", "origin/main\norigin/feat/bar\norigin/HEAD -> origin/main"),
-    ).toEqual([
-      { name: "feat/bar", local: false, remoteRef: "origin/feat/bar" },
-      { name: "feat/foo", local: true },
-      { name: "main", local: true, remoteRef: "origin/main" },
-    ]);
-  });
-
-  it("returns empty list for empty input", () => {
-    expect(parseBranchList("", "")).toEqual([]);
   });
 });

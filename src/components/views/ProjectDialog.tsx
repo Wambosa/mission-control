@@ -17,7 +17,12 @@ import {
   useCliAvailability,
 } from "~/lib/cli-availability";
 import { getElectron } from "~/lib/electron";
-import { useSettings } from "~/queries";
+import { queryKeys, useSandboxes, useSettings } from "~/queries";
+import { useQueryClient } from "@tanstack/react-query";
+import { api } from "~/lib/api";
+import { AddSshHostDialog } from "~/components/views/AddSshHostDialog";
+import { SandboxConfigModal } from "~/components/views/SandboxConfigModal";
+import { ConfirmDialog } from "~/components/ui/ConfirmDialog";
 import { AGENT_REGISTRY } from "~/shared/agents";
 import {
   DEFAULT_AGENT_LAUNCHER_CONFIG,
@@ -154,7 +159,9 @@ export function ProjectDialog({
     groupId: string | null;
     imagePath?: string | null;
     pendingImage?: { sourcePath: string; extension: string } | null;
-    worktreeSetupCommand?: string | null;
+    // Edit-only: the machine this project runs on, and where it lives there.
+    sandboxId?: string | null;
+    remoteDirectory?: string | null;
     // Create-only onboarding fields (undefined when editing an existing project).
     savedAgent?: TaskAgent | null;
     rememberAgentSettings?: boolean;
@@ -176,13 +183,55 @@ export function ProjectDialog({
   // Committed path+name snapshot so Esc in the browser reverts the preview.
   const folderSnapshotRef = useRef<{ path: string; name: string } | null>(null);
   const [groupId, setGroupId] = useState<string>("");
+  // The machine this project runs on ("" = Local) and its directory there.
+  // Edited together: a host without a directory is exactly the guess this
+  // replaces, so the two never live on separate surfaces.
+  const [sandboxId, setSandboxId] = useState<string>("");
+  const [remoteDirectory, setRemoteDirectory] = useState("");
+  const { data: sandboxState } = useSandboxes();
+  // Only a machine the user owns takes a directory. A managed remote VM clones
+  // the project into its own workspace, so its path stays derived.
+  const sshHosts = useMemo(
+    () => (sandboxState?.sandboxes ?? []).filter((sandbox) => sandbox.kind === "ssh-host"),
+    [sandboxState?.sandboxes],
+  );
+  const selectedHost = sshHosts.find((host) => host.id === sandboxId) ?? null;
+  // Adding, configuring, and removing a host all happen here, where the host is
+  // chosen. There is no separate scope switcher to keep in sync.
+  const queryClient = useQueryClient();
+  const [addHostOpen, setAddHostOpen] = useState(false);
+  const [hostConfigOpen, setHostConfigOpen] = useState(false);
+  const [confirmRemoveHost, setConfirmRemoveHost] = useState(false);
+  const [removingHost, setRemovingHost] = useState(false);
+
+  const removeSelectedHost = async () => {
+    if (!selectedHost || removingHost) return;
+    setRemovingHost(true);
+    try {
+      // Tear the machine's runtime down first — the manager still needs the
+      // persisted config to unregister itself cleanly.
+      await getElectron()?.sandbox.destroy(selectedHost.id).catch(() => undefined);
+      await api.deleteSandbox(selectedHost.id);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.sandboxes });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      // Every project that ran on it falls back to Local, server-side. Mirror
+      // that here so the dialog does not keep offering a host that is gone.
+      setSandboxId("");
+      setRemoteDirectory("");
+      setConfirmRemoveHost(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove the host");
+      setConfirmRemoveHost(false);
+    } finally {
+      setRemovingHost(false);
+    }
+  };
   const [groupQuery, setGroupQuery] = useState("");
   const [groupTypeaheadOpen, setGroupTypeaheadOpen] = useState(false);
   const [groupActiveIndex, setGroupActiveIndex] = useState(-1);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [icon, setIcon] = useState("");
   const [iconColor, setIconColor] = useState<string>(ICON_COLORS[0]);
-  const [worktreeSetupCommand, setWorktreeSetupCommand] = useState("");
   // Optional at create time: null means "just create the project", a selection
   // means "create it and start a session with that agent".
   const [agent, setAgent] = useState<TaskAgent | null>(null);
@@ -269,7 +318,8 @@ export function ProjectDialog({
       setCreatingGroup(false);
       setIcon(seededIcon);
       setIconColor(seededIconColor);
-      setWorktreeSetupCommand(project?.worktreeSetupCommand || "");
+      setSandboxId(project?.sandboxId ?? "");
+      setRemoteDirectory(project?.remoteDirectory ?? "");
       setGridView(project?.defaultGridView ?? false);
       setImagePath(project?.imagePath ?? null);
       setPendingImage(null);
@@ -451,8 +501,18 @@ export function ProjectDialog({
   // project. Drives the primary button's label and the create payload alike.
   const willStartSession = !project && agent !== null;
 
+  // The host and its directory are one setting: a host with no directory is
+  // the guess this replaces. Only emptiness is checked — the directory may not
+  // exist on the host yet, and a project should be configurable before it does.
+  const remoteDirectoryMissing =
+    !!project && selectedHost !== null && !remoteDirectory.trim();
+
   const submit = async () => {
     if (submitting) return;
+    if (remoteDirectoryMissing) {
+      setError(`${selectedHost?.name ?? "This host"} needs a directory to run this project in.`);
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
@@ -470,7 +530,10 @@ export function ProjectDialog({
         groupId: effectiveGroupId,
         ...(project ? { imagePath } : { pendingImage }),
         ...(project
-          ? { worktreeSetupCommand: worktreeSetupCommand.trim() || null }
+          ? {
+              sandboxId: sandboxId || null,
+              remoteDirectory: selectedHost ? remoteDirectory.trim() : null,
+            }
           : {
               savedAgent: agent,
               rememberAgentSettings: agent !== null,
@@ -802,6 +865,93 @@ export function ProjectDialog({
       )}
     </div>
   );
+
+  // Where this project runs, and where it lives there. One field would be a
+  // guess; two on separate screens would drift. So: adjacent, saved together.
+  const hostField = project ? (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+      <div style={{ flex: "0 0 200px", minWidth: 0 }}>
+        <FieldLabel>Runs on</FieldLabel>
+        <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
+          <select
+            value={sandboxId}
+            aria-label="Machine this project runs on"
+            onChange={(e) => {
+              const next = e.target.value;
+              setSandboxId(next);
+              if (!next) setRemoteDirectory("");
+            }}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              height: 38,
+              padding: "0 10px",
+              borderRadius: 7,
+              border: "1px solid var(--border)",
+              background: "var(--surface-0)",
+              color: "var(--text)",
+              fontSize: 13,
+            }}
+          >
+            <option value="">Local</option>
+            {sshHosts.map((host) => (
+              <option key={host.id} value={host.id}>
+                {host.name}
+              </option>
+            ))}
+          </select>
+          <Btn
+            variant="ghost"
+            size="sm"
+            icon="plus"
+            onClick={() => setAddHostOpen(true)}
+            title="Add an SSH host"
+            aria-label="Add an SSH host"
+            style={{ width: 34, padding: 0 }}
+          />
+          {selectedHost && (
+            <>
+              <Btn
+                variant="ghost"
+                size="sm"
+                icon="settings"
+                onClick={() => setHostConfigOpen(true)}
+                title={`Configure ${selectedHost.name}`}
+                aria-label={`Configure ${selectedHost.name}`}
+                style={{ width: 34, padding: 0 }}
+              />
+              <Btn
+                variant="ghost"
+                size="sm"
+                icon="trash"
+                onClick={() => setConfirmRemoveHost(true)}
+                title={`Remove ${selectedHost.name}`}
+                aria-label={`Remove ${selectedHost.name}`}
+                style={{ width: 34, padding: 0 }}
+              />
+            </>
+          )}
+        </div>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <TextField
+          mono
+          required={selectedHost !== null}
+          disabled={selectedHost === null}
+          ariaInvalid={remoteDirectoryMissing}
+          label={selectedHost ? `Directory on ${selectedHost.name}` : "Directory on the host"}
+          value={remoteDirectory}
+          onChange={(value) => setRemoteDirectory(value.slice(0, 500))}
+          placeholder="/Users/me/dev/my-project"
+          hint={
+            selectedHost
+              ? "Where sessions start on that machine. It does not have to exist yet."
+              : "A Local project runs from the working directory above."
+          }
+        />
+      </div>
+    </div>
+  ) : null;
 
   const dirField = (
     <div>
@@ -1228,17 +1378,6 @@ export function ProjectDialog({
     </div>
   );
 
-  const worktreeField = project ? (
-    <TextField
-      mono
-      label="New worktree setup command"
-      value={worktreeSetupCommand}
-      onChange={(value) => setWorktreeSetupCommand(value.slice(0, 500))}
-      placeholder="pnpm i"
-      hint="Optional. Runs once inside each newly created worktree."
-    />
-  ) : null;
-
   return (
     <Modal
       open={open}
@@ -1345,8 +1484,8 @@ export function ProjectDialog({
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {identityRow}
           {dirField}
+          {hostField}
           {groupField}
-          {worktreeField}
           <div ref={errorRef}>
             <FormErrorBox error={error} />
           </div>
@@ -1372,6 +1511,43 @@ export function ProjectDialog({
           </div>
         </div>
       )}
+
+      {/* Host management lives where the host is chosen — adding one is the
+          same act as picking one. A host added here is shared: another project
+          selects it from the same list rather than re-adding it. */}
+      <AddSshHostDialog
+        open={addHostOpen}
+        onClose={() => setAddHostOpen(false)}
+        onAdded={(addedId) => {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.sandboxes });
+          setSandboxId(addedId);
+          setAddHostOpen(false);
+        }}
+      />
+      <SandboxConfigModal
+        open={hostConfigOpen}
+        onClose={() => setHostConfigOpen(false)}
+        sandboxId={selectedHost?.id ?? null}
+      />
+      <ConfirmDialog
+        open={confirmRemoveHost}
+        onClose={() => {
+          if (!removingHost) setConfirmRemoveHost(false);
+        }}
+        onConfirm={() => void removeSelectedHost()}
+        title={selectedHost ? `Remove ${selectedHost.name}?` : "Remove host?"}
+        confirmLabel="Remove host"
+        icon="trash"
+        variant="danger"
+        loading={removingHost}
+        width={460}
+      >
+        <p style={{ margin: 0, fontSize: 13, color: "var(--text)", lineHeight: 1.5 }}>
+          Mission Control stops using this machine. Nothing on it is deleted, and
+          every project that ran there falls back to Local — you can point them
+          at another host afterwards.
+        </p>
+      </ConfirmDialog>
     </Modal>
   );
 }

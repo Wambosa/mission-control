@@ -18,8 +18,6 @@ import { PET_XP_AWARDS } from "~/lib/pet/pet-store";
  */
 
 const XP_SOURCES: ReadonlyArray<{ label: string; detail: string; xp: number }> = [
-  { label: "PR created", detail: "An agent opens a pull request", xp: PET_XP_AWARDS.prCreated },
-  { label: "Ship success", detail: "A push lands cleanly", xp: PET_XP_AWARDS.shipSuccess },
   {
     label: "Long session",
     detail: "A finished session that ran long",

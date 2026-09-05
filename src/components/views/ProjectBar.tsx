@@ -4,18 +4,16 @@ import { useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { toast } from "sonner";
-import { useGroups, useSandboxes, useScopedProjects, useSettings, queryKeys } from "~/queries";
+import { useGroups, useProjects, useSettings, queryKeys } from "~/queries";
 import type { ProjectWithCounts } from "~/shared/projects";
 import type { Group } from "~/db/schema";
 import { ProjectIcon } from "~/components/ui/ProjectIcon";
-import { Icon } from "~/components/ui/Icon";
 import { CardFrame } from "~/components/ui/CardFrame";
 import { ContextMenuPopover } from "~/components/ui/ContextMenuPopover";
 import { DropdownMenuItem } from "~/components/ui/DropdownMenuItem";
 import { ProjectDialog } from "~/components/views/ProjectDialog";
 import { useServerEvents } from "~/lib/use-events";
 import { useDebouncedCallback } from "~/lib/use-debounced-callback";
-import { useUserTerminals } from "~/lib/user-terminal-store";
 import { useBinding } from "~/lib/keybindings/store";
 import { formatBinding } from "~/lib/keybindings/format";
 import { PINNED_SLOT_COUNT } from "~/lib/keybindings/match";
@@ -66,11 +64,9 @@ type RailRow = {
 export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disabled?: boolean }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { data: projects } = useScopedProjects();
-  const { data: sandboxState } = useSandboxes();
+  const { data: projects } = useProjects();
   const { data: groups = [] } = useGroups();
   const { data: settings } = useSettings();
-  const { hasRunningLaunchForProject } = useUserTerminals();
   const minimal = settings?.minimalTheme ?? false;
   const invalidateProjects = useCallback(
     () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
@@ -196,13 +192,6 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
     .map((project) => project.id);
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  useEffect(() => {
-    setProjectDrag(null);
-    setGroupDragOrder(null);
-    groupDragOrderRef.current = null;
-    setGroupDrag(null);
-    setMenu(null);
-  }, [sandboxState?.activeScopeId, sandboxState?.enabled]);
   // Stop overriding once the server group order catches up to the optimistic
   // one (or diverges from it) — the fetched list is authoritative again.
   useEffect(() => {
@@ -233,8 +222,10 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
     )
   );
   const pinnedSlotBase = useBinding("project.pinnedSlot");
+  // Unbound by default: the tile keeps its number badge, and the title simply
+  // stops promising a chord that would not fire.
   const pinnedSlotBinding = (slot: number) =>
-    formatBinding({ ...pinnedSlotBase, key: String(slot) });
+    pinnedSlotBase ? formatBinding({ ...pinnedSlotBase, key: String(slot) }) : "";
 
   // Persist a project drop: the new pinned order (the full rail in All mode,
   // or one group's pinned subset in group-workspace mode), plus the group
@@ -1040,11 +1031,7 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
           ? pinnedSlotBinding(projectNumber)
           : `${pinnedSlotBinding(groupNumber)} ${projectNumber}`;
         const runningCount = project.taskCounts.running;
-        const launchRunning = hasRunningLaunchForProject(project.id, project.launchCommands);
-        const logoShouldFlash = shouldFlashPinnedProjectLogo({
-          cliRunningCount: runningCount,
-          terminalOpen: launchRunning,
-        });
+        const logoShouldFlash = shouldFlashPinnedProjectLogo({ cliRunningCount: runningCount });
         const finishedCount = project.taskCounts.finished;
         const statusDots = getPinnedProjectStatusDots(project.taskCounts);
         const hasStatusDots = statusDots.length > 0;
@@ -1057,16 +1044,14 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
           runningCount > 0
             ? `${runningCount} ${runningCount === 1 ? "session" : "sessions"} running`
             : null;
-        const launchLabel = launchRunning ? "launch running" : null;
         const finishedLabel =
           finishedCount > 0
             ? `${finishedCount} ${finishedCount === 1 ? "session" : "sessions"} finished`
             : null;
         const tooltip = [
-          hotkey ? `${project.name} (${chordHint})` : project.name,
+          hotkey && chordHint.trim() ? `${project.name} (${chordHint})` : project.name,
           project.pinned ? "Drag or press Shift+Arrow Up/Down to reorder pinned projects" : null,
           needsInputLabel,
-          launchLabel,
           runningLabel,
           finishedLabel,
         ]
@@ -1226,30 +1211,6 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
               >
                 <ProjectIcon project={project} size={ICON_SIZE} />
               </span>
-              {launchRunning && (
-                <span
-                  aria-hidden
-                  style={{
-                    position: "absolute",
-                    top: -4,
-                    right: needsInputCount > 0 ? 12 : -4,
-                    minWidth: 14,
-                    height: 14,
-                    padding: "0 2px",
-                    borderRadius: HOTKEY_BADGE_RADIUS,
-                    background: "var(--surface-3, var(--surface-2))",
-                    border: "1px solid var(--border)",
-                    color: "var(--accent-ink)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    pointerEvents: "none",
-                    zIndex: 4,
-                  }}
-                >
-                  <Icon name="play" size={8} />
-                </span>
-              )}
               {needsInputCount > 0 && (
                 <span
                   className="mc-needs-input-badge"

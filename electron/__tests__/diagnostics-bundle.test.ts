@@ -88,7 +88,8 @@ describe("stageDiagnosticsBundle", () => {
   });
 
   // The rotated sibling exists only once the log has rotated, so its absence is
-  // the normal case rather than a failure.
+  // the normal case rather than a failure — and the copy is attempted directly,
+  // so this also covers a log that rotates away mid-export.
   it("omits a rotated log that does not exist rather than failing", () => {
     const dir = path.join(root, "out");
     const entries = stageDiagnosticsBundle(dir, {
@@ -171,13 +172,14 @@ describe("stageDiagnosticsBundle", () => {
 
 describe("buildDiagnosticsManifest", () => {
   it("records the build, the platform, and what the bundle holds", () => {
-    const present = writeLog("main.log");
+    // The caller resolves which logs exist; this function does no I/O and
+    // reports the list it was handed.
     const manifest = buildDiagnosticsManifest({
       appVersion: "1.2.3",
       platform: "darwin",
       arch: "arm64",
       packaged: true,
-      logFiles: [present, path.join(root, "main.old.log")],
+      logFiles: [writeLog("main.log")],
       transcripts: [transcript({ output: "abc" })],
       now: Date.UTC(2026, 8, 8, 12, 0, 0),
     });
@@ -188,7 +190,6 @@ describe("buildDiagnosticsManifest", () => {
       platform: "darwin",
       arch: "arm64",
       packaged: true,
-      // Only the log that exists is listed.
       logFiles: ["main.log"],
       transcriptCount: 1,
       scrubbed: false,

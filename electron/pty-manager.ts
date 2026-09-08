@@ -278,7 +278,7 @@ export async function drainPtyTranscripts(timeoutMs: number): Promise<void> {
   await awaitTranscriptWrites(timeoutMs);
 }
 
-export async function awaitTranscriptWrites(timeoutMs: number): Promise<void> {
+async function awaitTranscriptWrites(timeoutMs: number): Promise<void> {
   if (pendingTranscriptWrites.size === 0) return;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<void>((resolve) => {

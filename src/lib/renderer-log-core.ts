@@ -5,7 +5,12 @@
  * `electron-log/renderer`, whose CommonJS tree the test bundler will not
  * resolve in a node environment. The same split the server-output forwarder
  * uses: injected dependencies here, the real transport wired in the shell.
+ *
+ * The payload shape itself is shared with the server emitter — see
+ * ~/shared/log-event-shape.
  */
+
+import { eventPayload } from "~/shared/log-event-shape";
 
 export type RendererLogDeps = {
   /** Hand one structured event to the transport. */
@@ -29,26 +34,11 @@ export type RendererEventLogger = (
   fields?: Record<string, unknown>,
 ) => void;
 
-/**
- * The `{ event, ...ids }` shape R7 fixes, kept an object rather than a string.
- *
- * The name is written last so a field can never rename the event, and first in
- * insertion order so a truncated line still says what happened.
- */
-export function rendererEventPayload(
-  event: string,
-  fields: Record<string, unknown> = {},
-): Record<string, unknown> {
-  const payload: Record<string, unknown> = { event, ...fields };
-  payload.event = event;
-  return payload;
-}
-
 export function createRendererEventLogger(deps: RendererLogDeps): RendererEventLogger {
   return (event, fields = {}) => {
     if (!deps.bridgeReady()) return;
     try {
-      deps.send(event, rendererEventPayload(event, fields));
+      deps.send(event, eventPayload(event, fields));
     } catch {
       // Called from a router subscription, so a throw here would take
       // navigation down with it. A lost event must never break the interaction

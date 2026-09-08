@@ -87,10 +87,6 @@ export function taskIdsWithTerminalLogs(): string[] {
   return rows.map((r) => r.taskId);
 }
 
-export function deleteTerminalLogsForTask(taskId: string): void {
-  getDb().delete(terminalLogs).where(eq(terminalLogs.taskId, taskId)).run();
-}
-
 function chunked<T>(items: readonly T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));

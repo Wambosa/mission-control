@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  createRendererEventLogger,
-  rendererEventPayload,
-} from "../renderer-log-core";
+import { createRendererEventLogger } from "../renderer-log-core";
+import { eventPayload as rendererEventPayload } from "~/shared/log-event-shape";
 
 function harness(over: { bridgeReady?: () => boolean } = {}) {
   const send = vi.fn();

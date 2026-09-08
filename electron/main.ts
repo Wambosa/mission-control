@@ -1882,14 +1882,20 @@ safeHandle(IPC.dialogGrantFolder, async (_evt, requested: unknown) => {
  * database, which main cannot read — they come back over the API, the mirror of
  * the path they crossed on capture.
  */
-function diagnosticsLogFiles(): string[] {
-  // electron-log keeps one rotated sibling; it exists only once the log has
-  // rotated, so its absence is normal and the staging step skips it.
+/**
+ * The log files that exist right now.
+ *
+ * electron-log keeps one rotated sibling, which exists only once the log has
+ * rotated — so its absence is the normal case. Resolved once per export and
+ * handed to both the manifest and the staging step: probing separately let the
+ * two disagree if a rotation landed between them.
+ */
+function existingDiagnosticsLogFiles(): string[] {
   const current = log.transports.file.getFile().path;
   const dir = path.dirname(current);
-  const base = path.basename(current, path.extname(current));
   const ext = path.extname(current);
-  return [current, path.join(dir, `${base}.old${ext}`)];
+  const base = path.basename(current, ext);
+  return [current, path.join(dir, `${base}.old${ext}`)].filter((file) => fs.existsSync(file));
 }
 
 function diagnosticsLogDirectory(): string {
@@ -1933,20 +1939,18 @@ safeHandle(IPC.diagnosticsRevealLogs, async () => {
 });
 
 safeHandle(IPC.diagnosticsExport, async () => {
-  const logFiles = diagnosticsLogFiles();
+  const logFiles = existingDiagnosticsLogFiles();
   const transcripts = await fetchRetainedTranscripts();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const saveOptions = {
+    title: "Export diagnostics",
+    defaultPath: `mission-control-diagnostics-${stamp}.tgz`,
+    filters: [{ name: "Diagnostics bundle", extensions: ["tgz"] }],
+  };
+  // Parented to the window when there is one, so the sheet is modal to the app.
   const result = win
-    ? await dialog.showSaveDialog(win, {
-        title: "Export diagnostics",
-        defaultPath: `mission-control-diagnostics-${stamp}.tgz`,
-        filters: [{ name: "Diagnostics bundle", extensions: ["tgz"] }],
-      })
-    : await dialog.showSaveDialog({
-        title: "Export diagnostics",
-        defaultPath: `mission-control-diagnostics-${stamp}.tgz`,
-        filters: [{ name: "Diagnostics bundle", extensions: ["tgz"] }],
-      });
+    ? await dialog.showSaveDialog(win, saveOptions)
+    : await dialog.showSaveDialog(saveOptions);
   // Dismissing the dialog is not a failure, and R27 wants the two told apart.
   if (result.canceled || !result.filePath) {
     return { ok: false as const, cancelled: true as const };

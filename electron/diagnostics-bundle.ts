@@ -76,16 +76,21 @@ export function stageDiagnosticsBundle(dir: string, input: DiagnosticsBundleInpu
   const logsDir = path.join(dir, "logs");
   let wroteLog = false;
   for (const source of input.logFiles) {
-    // A rotated sibling only exists once the log has rotated, so its absence is
-    // the normal case rather than a failure.
-    if (!fs.existsSync(source)) continue;
+    const name = path.basename(source);
+    const target = path.join(logsDir, name);
     if (!wroteLog) {
       fs.mkdirSync(logsDir, { recursive: true, mode: OWNER_ONLY_DIR });
       wroteLog = true;
     }
-    const name = path.basename(source);
-    fs.copyFileSync(source, path.join(logsDir, name));
-    fs.chmodSync(path.join(logsDir, name), OWNER_ONLY_FILE);
+    try {
+      // Copied rather than pre-checked: a log can rotate away between the
+      // caller resolving the list and this copy, and a rotated sibling that is
+      // simply absent is the normal case rather than a failure.
+      fs.copyFileSync(source, target);
+    } catch {
+      continue;
+    }
+    fs.chmodSync(target, OWNER_ONLY_FILE);
     entries.push(path.posix.join("logs", name));
   }
 
@@ -119,6 +124,7 @@ export function buildDiagnosticsManifest(input: {
   platform: string;
   arch: string;
   packaged: boolean;
+  /** Already resolved to the files that exist; this function does no I/O. */
   logFiles: readonly string[];
   transcripts: readonly RetainedTranscript[];
   now: number;
@@ -129,7 +135,7 @@ export function buildDiagnosticsManifest(input: {
     platform: input.platform,
     arch: input.arch,
     packaged: input.packaged,
-    logFiles: input.logFiles.filter((file) => fs.existsSync(file)).map((file) => path.basename(file)),
+    logFiles: input.logFiles.map((file) => path.basename(file)),
     transcriptCount: input.transcripts.length,
     transcripts: input.transcripts.map((t) => ({
       taskId: t.taskId,

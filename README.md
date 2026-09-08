@@ -172,6 +172,63 @@ within Mission Control. `/api/events` (SSE) uses a short-lived ticket from
 | GET    | `/api/settings`                        |
 | POST   | `/api/settings` (regenerate token)     |
 
+## Observability
+
+Everything the app records goes to one file. In a packaged build it persists to:
+
+- **macOS:** `~/Library/Logs/MissionControl/main.log`
+- **Windows:** `%USERPROFILE%\AppData\Roaming\MissionControl\logs\main.log`
+- **Linux:** `~/.config/MissionControl/logs/main.log`
+
+**Settings → Diagnostics** exports the logs and retained session transcripts as
+one bundle, and reveals the log directory in the OS file manager. Crash dumps
+land separately, in `Crashpad/` under the same user-data directory.
+
+Four producers write to that one file, three of which used to discard their
+output: the main process, the renderer (via a `console-message` hook and
+electron-log's renderer transport), the bundled server child (its stdout and
+stderr, forwarded under a `[server]` prefix), and PTY lifecycle from
+`electron/pty-manager.ts`.
+
+### Event families
+
+Every event carries a name and the ids needed to narrow one incident to one
+session: `{ event, ...ids }`. Individual event names are not listed here — they
+change with the code and the family is the stable part.
+
+| Family | Covers |
+| --- | --- |
+| `app.*` | Launch (version, platform, arch), quit, migrations applied |
+| `server.*` | The bundled server child starting and exiting |
+| `pty.*` | PTY spawn, exit, teardown, and bulk teardown at shutdown |
+| `session.*` | Sessions created, archived, restored, deleted, pinned |
+| `project.*` | Projects created, edited, deleted, opened, rebound to another host |
+| `group.*` | Project groups created, edited, deleted |
+| `setting.changed` | One settings mutation, with the key and both values |
+| `nav.route` | One line per navigation |
+| `sandbox.*` | Sandbox state and provisioning |
+
+**Input events are never logged** — no keystrokes, pointer movement, scroll, or
+activation of a control that changes no state. That exclusion is what keeps the
+file readable and keeps its synchronous write path affordable.
+
+Events emitted by the server child are single-line JSON behind an `[mc-event]`
+marker, so machine events can be separated from the free-text server
+diagnostics sharing the file:
+
+```
+rg 'mc-event' ~/Library/Logs/MissionControl/main.log
+```
+
+Two values are held back on purpose. Setting values are redacted by key
+(anything looking like a token, secret, password or credential) and capped by
+length — the diagnostics export ships unscrubbed, and the database already
+holds those secrets in cleartext without needing a second copy in a file with a
+wider audience. Retained transcripts are raw terminal output and carry whatever
+a shell or agent printed, so treat an exported bundle accordingly.
+
+In dev (`pnpm dev`) the same lines also go to stdout/stderr.
+
 ## Skill file for external CLIs
 
 A drop-in skill for Claude Code / Codex / Cursor CLI lives in `docs/skills/missioncontrol-notify.md`. Paste it into the CLI's instructions or memory so the agent knows to POST its lifecycle events back to MissionControl.

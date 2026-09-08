@@ -67,12 +67,19 @@ export function settingValueForLog(key: string, value: unknown): unknown {
   return `${value.slice(0, MAX_LOGGED_VALUE_CHARS)}…(${value.length} chars)`;
 }
 
-/** One structured event line: the marker, then `{ event, ...ids }` as JSON. */
+/**
+ * One structured event line: the marker, then `{ event, ...ids }` as JSON.
+ *
+ * The name is written last so a field can never rename the event, and first in
+ * insertion order so a truncated line still says what happened.
+ */
 export function formatServerEvent(
   event: string,
   fields: Record<string, unknown> = {},
 ): string {
-  return `${SERVER_EVENT_MARKER} ${JSON.stringify({ event, ...fields })}`;
+  const payload: Record<string, unknown> = { event, ...fields };
+  payload.event = event;
+  return `${SERVER_EVENT_MARKER} ${JSON.stringify(payload)}`;
 }
 
 /**

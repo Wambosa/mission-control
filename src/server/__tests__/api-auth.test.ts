@@ -66,6 +66,8 @@ const PROTECTED_ROUTES: ReadonlyArray<{ method: string; pathname: string }> = [
   { method: "POST", pathname: "/api/tasks/t1/status" },
   { method: "POST", pathname: "/api/tasks/t1/archive" },
   { method: "POST", pathname: "/api/tasks/t1/restore" },
+  { method: "POST", pathname: "/api/tasks/t1/terminal-output" },
+  { method: "GET", pathname: "/api/tasks/t1/terminal-output" },
   // Settings
   { method: "GET", pathname: "/api/settings" },
   { method: "POST", pathname: "/api/settings" },

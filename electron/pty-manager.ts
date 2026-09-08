@@ -32,7 +32,7 @@ import {
   SpawnPolicyError,
   type SpawnRequest,
 } from "./pty-spawn-policy";
-import { buildSyntheticHookUrl, type PtyHookEnv } from "./pty-hook-env";
+import { buildSyntheticHookUrl, buildTaskApiUrl, type PtyHookEnv } from "./pty-hook-env";
 import { AGENT_HOOK_EVENTS } from "../src/shared/agent-hook-events";
 import { checkAgentCliVersionCached, agentVersionErrorMessage } from "./agent-cli-version";
 import {
@@ -176,6 +176,118 @@ async function postSyntheticHook(p: Pty, event: string, extra?: Record<string, u
     });
   } catch {
     /* swallow — best-effort status sync */
+  }
+}
+
+/**
+ * Transcript capture (R23, R25).
+ *
+ * The bytes have to cross a process boundary whoever writes them: Electron main
+ * has no database access, because the server runs as a child process. This
+ * rides the output batcher's already-coalesced flush cadence rather than the
+ * per-chunk data handler, so the hot path stays allocation-cheap and no new
+ * timer is introduced.
+ *
+ * Deliberately fire-and-forget. A dropped chunk under load is a better trade
+ * than a write that can stall a terminal, which R25 forbids outright — so
+ * nothing here is awaited on the flush path, and every failure is swallowed.
+ * The pending set exists only so a clean quit can wait for outstanding writes
+ * (KTD9); it is not a retry queue.
+ */
+const pendingTranscriptWrites = new Set<Promise<void>>();
+
+/**
+ * The live batcher, so the quit drain can force a final flush.
+ *
+ * registerPtyHandlers() is called once per app run, so this is a handle to that
+ * one instance rather than a registry.
+ */
+let activeOutputBatcher: PtyOutputBatcher | null = null;
+
+/**
+ * Where a flushed batch should be sent, or `null` to drop it.
+ *
+ * Exported for its own sake: every branch here is a silent drop, so the ones
+ * that are correct need to be distinguishable from the ones that would be bugs.
+ */
+export function transcriptCaptureTarget(
+  pty: { shell: boolean; taskId: string },
+  mcEnv: PtyHookEnv | null | undefined,
+  data: string,
+): { url: string; token: string } | null {
+  // Agent sessions only (KTD10). A shell or dashboard terminal's id belongs to
+  // a separate entity, and the retention table's key is an enforced foreign key
+  // to the task table — so an insert for one would be rejected rather than
+  // stored. Dropping it here keeps a guaranteed-failing request off the wire.
+  if (pty.shell) return null;
+  if (!data) return null;
+  if (!mcEnv?.apiUrl || !mcEnv.token) return null;
+  const url = buildTaskApiUrl(mcEnv, pty.taskId, "terminal-output");
+  if (!url) return null;
+  return { url, token: mcEnv.token };
+}
+
+function captureTranscriptBatch(p: Pty, mcEnv: PtyHookEnv | null, data: string): void {
+  const target = transcriptCaptureTarget(p, mcEnv, data);
+  if (!target) return;
+
+  const write = fetch(target.url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${target.token}`,
+    },
+    body: JSON.stringify({ chunks: [data] }),
+  })
+    .then(() => {})
+    .catch(() => {
+      /* swallow — best-effort retention, never the terminal's problem */
+    })
+    .finally(() => {
+      pendingTranscriptWrites.delete(write);
+    });
+  pendingTranscriptWrites.add(write);
+}
+
+/**
+ * Wait for outstanding transcript writes, up to `timeoutMs` (KTD9).
+ *
+ * The bound is not optional. These writes carry no acknowledgment, so an
+ * unresponsive or already-dead server child must not be able to hang the quit —
+ * an app that will not exit and says nothing is the symptom this work exists to
+ * remove, and reintroducing it at shutdown for a few final lines would be a
+ * poor trade.
+ */
+/**
+ * Flush pending PTY output and wait for the transcript writes it produces.
+ *
+ * Called at quit, before the server child is killed (KTD9). Without it every
+ * clean quit loses the closing output of every live session: the quit handler
+ * tears down each PTY and kills the server a few synchronous lines later, while
+ * each PTY's final flush runs in its asynchronous exit handler — so the server
+ * dies before the last batches arrive.
+ *
+ * Bounded, because the writes it waits on carry no acknowledgment.
+ */
+export async function drainPtyTranscripts(timeoutMs: number): Promise<void> {
+  try {
+    activeOutputBatcher?.flushAll();
+  } catch {
+    /* a failed flush must not stop the quit */
+  }
+  await awaitTranscriptWrites(timeoutMs);
+}
+
+export async function awaitTranscriptWrites(timeoutMs: number): Promise<void> {
+  if (pendingTranscriptWrites.size === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs);
+  });
+  try {
+    await Promise.race([Promise.allSettled([...pendingTranscriptWrites]).then(() => {}), deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -382,7 +494,16 @@ export function registerPtyHandlers(
       scanForCodexHookReview(p, haystack);
     }
     send(getWin, IPC.ptyData, { ptyId, data, seq });
+    // Retention rides this flush (R23), and lands after the renderer send so
+    // the terminal is never waiting behind a write — R25.
+    //
+    // Credentials come from getHookEnv(), the accessor already in scope here,
+    // NOT from p.mcEnv: that field is populated only for agent-mode PTYs, so
+    // reading it would silently skip every session spawned without them — a
+    // gap that fails without erroring.
+    if (p) captureTranscriptBatch(p, getHookEnv(), data);
   });
+  activeOutputBatcher = outputBatcher;
   safeHandle(
     IPC.ptySpawn,
     async (_evt, opts: SpawnRequest) => {

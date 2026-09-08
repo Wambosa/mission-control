@@ -473,6 +473,10 @@ function ensureSchema(sqlite: Database.Database) {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS terminal_logs_task_idx ON terminal_logs(task_id);
+    -- Retention trims oldest-first within a session, so the sort key is
+    -- (task_id, created_at). Without this the trim orders the session's whole
+    -- row set on every pass.
+    CREATE INDEX IF NOT EXISTS terminal_logs_task_created_idx ON terminal_logs(task_id, created_at);
 
     CREATE TABLE IF NOT EXISTS task_diagrams (
       id TEXT PRIMARY KEY,
@@ -725,6 +729,11 @@ function ensureSchema(sqlite: Database.Database) {
   // and sorts separately; this lets it satisfy the filter + order in one index
   // scan.
   sqlite.exec("CREATE INDEX IF NOT EXISTS tasks_project_created_idx ON tasks(project_id, created_at);");
+  // Retention trims a session's chunks oldest-first, so the sort key is
+  // (task_id, created_at); the table only indexed its task column before
+  // transcript retention shipped, which left the trim ordering the session's
+  // whole row set.
+  sqlite.exec("CREATE INDEX IF NOT EXISTS terminal_logs_task_created_idx ON terminal_logs(task_id, created_at);");
   ensureColumn(sqlite, "user_terminals", "scope_id", `TEXT NOT NULL DEFAULT '${LOCAL_SCOPE_ID}'`);
   sqlite.exec("CREATE INDEX IF NOT EXISTS user_terminals_project_worktree_scope_idx ON user_terminals(project_id, worktree_id, scope_id);");
   sqlite.exec("CREATE INDEX IF NOT EXISTS user_terminals_scope_idx ON user_terminals(scope_id);");

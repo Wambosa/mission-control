@@ -15,9 +15,9 @@ import {
 } from "../repositories/tasks.repo";
 import { findProjectNameById } from "../repositories/projects.repo";
 import {
-  deleteTerminalLogById,
   findTerminalLogsByTaskId,
-  insertTerminalLog,
+  insertTerminalLogs,
+  trimTerminalLogsForTask,
 } from "../repositories/terminal-logs.repo";
 import { logServerEvent } from "../log-event";
 import { newId } from "./_ids";
@@ -245,23 +245,105 @@ export function deleteTask(id: string): boolean {
   return false;
 }
 
-const RING_LIMIT_BYTES = 1_000_000;
+/**
+ * Retained output per session (R24). Matches the in-memory replay ring in
+ * electron/pty-manager.ts, so what survives a restart is the same window the
+ * live terminal would have replayed.
+ *
+ * This bounds ONE session. Nothing bounds the total across sessions: archiving
+ * a session keeps its output, and only deleting it reclaims the rows through
+ * the cascade. That is a known, recorded gap rather than an oversight.
+ */
+const TRANSCRIPT_BUDGET_BYTES = 1_000_000;
 
-export function appendTerminalLog(taskId: string, chunk: string) {
-  const id = newId("tl");
-  insertTerminalLog({ id, taskId, chunk, createdAt: Date.now() });
-  // rough FIFO eviction by total length per task
-  const all = findTerminalLogsByTaskId(taskId);
-  let total = all.reduce((a, r) => a + r.chunk.length, 0);
-  for (const r of all) {
-    if (total <= RING_LIMIT_BYTES) break;
-    deleteTerminalLogById(r.id);
-    total -= r.chunk.length;
-  }
+/**
+ * How much new output a session may accumulate before its size is re-checked.
+ *
+ * The bound is enforced on a trigger rather than per write: a trim reads the
+ * session's rows, and doing that on every flush is the full per-task scan the
+ * previous implementation did. The consequence is that R24 is *eventually*
+ * enforced — a crash between an insert and its trim leaves a session
+ * temporarily over budget, never corrupt.
+ *
+ * Set to the batcher's own force-flush ceiling so a saturated session is
+ * checked roughly once per forced flush. Worth measuring against a real
+ * session; it is a throughput/overshoot dial, not a correctness one.
+ */
+const TRIM_CHECK_BYTES = 262_144;
+
+/** Bytes written per task since that task's last trim. Reset by the trim. */
+const bytesSinceTrim = new Map<string, number>();
+
+/**
+ * A strictly increasing creation stamp for retained chunks.
+ *
+ * Wall-clock milliseconds alone are not enough: several flushes land inside one
+ * millisecond under load, and the row id cannot break the tie because it ends
+ * in random hex — so two batches from the same millisecond would read back in
+ * arbitrary order. This never returns a value it has already returned, which
+ * gives the trim and the read a total order.
+ *
+ * Under a burst the stamp runs slightly ahead of the clock. That is the right
+ * trade: this column exists to order a session's output, and it is never shown
+ * to anyone as a timestamp.
+ */
+let lastCreatedAt = 0;
+function nextCreatedAt(): number {
+  const now = Date.now();
+  lastCreatedAt = now > lastCreatedAt ? now : lastCreatedAt + 1;
+  return lastCreatedAt;
 }
 
+/**
+ * Persist a batch of terminal output for a session (R23).
+ *
+ * Never throws for a missing task: the batches arrive fire-and-forget from the
+ * main process, and one can land after its task is deleted — the same
+ * existence-check-then-write shape recordPrompt uses, for the same reason. A
+ * batch for a task that is gone is dropped, not raised, because the cascade has
+ * already removed everything it would have been attached to.
+ */
+export function appendTerminalOutput(taskId: string, chunks: readonly string[]): boolean {
+  if (chunks.length === 0) return true;
+  // The foreign key would reject this anyway; checking first keeps a constraint
+  // error out of the request handler.
+  if (!findTaskById(taskId)) return false;
+
+  const rows = chunks
+    .filter((chunk) => chunk.length > 0)
+    .map((chunk) => ({
+      id: newId("tl"),
+      taskId,
+      chunk,
+      createdAt: nextCreatedAt(),
+    }));
+  if (rows.length === 0) return true;
+
+  insertTerminalLogs(rows);
+
+  const written = rows.reduce((total, row) => total + Buffer.byteLength(row.chunk, "utf8"), 0);
+  const pending = (bytesSinceTrim.get(taskId) ?? 0) + written;
+  if (pending < TRIM_CHECK_BYTES) {
+    bytesSinceTrim.set(taskId, pending);
+    return true;
+  }
+
+  // Reset before trimming: a trim that throws must not make every later flush
+  // retry it, and the next flush past the threshold will try again.
+  bytesSinceTrim.set(taskId, 0);
+  trimTerminalLogsForTask(taskId, TRANSCRIPT_BUDGET_BYTES);
+  return true;
+}
+
+/** A session's retained output, oldest first (R23). */
 export function readTerminalLog(taskId: string): string {
   return findTerminalLogsByTaskId(taskId)
     .map((r) => r.chunk)
     .join("");
+}
+
+/** Test-only: drop the in-memory trim counters and the creation stamp. */
+export function __resetTranscriptTrimStateForTesting(): void {
+  bytesSinceTrim.clear();
+  lastCreatedAt = 0;
 }

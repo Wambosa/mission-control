@@ -68,6 +68,7 @@ const TASK_QUESTION_PATH = /^\/api\/tasks\/([^/]+)\/question$/;
 const TASK_ARCHIVE_PATH = /^\/api\/tasks\/([^/]+)\/archive$/;
 const TASK_RESTORE_PATH = /^\/api\/tasks\/([^/]+)\/restore$/;
 const TASK_BRIEF_PATH = /^\/api\/tasks\/([^/]+)\/brief$/;
+const TASK_TERMINAL_OUTPUT_PATH = /^\/api\/tasks\/([^/]+)\/terminal-output$/;
 const USER_TERMINAL_PATH = /^\/api\/user-terminals\/([^/]+)$/;
 const HOME_USER_TERMINAL_PATH = /^\/api\/home\/user-terminals\/([^/]+)$/;
 const REQUEST_ID_HEADER = "x-request-id";
@@ -374,6 +375,15 @@ async function dispatch(
   if (m && method === "POST") return tasksController.restore(decode(m[1]), request);
   m = pathname.match(TASK_BRIEF_PATH);
   if (m && method === "GET") return projectMemoryController.brief(decode(m[1]), url);
+  // Retained terminal output: POST is the main process's fire-and-forget
+  // ingest, GET is how the diagnostics export reaches content main cannot read
+  // itself.
+  m = pathname.match(TASK_TERMINAL_OUTPUT_PATH);
+  if (m) {
+    const id = decode(m[1]);
+    if (method === "POST") return tasksController.appendTerminalOutputRoute(id, request);
+    if (method === "GET") return tasksController.readTerminalOutputRoute(id);
+  }
 
   // User terminals
   m = pathname.match(USER_TERMINAL_PATH);

@@ -23,7 +23,7 @@ import * as nodeNet from "node:net";
 import * as readline from "node:readline";
 import * as os from "node:os";
 import { spawn, ChildProcess, spawnSync } from "node:child_process";
-import { registerPtyHandlers, killAllPtys } from "./pty-manager";
+import { registerPtyHandlers, killAllPtys, drainPtyTranscripts } from "./pty-manager";
 import { formatRendererConsoleLine, rendererLogMethod } from "./renderer-console-log";
 import { createServerOutputForwarder } from "./server-output-forwarder";
 import { setPtyStreamHidden, setPtyStreamPowerSave } from "./pty-output-batch";
@@ -2117,7 +2117,37 @@ app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
-app.on("before-quit", () => {
+/**
+ * How long quit waits for outstanding session-transcript writes (KTD9).
+ *
+ * Roughly two seconds, and capped deliberately: the writes carry no
+ * acknowledgment, so an unresponsive or already-dead server child must not be
+ * able to hang the quit. An app that will not exit and says nothing is the
+ * symptom this work exists to remove; reintroducing it at shutdown for a few
+ * final lines would be a poor trade.
+ */
+const QUIT_TRANSCRIPT_DRAIN_MS = 2_000;
+
+/** Whether the transcript drain below has already run for this quit. */
+let quitDrained = false;
+
+app.on("before-quit", (event) => {
+  // First pass: let the last of each live session's output reach the server
+  // before anything is torn down. Without this every clean quit loses the
+  // closing output of every live session — the server child is killed a few
+  // synchronous lines below, while each PTY's final flush runs in its
+  // asynchronous exit handler, so the last batches arrive after it is gone.
+  //
+  // isQuiting stays unset here on purpose: it silences the server output
+  // forwarder, and the drain wants the server's own lines still reaching the
+  // log while it runs.
+  if (!quitDrained) {
+    quitDrained = true;
+    event.preventDefault();
+    void drainPtyTranscripts(QUIT_TRANSCRIPT_DRAIN_MS).finally(() => app.quit());
+    return;
+  }
+
   // Logged before isQuiting flips, because that flag is what silences the
   // server forwarder — and before the teardown below, so a quit that hangs
   // still shows that a quit was what started it.

@@ -74,6 +74,34 @@ export function hookEndpointSlug(agent: string | undefined): string {
   return "claude";
 }
 
+/**
+ * A Mission Control API URL for one task, validated the same way hook URLs are.
+ *
+ * `buildSyntheticHookUrl` is agent-hook-specific — it derives the path from the
+ * agent id — so transcript ingest needs its own builder rather than a reuse.
+ * The protocol/host/port checks are shared deliberately: they are what keeps a
+ * misconfigured apiUrl from turning best-effort POSTs into requests at an
+ * arbitrary host.
+ */
+export function buildTaskApiUrl(
+  mcEnv: PtyHookEnv,
+  taskId: string,
+  segment: string,
+): string | null {
+  let base: URL;
+  try {
+    base = new URL(mcEnv.apiUrl);
+  } catch {
+    return null;
+  }
+  if (base.protocol !== "http:" || !ALLOWED_HOOK_HOSTS.has(base.hostname) || !base.port) {
+    return null;
+  }
+  if (!taskId || !/^[A-Za-z0-9._:-]{1,128}$/.test(taskId)) return null;
+  if (!/^[a-z-]{1,64}$/.test(segment)) return null;
+  return new URL(`/api/tasks/${encodeURIComponent(taskId)}/${segment}`, base).toString();
+}
+
 export function buildSyntheticHookUrl(
   mcEnv: PtyHookEnv,
   agent: string | undefined,

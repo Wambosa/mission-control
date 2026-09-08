@@ -15,4 +15,5 @@ export {
   buildSandboxHookRelayUrl,
   hookEndpointSlug,
   buildSyntheticHookUrl,
+  buildTaskApiUrl,
 } from "../src/shared/mission-control-hook-env";

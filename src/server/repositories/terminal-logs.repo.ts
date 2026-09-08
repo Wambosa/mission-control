@@ -78,6 +78,15 @@ export function trimTerminalLogsForTask(taskId: string, budgetBytes: number): nu
   return doomed.length;
 }
 
+/** Every task that has retained output, for the diagnostics export. */
+export function taskIdsWithTerminalLogs(): string[] {
+  const rows = getDb()
+    .selectDistinct({ taskId: terminalLogs.taskId })
+    .from(terminalLogs)
+    .all();
+  return rows.map((r) => r.taskId);
+}
+
 export function deleteTerminalLogsForTask(taskId: string): void {
   getDb().delete(terminalLogs).where(eq(terminalLogs.taskId, taskId)).run();
 }

@@ -7,6 +7,7 @@ import { CLOSE_SETTINGS_EVENT } from "~/lib/design-meta";
 import { useHotkey } from "~/lib/use-hotkey";
 import { Z_INDEX } from "~/lib/z-index";
 import { DefaultsSettingsPage } from "./DefaultsSettingsPage";
+import { DiagnosticsSettingsPage } from "./DiagnosticsSettingsPage";
 import { GeneralSettingsPage } from "./GeneralSettingsPage";
 import { KeybindingsPage } from "./KeybindingsPage";
 import { PetSettingsPage } from "./PetSettingsPage";
@@ -93,6 +94,7 @@ export function SettingsPanel({
     { id: "theme", label: "Theme", icon: "sun" },
     { id: "pet", label: "Pet", icon: "pet" },
     { id: "keybindings", label: "Keybindings", icon: "settings" },
+    { id: "diagnostics", label: "Diagnostics", icon: "info" },
   ];
 
   return (
@@ -333,6 +335,8 @@ export function SettingsPanel({
             <RecallSettingsPage />
           ) : activePanel === "keybindings" ? (
             <KeybindingsPage />
+          ) : activePanel === "diagnostics" ? (
+            <DiagnosticsSettingsPage />
           ) : (
             <TermsSettingsPage />
           )}

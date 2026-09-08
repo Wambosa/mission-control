@@ -385,6 +385,11 @@ async function dispatch(
     if (method === "GET") return tasksController.readTerminalOutputRoute(id);
   }
 
+  // Diagnostics: the export runs in main, which cannot read the database.
+  if (pathname === "/api/diagnostics/transcripts" && method === "GET") {
+    return tasksController.listRetainedTranscriptsRoute();
+  }
+
   // User terminals
   m = pathname.match(USER_TERMINAL_PATH);
   if (m) {

@@ -6,6 +6,7 @@ import {
   createTask,
   deleteTask,
   getTask,
+  listRetainedTranscripts,
   listTasksForProject,
   readTerminalLog,
   restoreTask,
@@ -210,6 +211,16 @@ export async function appendTerminalOutputRoute(
   if (!body.ok) return body.response;
   if (!appendTerminalOutput(parsed.data, body.data.chunks)) return notFound();
   return noContent();
+}
+
+/**
+ * Every session with retained output (KTD7).
+ *
+ * The diagnostics export calls this: main has no database access, so the only
+ * way an export can include transcripts is to ask the server for them.
+ */
+export function listRetainedTranscriptsRoute(): Response {
+  return json({ transcripts: listRetainedTranscripts() });
 }
 
 /** A session's retained terminal output, for the diagnostics export (R23). */

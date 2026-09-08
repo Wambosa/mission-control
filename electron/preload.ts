@@ -11,6 +11,15 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   return () => ipcRenderer.removeListener(channel, listener);
 }
 
+// Mirror of the diagnostics export result in main.ts (structural — the
+// renderer never imports main-process code). "cancelled" is distinct from a
+// failure on purpose: R27 wants a failed write surfaced, and a user dismissing
+// the save dialog is not one.
+export type DiagnosticsExportResultBridge =
+  | { ok: true; path: string; entries: number }
+  | { ok: false; cancelled: true }
+  | { ok: false; cancelled?: false; error: string };
+
 // Mirror of SandboxState in sandbox-manager.ts (structural — renderer never
 // imports main-process code). Drift caught by reviewer-contracts.
 export type SandboxStateBridge =
@@ -506,6 +515,16 @@ const electronAPI = {
       enabled: boolean,
     ): Promise<{ active: boolean; taskId: string | null; alwaysOnTop: boolean }> =>
       ipcRenderer.invoke(IPC.appSetFocusModeAlwaysOnTop, { enabled }),
+  },
+  diagnostics: {
+    /** Build the export bundle and save it where the user chooses. */
+    export: (): Promise<DiagnosticsExportResultBridge> =>
+      ipcRenderer.invoke(IPC.diagnosticsExport),
+    /** Reveal the log directory in the OS file manager. */
+    revealLogs: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC.diagnosticsRevealLogs),
+    /** The log directory's path, for display. */
+    logDirectory: (): Promise<string> => ipcRenderer.invoke(IPC.diagnosticsLogDirectory),
   },
   files: {
     list: (projectRoot: string): Promise<{ ok: true; files: string[] } | { ok: false; error: string }> =>

@@ -17,6 +17,7 @@ import { findProjectNameById } from "../repositories/projects.repo";
 import {
   findTerminalLogsByTaskId,
   insertTerminalLogs,
+  taskIdsWithTerminalLogs,
   trimTerminalLogsForTask,
 } from "../repositories/terminal-logs.repo";
 import { logServerEvent } from "../log-event";
@@ -340,6 +341,39 @@ export function readTerminalLog(taskId: string): string {
   return findTerminalLogsByTaskId(taskId)
     .map((r) => r.chunk)
     .join("");
+}
+
+export type RetainedTranscript = {
+  taskId: string;
+  title: string;
+  projectId: string;
+  archived: boolean;
+  output: string;
+};
+
+/**
+ * Every session with retained output, for the diagnostics export (KTD7).
+ *
+ * Main cannot read this itself — the database lives with the server child — so
+ * the export reaches it through the API. That is the mirror of the write path:
+ * the bytes crossed one way on capture and cross back on export.
+ */
+export function listRetainedTranscripts(): RetainedTranscript[] {
+  const out: RetainedTranscript[] = [];
+  for (const taskId of taskIdsWithTerminalLogs()) {
+    const task = findTaskById(taskId);
+    // A row whose task is gone should not exist (the key cascades), so this is
+    // a guard rather than an expected branch.
+    if (!task) continue;
+    out.push({
+      taskId,
+      title: task.title,
+      projectId: task.projectId,
+      archived: task.archived,
+      output: readTerminalLog(taskId),
+    });
+  }
+  return out;
 }
 
 /** Test-only: drop the in-memory trim counters and the creation stamp. */

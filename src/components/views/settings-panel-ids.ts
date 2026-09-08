@@ -14,6 +14,7 @@ export const SETTINGS_PANEL_IDS = [
   "pet",
   "recall",
   "keybindings",
+  "diagnostics",
   "terms",
 ] as const;
 

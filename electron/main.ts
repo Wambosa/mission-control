@@ -165,6 +165,18 @@ try {
 }
 crashReporter.start({ uploadToServer: false });
 
+// R8 app lifecycle. Launch is logged here rather than on app-ready so it is the
+// first line of every run — a crash between module load and ready would
+// otherwise leave a log with no indication the app had even started.
+log.info("app.launch", {
+  event: "app.launch",
+  version: app.getVersion(),
+  platform: process.platform,
+  arch: process.arch,
+  packaged: app.isPackaged,
+  electron: process.versions.electron,
+});
+
 // Renderer console → log file. The renderer had no file transport at all, so a
 // UI failure left nothing on disk and the only way to see one was to reproduce
 // it live with DevTools open — which is what TERMINAL_FOCUS_BUG.md's diagnostic
@@ -1064,6 +1076,7 @@ async function startProductionServer(): Promise<string> {
 
   const runner = path.join(__dirname, "server-runner.mjs");
 
+  log.info("server.starting", { event: "server.starting", port, origin });
   serverProcess = spawn(process.execPath, [runner], {
     env: {
       ...process.env,
@@ -1089,6 +1102,12 @@ async function startProductionServer(): Promise<string> {
   });
 
   serverProcess.on("exit", (code) => {
+    log.info("server.exited", {
+      event: "server.exited",
+      code,
+      booted: serverBooted,
+      quitting: Boolean((app as any).isQuiting),
+    });
     if (!serverBooted) {
       rejectEarlyExit?.(
         new Error(`Mission Control server exited with code ${code} before it finished starting.`),
@@ -2099,6 +2118,10 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", () => {
+  // Logged before isQuiting flips, because that flag is what silences the
+  // server forwarder — and before the teardown below, so a quit that hangs
+  // still shows that a quit was what started it.
+  log.info("app.quit", { event: "app.quit" });
   (app as any).isQuiting = true;
   killAllPtys();
   disposeAllFileWatchers();

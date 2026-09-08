@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as schema from "./schema";
 import { resolveElectronBetterSqlite3NativeBinding } from "./better-sqlite3-native-binding";
 import { migrateMultiSandbox } from "./migrate-multi-sandbox";
+import { logServerEvent } from "~/server/log-event";
 import { DEFAULT_BRANCH, DEFAULT_TASK_STATUS } from "~/shared/domain";
 import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 
@@ -145,6 +146,7 @@ function runMigrations(
     }
     return;
   }
+  const justApplied: string[] = [];
   for (const name of names) {
     if (applied.has(name)) continue;
     const sql = migrationFiles[`./migrations/${name}`];
@@ -155,6 +157,13 @@ function runMigrations(
         .run(name, Date.now());
     });
     tx();
+    justApplied.push(name);
+  }
+  // Only when something actually ran. A boot that applies nothing is the normal
+  // case and does not need a line; a boot that migrates is the one worth having
+  // in the log when behaviour changes underneath the operator.
+  if (justApplied.length > 0) {
+    logServerEvent("app.migrations", { applied: justApplied });
   }
 }
 

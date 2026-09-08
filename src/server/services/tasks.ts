@@ -19,6 +19,7 @@ import {
   findTerminalLogsByTaskId,
   insertTerminalLog,
 } from "../repositories/terminal-logs.repo";
+import { logServerEvent } from "../log-event";
 import { newId } from "./_ids";
 import { isClientDomainId } from "../../shared/client-id";
 import { normalizeProjectScopeId } from "./sandbox-scope";
@@ -79,6 +80,12 @@ export function createTask(input: {
     updatedAt: now,
   };
   insertTask(row);
+  logServerEvent("session.created", {
+    taskId: row.id,
+    projectId: row.projectId,
+    agent: row.agent,
+    scopeId: row.scopeId,
+  });
   events.emit("task:created", { id: row.id, projectId: row.projectId });
   return row;
 }
@@ -167,6 +174,16 @@ export function updateTask(
   if (!existing) return null;
   const next = { ...existing, ...patch, updatedAt: Date.now() };
   updateTaskRow(id, next);
+  // Pinning is one field among several this function serves, so the event is
+  // gated on the value actually changing — otherwise a title edit would report
+  // a pin, and re-pinning an already-pinned session would report a second one.
+  if (patch.pinned !== undefined && patch.pinned !== existing.pinned) {
+    logServerEvent("session.pinned", {
+      taskId: id,
+      projectId: existing.projectId,
+      pinned: patch.pinned,
+    });
+  }
   events.emit("task:updated", { id, projectId: existing.projectId });
   return next;
 }
@@ -199,6 +216,7 @@ export function archiveTask(id: string): Task | null {
   updateTaskRow(id, { archived: true, updatedAt: Date.now() });
   const next = { ...existing, archived: true } as Task;
   clearPendingQuestion(id);
+  logServerEvent("session.archived", { taskId: id, projectId: existing.projectId });
   events.emit("task:archived", { id, projectId: existing.projectId });
   return next;
 }
@@ -208,6 +226,7 @@ export function restoreTask(id: string): Task | null {
   if (!existing) return null;
   updateTaskRow(id, { archived: false, updatedAt: Date.now() });
   const next = { ...existing, archived: false } as Task;
+  logServerEvent("session.restored", { taskId: id, projectId: existing.projectId });
   events.emit("task:restored", { id, projectId: existing.projectId });
   return next;
 }
@@ -219,6 +238,7 @@ export function deleteTask(id: string): boolean {
   if (changes > 0) {
     deleteDiagramsForTask(id);
     clearPendingQuestion(id);
+    logServerEvent("session.deleted", { taskId: id, projectId: existing.projectId });
     events.emit("task:deleted", { id, projectId: existing.projectId });
     return true;
   }

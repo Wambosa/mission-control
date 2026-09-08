@@ -12,6 +12,7 @@ import type { TaskStatus } from "~/shared/domain";
 import type { Project, Task } from "~/db/schema";
 import type { ProjectPathStatus, ProjectWithCounts } from "~/shared/projects";
 import { events } from "../events";
+import { logServerEvent } from "../log-event";
 import { ValidationError } from "../errors";
 import {
   deleteProjectRow,
@@ -347,6 +348,11 @@ export function createProject(input: {
     updatedAt: now,
   };
   insertProject(row);
+  logServerEvent("project.created", {
+    projectId: id,
+    sandboxId: row.sandboxId,
+    groupId: row.groupId,
+  });
   events.emit("project:created", { id });
   return row;
 }
@@ -428,6 +434,28 @@ export function updateProject(
     updatedAt: Date.now(),
   };
   updateProjectRow(id, updated);
+  // Two events out of one generic function, both gated on a real change.
+  //
+  // Rebinding a project to another host is its own event because it is the
+  // change most likely to explain a session that will not start — but the
+  // sandbox id arrives in the same patch as renames and group moves, so it is
+  // diffed against the stored row rather than fired whenever the field is
+  // merely present.
+  if (rest.sandboxId !== undefined && nextSandboxId !== existing.sandboxId) {
+    logServerEvent("project.host-changed", {
+      projectId: id,
+      from: existing.sandboxId,
+      to: nextSandboxId,
+    });
+  }
+  // Field names only, not values: a project path is already in the log, but an
+  // image path or a saved-agent blob is length the log does not need.
+  const changedFields = Object.keys(rest).filter(
+    (field) => updated[field as keyof typeof updated] !== existing[field as keyof typeof existing],
+  );
+  if (changedFields.length > 0) {
+    logServerEvent("project.edited", { projectId: id, fields: changedFields });
+  }
   events.emit("project:updated", { id });
   return updated;
 }
@@ -444,7 +472,13 @@ export function togglePin(id: string): Project | null {
     return next;
   });
   const next = togglePinned.immediate();
-  if (next) events.emit("project:updated", { id });
+  // Pinning is an edit that skips updateProject entirely, so it reports itself.
+  // Emitted outside the transaction: a rolled-back pin must not leave a log
+  // line claiming it happened.
+  if (next) {
+    logServerEvent("project.edited", { projectId: id, fields: ["pinned"] });
+    events.emit("project:updated", { id });
+  }
   return next;
 }
 
@@ -468,7 +502,10 @@ export function reorderPinnedProjects(order: string[]): ProjectWithCounts[] {
 
 export function deleteProject(id: string): boolean {
   const changes = deleteProjectRow(id);
-  if (changes > 0) deleteAllProjectImagesFor(id);
+  if (changes > 0) {
+    deleteAllProjectImagesFor(id);
+    logServerEvent("project.deleted", { projectId: id });
+  }
   events.emit("project:deleted", { id });
   return changes > 0;
 }

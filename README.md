@@ -71,7 +71,6 @@ mission-control/
 ## Download
 
 - **GitHub Releases:** [AgentSystemLabs/mission-control/releases](https://github.com/AgentSystemLabs/mission-control/releases) — signed macOS / Windows / Linux installers attached automatically when a `v*` tag ships (manual install / dogfooding)
-- **Stable + in-app updates:** [agentsystem.dev](https://agentsystem.dev) — same installers after a release is **approved** there; the Electron updater and in-app Update UI only advance on approval
 - **PR CI Artifacts:** pull requests build an unsigned Linux AppImage (`MissionControl-linux-x64`) — open the workflow run → **Artifacts**
 
 After download: macOS open the `.dmg` and drag the app to Applications; Windows run the Setup `.exe`; Linux make the `.AppImage` executable (`chmod +x`) and run it (FUSE 2 may be required on some distros).
@@ -172,29 +171,6 @@ within Mission Control. `/api/events` (SSE) uses a short-lived ticket from
 | GET    | `/api/events` (SSE)                    |
 | GET    | `/api/settings`                        |
 | POST   | `/api/settings` (regenerate token)     |
-
-## Observability
-
-Main-process logs are written via `electron-log`. In a packaged build they persist to:
-
-- **macOS:** `~/Library/Logs/MissionControl/main.log`
-- **Windows:** `%USERPROFILE%\AppData\Roaming\MissionControl\logs\main.log`
-- **Linux:** `~/.config/MissionControl/logs/main.log`
-
-In dev (`pnpm dev`) the same lines are written to stdout/stderr.
-
-### Event prefixes
-
-| Prefix | Surface | Dispatch sites |
-| --- | --- | --- |
-| `update.check.*` | Auto-updater check lifecycle (entry, failure) | `electron/update-manager.ts:safeCheck` |
-| `update.download.*` | Auto-updater download lifecycle | `electron/update-manager.ts:safeDownload` |
-| `update.install.*` | Auto-updater install lifecycle | `electron/update-manager.ts:safeInstall` |
-| `update.state.*` | Auto-updater UpdateState transitions (sampled at 10% boundaries for downloading) | `electron/update-manager.ts:broadcast` |
-| `update.error.*` | Errors emitted by electron-updater itself | `electron/update-manager.ts:wireEvents` |
-| `update.load.*` | electron-updater module load failure | `electron/update-manager.ts:loadUpdater` |
-
-When investigating "the update never installed," start with `rg 'event: "update\.' ~/Library/Logs/MissionControl/main.log`. electron-updater's own internal log stream (URL resolution, signature verification, retries) is also routed into the same file.
 
 ## Skill file for external CLIs
 

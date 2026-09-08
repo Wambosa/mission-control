@@ -55,7 +55,6 @@ import {
 } from "~/components/ui/HeaderActionsSlot";
 import { apiTokenQueryOptions, useSettings, useProjects, useSandboxes } from "~/queries";
 import { SandboxResumingOverlay } from "~/components/views/SandboxResumingOverlay";
-import { UpdateAvailableButton } from "~/components/ui/UpdateAvailableButton";
 import { ProviderUsageIndicator } from "~/components/views/ProviderUsageIndicator";
 import {
   ACCENT_CACHE_KEY,
@@ -843,7 +842,6 @@ function Shell() {
           dragRegion
           right={
             <>
-              <UpdateAvailableButton />
               <ProviderUsageIndicator />
               {/* Prompt search sits in the bar itself; grid view moved into
                * the project header beside the session controls it acts on. */}

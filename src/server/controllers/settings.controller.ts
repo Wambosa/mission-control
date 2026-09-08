@@ -175,8 +175,6 @@ const updateSettingsBody = z
     sessionFinishOsNotificationEnabled: z.boolean(),
     notificationSoundEnabled: z.boolean(),
     launchOverlayEnabled: z.boolean(),
-    automaticUpdateDownloadsEnabled: z.boolean(),
-    automaticUpdateInstallOnQuitEnabled: z.boolean(),
     worktreesEnabled: z.boolean(),
     questionOverlayEnabled: z.boolean(),
     gitDiffChangedFilesView: z.enum(GIT_DIFF_CHANGED_FILES_VIEWS).nullable(),
@@ -444,14 +442,6 @@ function settingsPayload() {
     ),
     notificationSoundEnabled: getBooleanSetting("notification_sound_enabled", true),
     launchOverlayEnabled: getBooleanSetting("launch_overlay_enabled", false),
-    automaticUpdateDownloadsEnabled: getBooleanSetting(
-      "automatic_update_downloads_enabled",
-      false,
-    ),
-    automaticUpdateInstallOnQuitEnabled: getBooleanSetting(
-      "automatic_update_install_on_quit_enabled",
-      false,
-    ),
     // Always on — worktrees graduated from experimental; ignore any stored preference.
     worktreesEnabled: true,
     // Graduated from experimental; retained in the payload for compatibility
@@ -598,18 +588,6 @@ export async function update(request: Request): Promise<Response> {
   }
   if (body.launchOverlayEnabled !== undefined) {
     setBooleanSetting("launch_overlay_enabled", body.launchOverlayEnabled);
-  }
-  if (body.automaticUpdateDownloadsEnabled !== undefined) {
-    setBooleanSetting(
-      "automatic_update_downloads_enabled",
-      body.automaticUpdateDownloadsEnabled,
-    );
-  }
-  if (body.automaticUpdateInstallOnQuitEnabled !== undefined) {
-    setBooleanSetting(
-      "automatic_update_install_on_quit_enabled",
-      body.automaticUpdateInstallOnQuitEnabled,
-    );
   }
   // worktreesEnabled is always on; ignore writes so old clients can't turn it
   // off. Native question popups are the same; their legacy fields remain

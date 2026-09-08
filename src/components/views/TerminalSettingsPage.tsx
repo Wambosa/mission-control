@@ -176,9 +176,6 @@ export function TerminalSettingsPage() {
       settings?.sessionFinishOsNotificationEnabled ?? false,
     notificationSoundEnabled: settings?.notificationSoundEnabled ?? true,
     launchOverlayEnabled: settings?.launchOverlayEnabled ?? false,
-    automaticUpdateDownloadsEnabled: settings?.automaticUpdateDownloadsEnabled ?? false,
-    automaticUpdateInstallOnQuitEnabled:
-      settings?.automaticUpdateInstallOnQuitEnabled ?? false,
     worktreesEnabled: true,
     gitDiffChangedFilesView: settings?.gitDiffChangedFilesView ?? null,
     gitDiffChangedFilesWidth: settings?.gitDiffChangedFilesWidth ?? null,

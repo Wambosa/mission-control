@@ -52,15 +52,13 @@ describe("settings API", () => {
     });
   });
 
-  it("keeps automatic update downloads disabled by default", async () => {
+  it("defaults the terminal zoom level to unzoomed", async () => {
     const response = await handleApiRequest(
       authedRequest("http://localhost/api/settings"),
     );
 
     expect(response?.status).toBe(200);
     expect(await jsonBody(response!)).toMatchObject({
-      automaticUpdateDownloadsEnabled: false,
-      automaticUpdateInstallOnQuitEnabled: false,
       terminalZoomLevel: 0,
     });
   });
@@ -565,48 +563,6 @@ describe("settings API", () => {
     });
     expect(await jsonBody(read!)).toMatchObject({
       launchOverlayEnabled: true,
-    });
-  });
-
-  it("persists the automatic update download preference", async () => {
-    const update = await handleApiRequest(
-      authedRequest("http://localhost/api/settings", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ automaticUpdateDownloadsEnabled: true }),
-      }),
-    );
-    const read = await handleApiRequest(
-      authedRequest("http://localhost/api/settings"),
-    );
-
-    expect(update?.status).toBe(200);
-    expect(await jsonBody(update!)).toMatchObject({
-      automaticUpdateDownloadsEnabled: true,
-    });
-    expect(await jsonBody(read!)).toMatchObject({
-      automaticUpdateDownloadsEnabled: true,
-    });
-  });
-
-  it("persists the automatic update install-on-quit preference", async () => {
-    const update = await handleApiRequest(
-      authedRequest("http://localhost/api/settings", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ automaticUpdateInstallOnQuitEnabled: true }),
-      }),
-    );
-    const read = await handleApiRequest(
-      authedRequest("http://localhost/api/settings"),
-    );
-
-    expect(update?.status).toBe(200);
-    expect(await jsonBody(update!)).toMatchObject({
-      automaticUpdateInstallOnQuitEnabled: true,
-    });
-    expect(await jsonBody(read!)).toMatchObject({
-      automaticUpdateInstallOnQuitEnabled: true,
     });
   });
 

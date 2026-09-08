@@ -100,8 +100,6 @@ export type AppSettings = {
   /** Ding when a session-finish or diagram-ready notification arrives. */
   notificationSoundEnabled: boolean;
   launchOverlayEnabled: boolean;
-  automaticUpdateDownloadsEnabled: boolean;
-  automaticUpdateInstallOnQuitEnabled: boolean;
   /** Git worktrees per project (always on). */
   worktreesEnabled: boolean;
   /** Legacy compatibility field; native Claude Code question popups are always enabled. */
@@ -639,8 +637,6 @@ export const api = {
         | "sessionFinishOsNotificationEnabled"
         | "notificationSoundEnabled"
         | "launchOverlayEnabled"
-        | "automaticUpdateDownloadsEnabled"
-        | "automaticUpdateInstallOnQuitEnabled"
         | "worktreesEnabled"
         | "questionOverlayEnabled"
         | "gitDiffChangedFilesView"

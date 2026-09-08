@@ -33,7 +33,6 @@ import { startPreviewServer, disposeAllPreviewServers } from "./preview-server";
 import { IPC } from "./ipc-channels";
 import { resolveAgentCommandMeetingVersion, resolveAgentCommandOnPath } from "./agent-cli-resolution";
 import { augmentProcessEnv, sanitizedProcessEnv } from "./shell-env";
-import { registerUpdateManager } from "./update-manager";
 import { registerFocusMode } from "./focus-mode";
 import {
   registerSandboxManager,
@@ -2142,7 +2141,6 @@ app.whenReady().then(() => {
     return true;
   });
   registerProjectImageProtocol();
-  registerUpdateManager(ipcMain, () => win, missionControlUserDataDir);
   registerFocusMode(() => win, missionControlUserDataDir, {
     width: MAIN_WINDOW_MIN_WIDTH,
     height: MAIN_WINDOW_MIN_HEIGHT,

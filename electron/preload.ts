@@ -11,25 +11,6 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   return () => ipcRenderer.removeListener(channel, listener);
 }
 
-// Mirror of UpdateState in update-manager.ts. Kept structural here so the renderer
-// bundle never imports main-process code. Drift between the two is caught by the
-// reviewer-contracts subagent.
-export type UpdateStateBridge =
-  | { kind: "unsupported-dev" }
-  | { kind: "idle"; lastCheckedAt: number | null }
-  | { kind: "checking" }
-  | { kind: "available"; version: string }
-  | {
-      kind: "downloading";
-      version: string;
-      percent: number;
-      bytesPerSecond: number;
-      transferred: number;
-      total: number;
-    }
-  | { kind: "ready-to-install"; version: string }
-  | { kind: "error"; message: string };
-
 // Mirror of SandboxState in sandbox-manager.ts (structural — renderer never
 // imports main-process code). Drift caught by reviewer-contracts.
 export type SandboxStateBridge =
@@ -525,17 +506,6 @@ const electronAPI = {
       enabled: boolean,
     ): Promise<{ active: boolean; taskId: string | null; alwaysOnTop: boolean }> =>
       ipcRenderer.invoke(IPC.appSetFocusModeAlwaysOnTop, { enabled }),
-  },
-  updater: {
-    getState: (): Promise<UpdateStateBridge> =>
-      ipcRenderer.invoke(IPC.updateGetState) as Promise<UpdateStateBridge>,
-    check: (): Promise<void> => ipcRenderer.invoke(IPC.updateCheck) as Promise<void>,
-    download: (): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC.updateDownload),
-    installNow: (): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC.updateInstall),
-    onStateChange: (cb: (state: UpdateStateBridge) => void) =>
-      subscribe(IPC.updateStateChange, cb),
   },
   files: {
     list: (projectRoot: string): Promise<{ ok: true; files: string[] } | { ok: false; error: string }> =>

@@ -197,6 +197,20 @@ async function postSyntheticHook(p: Pty, event: string, extra?: Record<string, u
 const pendingTranscriptWrites = new Set<Promise<void>>();
 
 /**
+ * Ceiling on in-flight transcript writes.
+ *
+ * Without one, a server child that accepts connections and stops answering
+ * makes this set grow on the batcher's cadence, each entry holding its
+ * serialized body -- turning a stalled peer into main-process memory growth.
+ * Dropping past the ceiling is what the fire-and-forget contract above already
+ * promises: a dropped chunk beats a write that costs the terminal anything.
+ *
+ * Sized at roughly a second of flushes for several concurrent sessions, so it
+ * is only reached when writes genuinely are not draining.
+ */
+const MAX_PENDING_TRANSCRIPT_WRITES = 64;
+
+/**
  * The live batcher, so the quit drain can force a final flush.
  *
  * registerPtyHandlers() is called once per app run, so this is a handle to that
@@ -230,6 +244,9 @@ export function transcriptCaptureTarget(
 function captureTranscriptBatch(p: Pty, mcEnv: PtyHookEnv | null, data: string): void {
   const target = transcriptCaptureTarget(p, mcEnv, data);
   if (!target) return;
+  // Writes are not draining; drop rather than accumulate. Retention is
+  // best-effort by decision, and the alternative is unbounded growth in main.
+  if (pendingTranscriptWrites.size >= MAX_PENDING_TRANSCRIPT_WRITES) return;
 
   const write = fetch(target.url, {
     method: "POST",
@@ -278,17 +295,33 @@ export async function drainPtyTranscripts(timeoutMs: number): Promise<void> {
   await awaitTranscriptWrites(timeoutMs);
 }
 
-async function awaitTranscriptWrites(timeoutMs: number): Promise<void> {
-  if (pendingTranscriptWrites.size === 0) return;
+/**
+ * Wait for every promise, or give up at `timeoutMs` -- whichever comes first.
+ *
+ * Exported because the deadline is the load-bearing half: these writes carry no
+ * acknowledgment, so a dead server child must not be able to hold the quit
+ * open. A bound that silently stopped working would reintroduce exactly the
+ * hang this work exists to remove, and nothing else would notice.
+ */
+export async function awaitAllSettledWithin(
+  promises: Iterable<Promise<unknown>>,
+  timeoutMs: number,
+): Promise<void> {
+  const pending = [...promises];
+  if (pending.length === 0) return;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<void>((resolve) => {
     timer = setTimeout(resolve, timeoutMs);
   });
   try {
-    await Promise.race([Promise.allSettled([...pendingTranscriptWrites]).then(() => {}), deadline]);
+    await Promise.race([Promise.allSettled(pending).then(() => {}), deadline]);
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+async function awaitTranscriptWrites(timeoutMs: number): Promise<void> {
+  await awaitAllSettledWithin(pendingTranscriptWrites, timeoutMs);
 }
 
 const ptys = new Map<string, Pty>();

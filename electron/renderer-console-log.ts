@@ -76,8 +76,36 @@ export function rendererFrameLabel(frame: RendererFrame | null | undefined): str
   }
 }
 
+/**
+ * A console message is longer than a log line should be, and it is not the
+ * app's text to trust.
+ *
+ * `console-message` fires for every frame, and one of those frames renders
+ * arbitrary project HTML with scripts enabled (the preview iframe). A raw
+ * newline in that message would end the log line and start a new one the
+ * previewed page controls -- letting it forge entries, including the
+ * `[mc-event]` marker analysis greps for. So control characters are escaped
+ * rather than passed through, which also makes one message exactly one line.
+ *
+ * Mirrors safeLogValue() in pty-manager.ts, which already strips control
+ * characters out of logged values for the same reason.
+ */
+export const MAX_RENDERER_MESSAGE_CHARS = 2000;
+
+export function sanitizeRendererText(text: string): string {
+  const oneLine = text
+    .replace(/\r\n|\r|\n/g, "\\n")
+    .replace(/[\x00-\x1f\x7f]/g, "?");
+  return oneLine.length > MAX_RENDERER_MESSAGE_CHARS
+    ? `${oneLine.slice(0, MAX_RENDERER_MESSAGE_CHARS)}...(${oneLine.length} chars)`
+    : oneLine;
+}
+
 /** The log line for one renderer console message, frame and source included. */
 export function formatRendererConsoleLine(details: RendererConsoleDetails): string {
-  const origin = details.sourceId ? ` (${details.sourceId}:${details.lineNumber})` : "";
-  return `[renderer:${rendererFrameLabel(details.frame)}] ${details.message}${origin}`;
+  // The source URL is frame-controlled too, so it is sanitized on the same path.
+  const origin = details.sourceId
+    ? ` (${sanitizeRendererText(details.sourceId)}:${details.lineNumber})`
+    : "";
+  return `[renderer:${rendererFrameLabel(details.frame)}] ${sanitizeRendererText(details.message)}${origin}`;
 }

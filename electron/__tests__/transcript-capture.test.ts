@@ -8,7 +8,7 @@ const logMock = vi.hoisted(() => ({
 }));
 vi.mock("electron-log/main", () => ({ default: logMock }));
 
-import { transcriptCaptureTarget } from "../pty-manager";
+import { awaitAllSettledWithin, transcriptCaptureTarget } from "../pty-manager";
 import { buildTaskApiUrl } from "../pty-hook-env";
 
 const MC_ENV = { apiUrl: "http://127.0.0.1:41337", token: "tok-abc" };
@@ -109,5 +109,46 @@ describe("buildTaskApiUrl", () => {
     expect(buildTaskApiUrl(MC_ENV, "t-1:2", "terminal-output")).toBe(
       "http://127.0.0.1:41337/api/tasks/t-1%3A2/terminal-output",
     );
+  });
+});
+
+describe("awaitAllSettledWithin", () => {
+  // KTD9's bound: these writes carry no acknowledgment, so a dead server child
+  // must never be able to hold the quit open.
+  it("resolves immediately when nothing is pending", async () => {
+    const started = Date.now();
+    await awaitAllSettledWithin([], 5_000);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it("resolves as soon as every write settles, well inside the bound", async () => {
+    const quick = [Promise.resolve(), Promise.resolve()];
+    const started = Date.now();
+    await awaitAllSettledWithin(quick, 5_000);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it("resolves at the deadline when a write never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const never = new Promise<void>(() => {});
+      let done = false;
+      const waiting = awaitAllSettledWithin([never], 2_000).then(() => {
+        done = true;
+      });
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
+      await waiting;
+      expect(done).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not reject when a write rejects", async () => {
+    // Delivery failures are swallowed by design; the drain must not surface one.
+    const rejecting = Promise.reject(new Error("server gone"));
+    await expect(awaitAllSettledWithin([rejecting], 1_000)).resolves.toBeUndefined();
   });
 });

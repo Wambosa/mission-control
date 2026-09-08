@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_RENDERER_MESSAGE_CHARS,
   formatRendererConsoleLine,
   rendererFrameLabel,
   rendererLogMethod,
+  sanitizeRendererText,
   type RendererConsoleDetails,
   type RendererFrame,
 } from "../renderer-console-log";
@@ -92,6 +94,30 @@ describe("rendererFrameLabel", () => {
   });
 });
 
+describe("sanitizeRendererText", () => {
+  it("escapes every newline form to a literal, losing no content", () => {
+    expect(sanitizeRendererText("a\nb\r\nc\rd")).toBe("a\\nb\\nc\\nd");
+  });
+
+  it("replaces other control characters rather than emitting them", () => {
+    expect(sanitizeRendererText("a\u0000b\u001bc\u007f")).toBe("a?b?c?");
+  });
+
+  it("leaves ordinary text untouched", () => {
+    expect(sanitizeRendererText("Error: boom at thing")).toBe("Error: boom at thing");
+  });
+
+  it("reports the original length when it truncates", () => {
+    const out = sanitizeRendererText("y".repeat(MAX_RENDERER_MESSAGE_CHARS + 5));
+    expect(out).toContain(`(${MAX_RENDERER_MESSAGE_CHARS + 5} chars)`);
+  });
+
+  it("leaves text exactly at the cap alone", () => {
+    const exact = "y".repeat(MAX_RENDERER_MESSAGE_CHARS);
+    expect(sanitizeRendererText(exact)).toBe(exact);
+  });
+});
+
 describe("formatRendererConsoleLine", () => {
   it("records the originating frame alongside the message", () => {
     expect(formatRendererConsoleLine(details())).toBe(
@@ -113,8 +139,50 @@ describe("formatRendererConsoleLine", () => {
     );
   });
 
-  it("keeps the message verbatim", () => {
-    const message = "Error: boom\n  at thing (app://x.js:1:1)";
-    expect(formatRendererConsoleLine(details({ message }))).toContain(message);
+  it("keeps the message's content while collapsing it onto one line", () => {
+    // A stack trace stays fully readable, but its newlines are escaped rather
+    // than emitted -- one console message must be exactly one log line.
+    const line = formatRendererConsoleLine(
+      details({ message: "Error: boom\n  at thing (app://x.js:1:1)" }),
+    );
+    expect(line.split("\n")).toHaveLength(1);
+    expect(line).toContain("Error: boom");
+    expect(line).toContain("at thing (app://x.js:1:1)");
+  });
+
+  // `console-message` fires for every frame, and one of them renders arbitrary
+  // project HTML with scripts enabled. Without escaping, that page could end
+  // the log line and write its own.
+  it("stops a frame from forging a log line with an embedded newline", () => {
+    const line = formatRendererConsoleLine(
+      details({
+        frame: { detached: false, parent: topFrame(), routingId: 4 },
+        message: 'x\n[2026-09-08 12:00:00.000] [info]  [mc-event] {"event":"app.quit"}',
+      }),
+    );
+    expect(line.split("\n")).toHaveLength(1);
+    expect(line).toMatch(/^\[renderer:subframe#4]/);
+  });
+
+  it("stops a frame from forging the structured-event marker on its own line", () => {
+    // The README tells operators to grep for this marker, so a forged one is
+    // worse than noise.
+    const line = formatRendererConsoleLine(
+      details({ message: '\r\n[mc-event] {"event":"session.deleted"}' }),
+    );
+    expect(line.split(/\r|\n/)).toHaveLength(1);
+  });
+
+  it("sanitizes the source URL too, since the frame controls it", () => {
+    const line = formatRendererConsoleLine(
+      details({ sourceId: "app://x.js\n[mc-event] {}", lineNumber: 1 }),
+    );
+    expect(line.split("\n")).toHaveLength(1);
+  });
+
+  it("caps an oversized message so one line cannot flood the transport", () => {
+    const line = formatRendererConsoleLine(details({ message: "z".repeat(50_000) }));
+    expect(line.length).toBeLessThan(MAX_RENDERER_MESSAGE_CHARS + 200);
+    expect(line).toContain("(50000 chars)");
   });
 });

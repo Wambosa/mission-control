@@ -83,20 +83,33 @@ export function hookEndpointSlug(agent: string | undefined): string {
  * misconfigured apiUrl from turning best-effort POSTs into requests at an
  * arbitrary host.
  */
-export function buildTaskApiUrl(
-  mcEnv: PtyHookEnv,
-  taskId: string,
-  segment: string,
-): string | null {
+/**
+ * Parse an apiUrl and accept it only as a permitted local API base.
+ *
+ * One home for the check, because it is what keeps a misconfigured or
+ * attacker-influenced apiUrl from turning best-effort POSTs into requests at an
+ * arbitrary host. Two copies of a security check drift apart; this one does not.
+ */
+function parseAllowedHookBase(apiUrl: string): URL | null {
   let base: URL;
   try {
-    base = new URL(mcEnv.apiUrl);
+    base = new URL(apiUrl);
   } catch {
     return null;
   }
   if (base.protocol !== "http:" || !ALLOWED_HOOK_HOSTS.has(base.hostname) || !base.port) {
     return null;
   }
+  return base;
+}
+
+export function buildTaskApiUrl(
+  mcEnv: PtyHookEnv,
+  taskId: string,
+  segment: string,
+): string | null {
+  const base = parseAllowedHookBase(mcEnv.apiUrl);
+  if (!base) return null;
   if (!taskId || !/^[A-Za-z0-9._:-]{1,128}$/.test(taskId)) return null;
   if (!/^[a-z-]{1,64}$/.test(segment)) return null;
   return new URL(`/api/tasks/${encodeURIComponent(taskId)}/${segment}`, base).toString();
@@ -107,16 +120,8 @@ export function buildSyntheticHookUrl(
   agent: string | undefined,
   taskId: string,
 ): string | null {
-  let base: URL;
-  try {
-    base = new URL(mcEnv.apiUrl);
-  } catch {
-    return null;
-  }
-
-  if (base.protocol !== "http:" || !ALLOWED_HOOK_HOSTS.has(base.hostname) || !base.port) {
-    return null;
-  }
+  const base = parseAllowedHookBase(mcEnv.apiUrl);
+  if (!base) return null;
 
   const url = new URL(`/api/hooks/${hookEndpointSlug(agent)}`, base);
   url.searchParams.set("taskId", taskId);

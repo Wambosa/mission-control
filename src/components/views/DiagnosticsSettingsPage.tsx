@@ -38,7 +38,17 @@ export function DiagnosticsSettingsPage() {
     try {
       const result = await api.diagnostics.export();
       if (result.ok) {
-        setStatus({ tone: "ok", message: `Saved to ${result.path}` });
+        // A bundle whose transcripts could not be collected still saved, but
+        // saying only "Saved" would let the operator believe no sessions had
+        // retained output. Report the gap on the success path.
+        setStatus(
+          result.transcriptsUnavailable
+            ? {
+                tone: "error",
+                message: `Saved to ${result.path} -- but session transcripts could not be collected (${result.transcriptsUnavailable}). The bundle contains logs only.`,
+              }
+            : { tone: "ok", message: `Saved to ${result.path}` },
+        );
       } else if (result.cancelled) {
         // A dismissed save dialog is not a failure and gets no error message.
         setStatus(null);
@@ -140,7 +150,7 @@ export function DiagnosticsSettingsPage() {
         </Field>
       </SettingsSection>
 
-      <SettingsSection title="Log folder" subtitle="Where the app writes its log and crash dumps.">
+      <SettingsSection title="Log folder" subtitle="Where the app writes its log.">
         <Field label="Location">
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <CodeBlock
@@ -159,6 +169,11 @@ export function DiagnosticsSettingsPage() {
               >
                 Reveal log folder
               </Btn>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>
+              Crash dumps are written separately, to a <code>Crashpad</code> folder inside the
+              app's user-data directory. They are not in this folder and are not included in the
+              export.
             </div>
           </div>
         </Field>

@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "~/db/client";
+import { chunked } from "./_chunk";
 import { escapeLike, likeEscaped } from "./_sql";
 import {
   graphEdges,
@@ -540,8 +541,4 @@ export function getNodesByIds(projectId: string, ids: readonly string[]): Map<st
   return out;
 }
 
-function chunked<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
+

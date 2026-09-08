@@ -62,6 +62,16 @@ const updateTaskBody = z
  */
 const MAX_TRANSCRIPT_CHUNKS_PER_BATCH = 64;
 
+/**
+ * Largest single chunk the route accepts.
+ *
+ * Matches PTY_FLUSH_MAX_PENDING_CHARS in electron/pty-output-batch.ts, which is
+ * the batcher's force-flush ceiling and therefore the biggest chunk the real
+ * producer can emit. Capping the count without the size left the request body
+ * effectively unbounded.
+ */
+const MAX_TRANSCRIPT_CHUNK_CHARS = 262_144;
+
 const updateStatusBody = z.object({
   status: z.enum(TASK_STATUSES).optional(),
   preview: z.string().optional(),
@@ -188,7 +198,9 @@ export async function restore(rawId: string, request: Request): Promise<Response
 }
 
 const terminalOutputBody = z.object({
-  chunks: z.array(z.string()).max(MAX_TRANSCRIPT_CHUNKS_PER_BATCH),
+  chunks: z
+    .array(z.string().max(MAX_TRANSCRIPT_CHUNK_CHARS))
+    .max(MAX_TRANSCRIPT_CHUNKS_PER_BATCH),
 });
 
 /**

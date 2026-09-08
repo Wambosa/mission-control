@@ -16,7 +16,7 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 // failure on purpose: R27 wants a failed write surfaced, and a user dismissing
 // the save dialog is not one.
 export type DiagnosticsExportResultBridge =
-  | { ok: true; path: string; entries: number }
+  | { ok: true; path: string; entries: number; transcriptsUnavailable?: string }
   | { ok: false; cancelled: true }
   | { ok: false; cancelled?: false; error: string };
 

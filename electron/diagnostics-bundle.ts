@@ -127,6 +127,12 @@ export function buildDiagnosticsManifest(input: {
   /** Already resolved to the files that exist; this function does no I/O. */
   logFiles: readonly string[];
   transcripts: readonly RetainedTranscript[];
+  /**
+   * Set when transcript collection FAILED, rather than finding nothing. An
+   * empty list cannot distinguish the two, and the failing case is the one an
+   * operator is most likely to be exporting in.
+   */
+  transcriptsUnavailable?: string;
   now: number;
 }): Record<string, unknown> {
   return {
@@ -137,6 +143,21 @@ export function buildDiagnosticsManifest(input: {
     packaged: input.packaged,
     logFiles: input.logFiles.map((file) => path.basename(file)),
     transcriptCount: input.transcripts.length,
+    // Present only on failure, so a reader can tell "nothing was retained"
+    // from "collection did not work". A bundle that cannot say which is a
+    // bundle that misleads the person reading it after a crash.
+    ...(input.transcriptsUnavailable
+      ? { transcriptsUnavailable: input.transcriptsUnavailable }
+      : {}),
+    // What retention covers, stated because the bundle is read without the
+    // code beside it. Remote and sandbox sessions run through a different
+    // batcher and are not captured; shell and dashboard terminals are excluded
+    // by design (their ids belong to a separate entity the retention key
+    // cannot reference).
+    coverage: {
+      sessions: "local agent sessions only",
+      excluded: ["remote/sandbox sessions", "shell and dashboard terminals"],
+    },
     transcripts: input.transcripts.map((t) => ({
       taskId: t.taskId,
       projectId: t.projectId,

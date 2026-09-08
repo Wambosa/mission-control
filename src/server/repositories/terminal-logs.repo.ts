@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { getDb } from "~/db/client";
 import { terminalLogs } from "~/db/schema";
+import { chunked } from "./_chunk";
 
 export type TerminalLogRow = {
   id: string;
@@ -85,10 +86,4 @@ export function taskIdsWithTerminalLogs(): string[] {
     .from(terminalLogs)
     .all();
   return rows.map((r) => r.taskId);
-}
-
-function chunked<T>(items: readonly T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
 }

@@ -308,7 +308,7 @@ export type ListFoldersResult =
   | { ok: false; error: string };
 
 export type DiagnosticsExportResult =
-  | { ok: true; path: string; entries: number }
+  | { ok: true; path: string; entries: number; transcriptsUnavailable?: string }
   | { ok: false; cancelled: true }
   | { ok: false; cancelled?: false; error: string };
 

@@ -26,13 +26,7 @@ import { spawn, ChildProcess, spawnSync } from "node:child_process";
 import { registerPtyHandlers, killAllPtys, drainPtyTranscripts } from "./pty-manager";
 import { formatRendererConsoleLine, rendererLogMethod } from "./renderer-console-log";
 import { createServerOutputForwarder } from "./server-output-forwarder";
-import {
-  buildDiagnosticsManifest,
-  stageDiagnosticsBundle,
-  OWNER_ONLY_DIR,
-  OWNER_ONLY_FILE,
-  type RetainedTranscript,
-} from "./diagnostics-bundle";
+import { registerDiagnosticsHandlers } from "./diagnostics-handlers";
 import { setPtyStreamHidden, setPtyStreamPowerSave } from "./pty-output-batch";
 import { setAppThemeFromBackground } from "./app-theme";
 import { registerFileHandlers, disposeAllFileWatchers } from "./file-handlers";
@@ -1880,134 +1874,12 @@ safeHandle(IPC.dialogGrantFolder, async (_evt, requested: unknown) => {
  * The export is a bundle of the log files plus retained session transcripts, so
  * a dead-session postmortem does not still need SQL. Transcripts live in the
  * database, which main cannot read — they come back over the API, the mirror of
- * the path they crossed on capture.
+ * the path they crossed on capture. Implementation lives in
+ * ./diagnostics-handlers so it is reachable from a test.
  */
-/**
- * The log files that exist right now.
- *
- * electron-log keeps one rotated sibling, which exists only once the log has
- * rotated — so its absence is the normal case. Resolved once per export and
- * handed to both the manifest and the staging step: probing separately let the
- * two disagree if a rotation landed between them.
- */
-function existingDiagnosticsLogFiles(): string[] {
-  const current = log.transports.file.getFile().path;
-  const dir = path.dirname(current);
-  const ext = path.extname(current);
-  const base = path.basename(current, ext);
-  return [current, path.join(dir, `${base}.old${ext}`)].filter((file) => fs.existsSync(file));
-}
-
-function diagnosticsLogDirectory(): string {
-  return path.dirname(log.transports.file.getFile().path);
-}
-
-async function fetchRetainedTranscripts(): Promise<RetainedTranscript[]> {
-  // Same loopback origin and token the PTY hook environment is built from, so
-  // the export reads over exactly the path capture writes over.
-  const apiUrl = buildLocalMissionControlApiUrl(runtimePort);
-  if (!apiUrl) return [];
-  try {
-    const res = await fetch(new URL("/api/diagnostics/transcripts", apiUrl), {
-      headers: {
-        authorization: `Bearer ${getOrCreateApiToken(missionControlUserDataDir)}`,
-      },
-    });
-    if (!res.ok) return [];
-    const body = (await res.json()) as { transcripts?: RetainedTranscript[] };
-    return body.transcripts ?? [];
-  } catch {
-    // A bundle of logs alone still beats no bundle: the server child may be
-    // down, which is itself the sort of failure an export is being taken for.
-    return [];
-  }
-}
-
-safeHandle(IPC.diagnosticsLogDirectory, async () => diagnosticsLogDirectory());
-
-safeHandle(IPC.diagnosticsRevealLogs, async () => {
-  try {
-    const dir = diagnosticsLogDirectory();
-    fs.mkdirSync(dir, { recursive: true });
-    // openPath rather than showItemInFolder: the target is the directory
-    // itself, not a file to highlight inside its parent.
-    const error = await shell.openPath(dir);
-    return error ? { ok: false as const, error } : { ok: true as const };
-  } catch (err) {
-    return { ok: false as const, error: String(err) };
-  }
-});
-
-safeHandle(IPC.diagnosticsExport, async () => {
-  const logFiles = existingDiagnosticsLogFiles();
-  const transcripts = await fetchRetainedTranscripts();
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const saveOptions = {
-    title: "Export diagnostics",
-    defaultPath: `mission-control-diagnostics-${stamp}.tgz`,
-    filters: [{ name: "Diagnostics bundle", extensions: ["tgz"] }],
-  };
-  // Parented to the window when there is one, so the sheet is modal to the app.
-  const result = win
-    ? await dialog.showSaveDialog(win, saveOptions)
-    : await dialog.showSaveDialog(saveOptions);
-  // Dismissing the dialog is not a failure, and R27 wants the two told apart.
-  if (result.canceled || !result.filePath) {
-    return { ok: false as const, cancelled: true as const };
-  }
-
-  const staging = fs.mkdtempSync(path.join(os.tmpdir(), "mc-diagnostics-"));
-  try {
-    fs.chmodSync(staging, OWNER_ONLY_DIR);
-    const entries = stageDiagnosticsBundle(path.join(staging, "diagnostics"), {
-      logFiles,
-      transcripts,
-      manifest: buildDiagnosticsManifest({
-        appVersion: app.getVersion(),
-        platform: process.platform,
-        arch: process.arch,
-        packaged: app.isPackaged,
-        logFiles,
-        transcripts,
-        now: Date.now(),
-      }),
-    });
-
-    // Create the destination owner-only BEFORE anything is written into it.
-    // Opening with "w" truncates without resetting the mode, so the archive
-    // never exists at default permissions even briefly — which matters, because
-    // it carries verbatim terminal output (R26).
-    fs.closeSync(fs.openSync(result.filePath, "w", OWNER_ONLY_FILE));
-    fs.chmodSync(result.filePath, OWNER_ONLY_FILE);
-
-    const { create } = await import("tar");
-    await create(
-      { gzip: true, file: result.filePath, cwd: staging, portable: true },
-      ["diagnostics"],
-    );
-    fs.chmodSync(result.filePath, OWNER_ONLY_FILE);
-
-    log.info("diagnostics.exported", {
-      event: "diagnostics.exported",
-      entries: entries.length,
-      transcripts: transcripts.length,
-    });
-    return { ok: true as const, path: result.filePath, entries: entries.length };
-  } catch (err) {
-    // R27: a write that fails after the destination is chosen must say so
-    // rather than looking like it worked.
-    log.error("diagnostics.export.failed", {
-      event: "diagnostics.export.failed",
-      error: String(err),
-    });
-    return { ok: false as const, error: String(err) };
-  } finally {
-    try {
-      fs.rmSync(staging, { recursive: true, force: true });
-    } catch {
-      /* a leftover temp dir is not worth failing the export over */
-    }
-  }
+registerDiagnosticsHandlers(ipcMain, () => win, {
+  userDataDir: missionControlUserDataDir,
+  runtimePort: () => runtimePort,
 });
 
 safeHandle(IPC.shellOpenPath, async (_evt, p: string) => {

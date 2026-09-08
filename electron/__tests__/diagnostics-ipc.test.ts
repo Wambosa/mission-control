@@ -7,15 +7,16 @@ import { IPC } from "../ipc-channels";
  * The diagnostics channels are registered through the safe wrapper, which is
  * what rejects a call from a frame the app does not own.
  *
- * main.ts calls app.setPath() at module scope and cannot be imported, so this
- * is a source-level assertion in the same shape as the packaging-config and
+ * A source-level assertion in the same shape as the packaging-config and
  * api-auth dispatch-wrapper guards. It catches the regression that matters: a
  * channel added with a bare ipcMain.handle bypasses the frame gate entirely,
- * and nothing else in the suite would notice.
+ * and nothing else in the suite would notice. The handlers live in
+ * diagnostics-handlers.ts, read once because several assertions use it.
  */
-function readMain(): string {
-  return fs.readFileSync(path.resolve(__dirname, "..", "main.ts"), "utf8");
-}
+const HANDLERS = fs.readFileSync(
+  path.resolve(__dirname, "..", "diagnostics-handlers.ts"),
+  "utf8",
+);
 
 const DIAGNOSTICS_CHANNELS = [
   "diagnosticsExport",
@@ -36,11 +37,11 @@ describe("diagnostics IPC channels", () => {
 
   for (const channel of DIAGNOSTICS_CHANNELS) {
     it(`registers ${channel} through safeHandle`, () => {
-      expect(readMain()).toContain(`safeHandle(IPC.${channel}`);
+      expect(HANDLERS).toContain(`safeHandle(IPC.${channel}`);
     });
 
     it(`does not register ${channel} with a bare ipcMain.handle`, () => {
-      expect(readMain()).not.toContain(`ipcMain.handle(IPC.${channel}`);
+      expect(HANDLERS).not.toContain(`ipcMain.handle(IPC.${channel}`);
     });
   }
 

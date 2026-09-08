@@ -321,3 +321,93 @@ describe("the ingest endpoint", () => {
     expect(await res!.json()).toEqual({ output: "" });
   });
 });
+
+describe("listRetainedTranscripts (the export's only source)", () => {
+  it("returns one entry per session that retained output", () => {
+    const a = newTask();
+    const b = newTask();
+    taskService.appendTerminalOutput(a.id, ["from a"]);
+    taskService.appendTerminalOutput(b.id, ["from b"]);
+
+    const got = taskService.listRetainedTranscripts();
+    expect(got.map((t) => t.taskId).sort()).toEqual([a.id, b.id].sort());
+    expect(got.find((t) => t.taskId === a.id)?.output).toBe("from a");
+  });
+
+  it("carries the ids and titles a bundle reader needs to identify a session", () => {
+    const task = newTask();
+    taskService.appendTerminalOutput(task.id, ["out"]);
+    const [got] = taskService.listRetainedTranscripts();
+    expect(got).toMatchObject({
+      taskId: task.id,
+      projectId: task.projectId,
+      title: task.title,
+      archived: false,
+    });
+  });
+
+  it("excludes a session that retained nothing", () => {
+    const withOutput = newTask();
+    newTask(); // never writes
+    taskService.appendTerminalOutput(withOutput.id, ["only this one"]);
+    expect(taskService.listRetainedTranscripts().map((t) => t.taskId)).toEqual([withOutput.id]);
+  });
+
+  it("returns an empty list when nothing is retained at all", () => {
+    newTask();
+    expect(taskService.listRetainedTranscripts()).toEqual([]);
+  });
+
+  it("still reports an archived session, since archiving keeps its output", () => {
+    const task = newTask();
+    taskService.appendTerminalOutput(task.id, ["kept"]);
+    taskService.archiveTask(task.id);
+    const [got] = taskService.listRetainedTranscripts();
+    expect(got).toMatchObject({ taskId: task.id, archived: true });
+  });
+
+  it("skips a row whose task is gone rather than throwing", () => {
+    // The cascade should make this unreachable; the guard exists so a stale row
+    // cannot take the whole export down with it.
+    const task = newTask();
+    taskService.appendTerminalOutput(task.id, ["orphan"]);
+    getSqlite().prepare("DELETE FROM tasks WHERE id = ?").run(task.id);
+    expect(() => taskService.listRetainedTranscripts()).not.toThrow();
+    expect(taskService.listRetainedTranscripts()).toEqual([]);
+  });
+
+  it("serves the same content through the diagnostics route", async () => {
+    const task = newTask();
+    taskService.appendTerminalOutput(task.id, ["over the wire"]);
+    const res = await handleApiRequest(
+      authed("http://127.0.0.1:5173/api/diagnostics/transcripts"),
+    );
+    expect(res?.status).toBe(200);
+    const body = (await res!.json()) as { transcripts: { taskId: string; output: string }[] };
+    expect(body.transcripts).toMatchObject([{ taskId: task.id, output: "over the wire" }]);
+  });
+});
+
+describe("the composite index on an upgraded database", () => {
+  // The fresh-install path is covered above. This is the branch every existing
+  // user actually takes: a terminal_logs table that predates the index.
+  it("is retrofitted onto a database that lacks it", () => {
+    const sqlite = getSqlite();
+    sqlite.exec("DROP INDEX IF EXISTS terminal_logs_task_created_idx");
+    expect(
+      sqlite
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name=?")
+        .get("terminal_logs_task_created_idx"),
+    ).toBeUndefined();
+
+    // The same idempotent statement ensureSchema runs on every boot.
+    sqlite.exec(
+      "CREATE INDEX IF NOT EXISTS terminal_logs_task_created_idx ON terminal_logs(task_id, created_at)",
+    );
+    expect(
+      sqlite
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name=?")
+        .get("terminal_logs_task_created_idx"),
+    ).toMatchObject({ name: "terminal_logs_task_created_idx" });
+  });
+});

@@ -199,6 +199,37 @@ describe("buildDiagnosticsManifest", () => {
     ]);
   });
 
+  // The bundle is read without the code beside it, so it states what retention
+  // does not cover rather than leaving the reader to infer completeness.
+  it("states what retention covers, so an omission is not read as an absence", () => {
+    const manifest = buildDiagnosticsManifest({
+      appVersion: "1.0.0", platform: "darwin", arch: "arm64", packaged: false,
+      logFiles: [], transcripts: [], now: 0,
+    });
+    expect(manifest.coverage).toMatchObject({ sessions: "local agent sessions only" });
+    expect(String(JSON.stringify(manifest.coverage))).toContain("remote/sandbox sessions");
+  });
+
+  // The finding this closes: an empty transcript list could mean "nothing was
+  // retained" or "collection failed", and the manifest said the same thing for
+  // both -- in the situation an operator is most likely exporting in.
+  it("marks transcripts as unavailable when collection failed", () => {
+    const manifest = buildDiagnosticsManifest({
+      appVersion: "1.0.0", platform: "darwin", arch: "arm64", packaged: false,
+      logFiles: [], transcripts: [], transcriptsUnavailable: "http-503", now: 0,
+    });
+    expect(manifest).toMatchObject({ transcriptCount: 0, transcriptsUnavailable: "http-503" });
+  });
+
+  it("omits the unavailable marker when collection simply found nothing", () => {
+    const manifest = buildDiagnosticsManifest({
+      appVersion: "1.0.0", platform: "darwin", arch: "arm64", packaged: false,
+      logFiles: [], transcripts: [], now: 0,
+    });
+    expect(manifest.transcriptCount).toBe(0);
+    expect("transcriptsUnavailable" in manifest).toBe(false);
+  });
+
   // KD2 ships the export unscrubbed. The artifact leaves the machine, so it
   // says so itself rather than relying on the UI that produced it.
   it("states in the artifact that it is unscrubbed", () => {

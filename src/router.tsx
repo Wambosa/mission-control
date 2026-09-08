@@ -8,6 +8,8 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { getElectron } from "~/lib/electron";
 import { CURRENT_MC_VERSION } from "~/queries/mission-control-version";
 import { installShellQueryCache } from "~/lib/shell-query-cache";
+import { navigationEvents } from "~/lib/navigation-events";
+import { logRendererEvent } from "~/lib/renderer-log";
 import { sandboxesQueryOptions } from "~/queries";
 import { routeTree } from "./routeTree.gen";
 
@@ -219,6 +221,31 @@ export function getRouter() {
     Wrap: ({ children }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     ),
+  });
+  // One log line per navigation (R11).
+  //
+  // Subscribed here, beside the router instance, rather than from the root
+  // route's effect: the router emits its first `onResolved` while the root
+  // component is still mounting, so an effect-based subscription would miss the
+  // navigation that opened the app — the one a startup problem needs. It also
+  // has no remount to guard against and lives exactly as long as the router.
+  //
+  // `onResolved` is the settled event, so `state.matches` already describes the
+  // destination. `pathChanged` is the router's own answer to "did the route
+  // actually change", which is what keeps re-renders, hovers, focus moves and
+  // search-param writes out of the log; navigationEvents() owns that rule.
+  router.subscribe("onResolved", (event) => {
+    const match = router.state.matches.at(-1);
+    for (const logged of navigationEvents({
+      pathChanged: event.pathChanged,
+      toPathname: event.toLocation.pathname,
+      fromPathname: event.fromLocation?.pathname,
+      routeId: match?.routeId as string | undefined,
+      params: match?.params as Record<string, string | undefined> | undefined,
+    })) {
+      const { event: name, ...fields } = logged;
+      logRendererEvent(name, fields);
+    }
   });
   return routerWithQueryClient(router, queryClient);
 }

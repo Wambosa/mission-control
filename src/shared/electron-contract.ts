@@ -307,6 +307,11 @@ export type ListFoldersResult =
     }
   | { ok: false; error: string };
 
+export type DiagnosticsExportResult =
+  | { ok: true; path: string; entries: number; transcriptsUnavailable?: string }
+  | { ok: false; cancelled: true }
+  | { ok: false; cancelled?: false; error: string };
+
 export type ElectronBridge = {
   /** The host OS, straight from the main process (authoritative, unlike navigator.platform). */
   platform: NodeJS.Platform;
@@ -424,6 +429,14 @@ export type ElectronBridge = {
     exit: () => Promise<FocusModeStateBridge>;
     get: () => Promise<FocusModeStateBridge>;
     setAlwaysOnTop: (enabled: boolean) => Promise<FocusModeStateBridge>;
+  };
+  diagnostics: {
+    /** Build the export bundle and save it where the user chooses. */
+    export: () => Promise<DiagnosticsExportResult>;
+    /** Reveal the log directory in the OS file manager. */
+    revealLogs: () => Promise<{ ok: true } | { ok: false; error: string }>;
+    /** The log directory's path, for display. */
+    logDirectory: () => Promise<string>;
   };
   files: {
     list: (projectRoot: string) => Promise<FileListResult>;

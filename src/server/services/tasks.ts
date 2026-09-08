@@ -15,10 +15,12 @@ import {
 } from "../repositories/tasks.repo";
 import { findProjectNameById } from "../repositories/projects.repo";
 import {
-  deleteTerminalLogById,
   findTerminalLogsByTaskId,
-  insertTerminalLog,
+  insertTerminalLogs,
+  taskIdsWithTerminalLogs,
+  trimTerminalLogsForTask,
 } from "../repositories/terminal-logs.repo";
+import { logServerEvent } from "../log-event";
 import { newId } from "./_ids";
 import { isClientDomainId } from "../../shared/client-id";
 import { normalizeProjectScopeId } from "./sandbox-scope";
@@ -79,6 +81,12 @@ export function createTask(input: {
     updatedAt: now,
   };
   insertTask(row);
+  logServerEvent("session.created", {
+    taskId: row.id,
+    projectId: row.projectId,
+    agent: row.agent,
+    scopeId: row.scopeId,
+  });
   events.emit("task:created", { id: row.id, projectId: row.projectId });
   return row;
 }
@@ -167,6 +175,16 @@ export function updateTask(
   if (!existing) return null;
   const next = { ...existing, ...patch, updatedAt: Date.now() };
   updateTaskRow(id, next);
+  // Pinning is one field among several this function serves, so the event is
+  // gated on the value actually changing — otherwise a title edit would report
+  // a pin, and re-pinning an already-pinned session would report a second one.
+  if (patch.pinned !== undefined && patch.pinned !== existing.pinned) {
+    logServerEvent("session.pinned", {
+      taskId: id,
+      projectId: existing.projectId,
+      pinned: patch.pinned,
+    });
+  }
   events.emit("task:updated", { id, projectId: existing.projectId });
   return next;
 }
@@ -199,6 +217,7 @@ export function archiveTask(id: string): Task | null {
   updateTaskRow(id, { archived: true, updatedAt: Date.now() });
   const next = { ...existing, archived: true } as Task;
   clearPendingQuestion(id);
+  logServerEvent("session.archived", { taskId: id, projectId: existing.projectId });
   events.emit("task:archived", { id, projectId: existing.projectId });
   return next;
 }
@@ -208,6 +227,7 @@ export function restoreTask(id: string): Task | null {
   if (!existing) return null;
   updateTaskRow(id, { archived: false, updatedAt: Date.now() });
   const next = { ...existing, archived: false } as Task;
+  logServerEvent("session.restored", { taskId: id, projectId: existing.projectId });
   events.emit("task:restored", { id, projectId: existing.projectId });
   return next;
 }
@@ -219,29 +239,145 @@ export function deleteTask(id: string): boolean {
   if (changes > 0) {
     deleteDiagramsForTask(id);
     clearPendingQuestion(id);
+    logServerEvent("session.deleted", { taskId: id, projectId: existing.projectId });
     events.emit("task:deleted", { id, projectId: existing.projectId });
     return true;
   }
   return false;
 }
 
-const RING_LIMIT_BYTES = 1_000_000;
+/**
+ * Retained output per session (R24). Matches the in-memory replay ring in
+ * electron/pty-manager.ts, so what survives a restart is the same window the
+ * live terminal would have replayed.
+ *
+ * This bounds ONE session. Nothing bounds the total across sessions: archiving
+ * a session keeps its output, and only deleting it reclaims the rows through
+ * the cascade. That is a known, recorded gap rather than an oversight.
+ */
+const TRANSCRIPT_BUDGET_BYTES = 1_000_000;
 
-export function appendTerminalLog(taskId: string, chunk: string) {
-  const id = newId("tl");
-  insertTerminalLog({ id, taskId, chunk, createdAt: Date.now() });
-  // rough FIFO eviction by total length per task
-  const all = findTerminalLogsByTaskId(taskId);
-  let total = all.reduce((a, r) => a + r.chunk.length, 0);
-  for (const r of all) {
-    if (total <= RING_LIMIT_BYTES) break;
-    deleteTerminalLogById(r.id);
-    total -= r.chunk.length;
-  }
+/**
+ * How much new output a session may accumulate before its size is re-checked.
+ *
+ * The bound is enforced on a trigger rather than per write: a trim reads the
+ * session's rows, and doing that on every flush is the full per-task scan the
+ * previous implementation did. The consequence is that R24 is *eventually*
+ * enforced — a crash between an insert and its trim leaves a session
+ * temporarily over budget, never corrupt.
+ *
+ * Set to the batcher's own force-flush ceiling so a saturated session is
+ * checked roughly once per forced flush. Worth measuring against a real
+ * session; it is a throughput/overshoot dial, not a correctness one.
+ */
+const TRIM_CHECK_BYTES = 262_144;
+
+/** Bytes written per task since that task's last trim. Reset by the trim. */
+const bytesSinceTrim = new Map<string, number>();
+
+/**
+ * A strictly increasing creation stamp for retained chunks.
+ *
+ * Wall-clock milliseconds alone are not enough: several flushes land inside one
+ * millisecond under load, and the row id cannot break the tie because it ends
+ * in random hex — so two batches from the same millisecond would read back in
+ * arbitrary order. This never returns a value it has already returned, which
+ * gives the trim and the read a total order.
+ *
+ * Under a burst the stamp runs slightly ahead of the clock. That is the right
+ * trade: this column exists to order a session's output, and it is never shown
+ * to anyone as a timestamp.
+ */
+let lastCreatedAt = 0;
+function nextCreatedAt(): number {
+  const now = Date.now();
+  lastCreatedAt = now > lastCreatedAt ? now : lastCreatedAt + 1;
+  return lastCreatedAt;
 }
 
+/**
+ * Persist a batch of terminal output for a session (R23).
+ *
+ * Never throws for a missing task: the batches arrive fire-and-forget from the
+ * main process, and one can land after its task is deleted — the same
+ * existence-check-then-write shape recordPrompt uses, for the same reason. A
+ * batch for a task that is gone is dropped, not raised, because the cascade has
+ * already removed everything it would have been attached to.
+ */
+export function appendTerminalOutput(taskId: string, chunks: readonly string[]): boolean {
+  if (chunks.length === 0) return true;
+  // The foreign key would reject this anyway; checking first keeps a constraint
+  // error out of the request handler.
+  if (!findTaskById(taskId)) return false;
+
+  const rows = chunks
+    .filter((chunk) => chunk.length > 0)
+    .map((chunk) => ({
+      id: newId("tl"),
+      taskId,
+      chunk,
+      createdAt: nextCreatedAt(),
+    }));
+  if (rows.length === 0) return true;
+
+  insertTerminalLogs(rows);
+
+  const written = rows.reduce((total, row) => total + Buffer.byteLength(row.chunk, "utf8"), 0);
+  const pending = (bytesSinceTrim.get(taskId) ?? 0) + written;
+  if (pending < TRIM_CHECK_BYTES) {
+    bytesSinceTrim.set(taskId, pending);
+    return true;
+  }
+
+  // Reset before trimming: a trim that throws must not make every later flush
+  // retry it, and the next flush past the threshold will try again.
+  bytesSinceTrim.set(taskId, 0);
+  trimTerminalLogsForTask(taskId, TRANSCRIPT_BUDGET_BYTES);
+  return true;
+}
+
+/** A session's retained output, oldest first (R23). */
 export function readTerminalLog(taskId: string): string {
   return findTerminalLogsByTaskId(taskId)
     .map((r) => r.chunk)
     .join("");
+}
+
+export type RetainedTranscript = {
+  taskId: string;
+  title: string;
+  projectId: string;
+  archived: boolean;
+  output: string;
+};
+
+/**
+ * Every session with retained output, for the diagnostics export (KTD7).
+ *
+ * Main cannot read this itself — the database lives with the server child — so
+ * the export reaches it through the API. That is the mirror of the write path:
+ * the bytes crossed one way on capture and cross back on export.
+ */
+export function listRetainedTranscripts(): RetainedTranscript[] {
+  const out: RetainedTranscript[] = [];
+  for (const taskId of taskIdsWithTerminalLogs()) {
+    const task = findTaskById(taskId);
+    // A row whose task is gone should not exist (the key cascades), so this is
+    // a guard rather than an expected branch.
+    if (!task) continue;
+    out.push({
+      taskId,
+      title: task.title,
+      projectId: task.projectId,
+      archived: task.archived,
+      output: readTerminalLog(taskId),
+    });
+  }
+  return out;
+}
+
+/** Test-only: drop the in-memory trim counters and the creation stamp. */
+export function __resetTranscriptTrimStateForTesting(): void {
+  bytesSinceTrim.clear();
+  lastCreatedAt = 0;
 }

@@ -1,23 +1,12 @@
 import { DEFAULT_AGENT_LAUNCHER_CONFIG } from "~/shared/agent-launcher-config";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { openExternal } from "~/lib/open-external";
 import { Btn } from "~/components/ui/Btn";
 import { Field, SettingsSection, ToggleRow } from "~/components/views/SettingsParts";
 import { getElectron } from "~/lib/electron";
 import { api, type AppSettings } from "~/lib/api";
 import { queryKeys, useSettings } from "~/queries";
-import {
-  CURRENT_MC_VERSION,
-  useLatestMissionControlVersion,
-} from "~/queries/mission-control-version";
-import {
-  canTriggerUpdateCheck,
-  triggerUpdateDownload,
-  triggerUpdateCheck,
-  triggerUpdateInstall,
-  useAutoUpdaterState,
-} from "~/queries/mc-auto-updater";
+import { CURRENT_MC_VERSION } from "~/queries/mission-control-version";
 import { DEFAULT_ACCENT_COLOR } from "~/lib/accent-colors";
 import {
   readCachedLaunchIntroEnabled,
@@ -52,10 +41,6 @@ export function GeneralSettingsPage() {
   const osNotificationEnabled =
     settings?.sessionFinishOsNotificationEnabled ?? false;
   const notificationSoundEnabled = settings?.notificationSoundEnabled ?? true;
-  const automaticUpdateDownloadsEnabled =
-    settings?.automaticUpdateDownloadsEnabled ?? false;
-  const automaticUpdateInstallOnQuitEnabled =
-    settings?.automaticUpdateInstallOnQuitEnabled ?? false;
   const [launchOverlayEnabled, setLaunchOverlayEnabledState] = useState(
     () => readCachedLaunchIntroEnabled(),
   );
@@ -93,8 +78,6 @@ export function GeneralSettingsPage() {
         | "sessionFinishOsNotificationEnabled"
         | "notificationSoundEnabled"
         | "launchOverlayEnabled"
-        | "automaticUpdateDownloadsEnabled"
-        | "automaticUpdateInstallOnQuitEnabled"
       >
     >,
   ): AppSettings => ({
@@ -112,8 +95,6 @@ export function GeneralSettingsPage() {
     sessionFinishOsNotificationEnabled: osNotificationEnabled,
     notificationSoundEnabled,
     launchOverlayEnabled,
-    automaticUpdateDownloadsEnabled,
-    automaticUpdateInstallOnQuitEnabled,
     gitDiffChangedFilesView: settings?.gitDiffChangedFilesView ?? null,
     gitDiffChangedFilesWidth: settings?.gitDiffChangedFilesWidth ?? null,
     projectsDashboardView: settings?.projectsDashboardView ?? null,
@@ -179,8 +160,6 @@ export function GeneralSettingsPage() {
         | "sessionFinishOsNotificationEnabled"
         | "notificationSoundEnabled"
         | "launchOverlayEnabled"
-        | "automaticUpdateDownloadsEnabled"
-        | "automaticUpdateInstallOnQuitEnabled"
       >
     >,
   ) => {
@@ -239,21 +218,6 @@ export function GeneralSettingsPage() {
           current ? { ...current, launchOverlayEnabled: enabled } : current,
         );
       });
-  };
-
-  const setAutomaticUpdateDownloadsEnabled = async (enabled: boolean) => {
-    await updateSettings({ automaticUpdateDownloadsEnabled: enabled });
-    if (enabled) {
-      try {
-        await triggerUpdateCheck();
-      } catch (err) {
-        console.error("[updater] check after enabling auto-download failed:", err);
-      }
-    }
-  };
-
-  const setAutomaticUpdateInstallOnQuitEnabled = async (enabled: boolean) => {
-    await updateSettings({ automaticUpdateInstallOnQuitEnabled: enabled });
   };
 
   const setOsNotificationEnabled = async (enabled: boolean) => {
@@ -346,24 +310,6 @@ export function GeneralSettingsPage() {
             label="Enable"
           />
         </Field>
-        <Field label="Updates">
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <ToggleRow
-              title="Download updates automatically"
-              description="When enabled, Mission Control downloads app updates in the background after a check finds one."
-              checked={automaticUpdateDownloadsEnabled}
-              onChange={setAutomaticUpdateDownloadsEnabled}
-              label="Enable automatic update downloads"
-            />
-            <ToggleRow
-              title="Install updates when quitting"
-              description="When enabled, a downloaded update installs the next time you quit Mission Control. Otherwise use Restart to install."
-              checked={automaticUpdateInstallOnQuitEnabled}
-              onChange={setAutomaticUpdateInstallOnQuitEnabled}
-              label="Enable install on quit"
-            />
-          </div>
-        </Field>
       </SettingsSection>
       <SettingsSection
         title="Session finish notifications"
@@ -424,119 +370,19 @@ export function GeneralSettingsPage() {
 }
 
 function AboutSection() {
-  const { data: academy, isLoading: academyLoading, isError: academyError } =
-    useLatestMissionControlVersion();
-  const updater = useAutoUpdaterState();
-  const statusId = useId();
-  const latest = academy?.latestVersion;
-  const academyHasUpdate = !!academy?.isUpdateAvailable;
-
-  const openBrowserDownload = () => {
-    if (!academy?.downloadUrl) return;
-    const api = (window as any).electronAPI;
-    if (api?.openExternal) void api.openExternal(academy.downloadUrl);
-    else openExternal(academy.downloadUrl);
-  };
-
-  let status: string;
-  let action: { label: string; onClick: () => void } | null = null;
-  const busy =
-    updater.kind === "priming" ||
-    updater.kind === "checking" ||
-    updater.kind === "downloading";
-  const checkForUpdate = async () => {
-    try {
-      await triggerUpdateCheck();
-    } catch (err) {
-      console.error("[updater] check failed; falling through to browser:", err);
-      openBrowserDownload();
-    }
-  };
-  const downloadUpdate = async () => {
-    const res = await triggerUpdateDownload();
-    if (!res.ok) {
-      console.error("[updater] download failed:", res.error);
-      if (academy?.downloadUrl) openBrowserDownload();
-    }
-  };
-
-  switch (updater.kind) {
-    case "priming":
-      status = "Checking for updates…";
-      break;
-    case "checking":
-      status = "Checking for updates…";
-      break;
-    case "available":
-      status = `Update v${updater.version} found.`;
-      action = { label: "Download", onClick: downloadUpdate };
-      break;
-    case "downloading": {
-      const pct = Math.round(updater.percent);
-      status =
-        pct < 1
-          ? `Starting download of v${updater.version}…`
-          : `Downloading v${updater.version} — ${pct}%`;
-      break;
-    }
-    case "ready-to-install":
-      status = `v${updater.version} downloaded and ready to install.`;
-      action = {
-        label: "Restart to install",
-        onClick: async () => {
-          const res = await triggerUpdateInstall();
-          if (!res.ok && academy?.downloadUrl) openBrowserDownload();
-        },
-      };
-      break;
-    case "error":
-      if (academyHasUpdate && latest && academy?.downloadUrl) {
-        status = `Automatic update hit a download error. New version v${latest} is available.`;
-        action = {
-          label: "Update",
-          onClick: checkForUpdate,
-        };
-      } else {
-        status = `Auto-update unavailable (${updater.message}).`;
-        // Always offer a retry path so the user isn't stranded.
-        action = { label: "Try again", onClick: () => void triggerUpdateCheck() };
-      }
-      break;
-    case "unsupported-dev":
-      if (academyHasUpdate && latest && academy?.downloadUrl) {
-        status = `New version v${latest} can be downloaded manually.`;
-        action = { label: "Download", onClick: openBrowserDownload };
-        break;
-      }
-      if (academyLoading) status = "Checking for updates…";
-      else if (academyError) status = "Couldn't check for updates.";
-      else if (!latest) status = "No release information available.";
-      else status = "You're on the latest version.";
-      break;
-    case "idle":
-    default:
-      if (academyLoading) status = "Checking for updates…";
-      else if (academyError) status = "Couldn't check for updates.";
-      else if (!latest) status = "No release information available.";
-      else if (academyHasUpdate && canTriggerUpdateCheck(updater)) {
-        status = `New version v${latest} available.`;
-        action = {
-          label: "Update",
-          onClick: checkForUpdate,
-        };
-      } else status = "You're on the latest version.";
-      break;
-  }
-
+  // Version display only. This section used to interleave update check,
+  // download and install UI with the app's only version readout — and this
+  // fork ships no release feed, so all of that was dead weight around the one
+  // line worth keeping. There is no native about panel to fall back on
+  // (setAboutPanelOptions is called nowhere), so this stays the app's single
+  // place to read the running version.
   return (
     <SettingsSection title="About" subtitle="Version information for Mission Control.">
       <Field label="Version">
         <div
-          aria-busy={busy}
           style={{
             display: "flex",
             alignItems: "center",
-            justifyContent: "space-between",
             gap: 16,
             padding: "12px 14px",
             background: "var(--surface-0)",
@@ -544,31 +390,9 @@ function AboutSection() {
             borderRadius: 7,
           }}
         >
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 3 }}>
-              Installed: v{CURRENT_MC_VERSION}
-            </div>
-            <div
-              id={statusId}
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-              style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}
-            >
-              {status}
-            </div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+            Installed: v{CURRENT_MC_VERSION}
           </div>
-          {action && (
-            <Btn
-              variant="ghost"
-              size="sm"
-              onClick={action.onClick}
-              aria-describedby={statusId}
-              style={{ flexShrink: 0 }}
-            >
-              {action.label}
-            </Btn>
-          )}
         </div>
       </Field>
     </SettingsSection>

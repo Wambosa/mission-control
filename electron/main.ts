@@ -11,6 +11,7 @@ import {
   nativeImage,
   powerMonitor,
   systemPreferences,
+  crashReporter,
   type NativeImage,
 } from "electron";
 import log from "electron-log/main";
@@ -22,7 +23,10 @@ import * as nodeNet from "node:net";
 import * as readline from "node:readline";
 import * as os from "node:os";
 import { spawn, ChildProcess, spawnSync } from "node:child_process";
-import { registerPtyHandlers, killAllPtys } from "./pty-manager";
+import { registerPtyHandlers, killAllPtys, drainPtyTranscripts } from "./pty-manager";
+import { formatRendererConsoleLine, rendererLogMethod } from "./renderer-console-log";
+import { createServerOutputForwarder } from "./server-output-forwarder";
+import { registerDiagnosticsHandlers } from "./diagnostics-handlers";
 import { setPtyStreamHidden, setPtyStreamPowerSave } from "./pty-output-batch";
 import { setAppThemeFromBackground } from "./app-theme";
 import { registerFileHandlers, disposeAllFileWatchers } from "./file-handlers";
@@ -30,7 +34,6 @@ import { startPreviewServer, disposeAllPreviewServers } from "./preview-server";
 import { IPC } from "./ipc-channels";
 import { resolveAgentCommandMeetingVersion, resolveAgentCommandOnPath } from "./agent-cli-resolution";
 import { augmentProcessEnv, sanitizedProcessEnv } from "./shell-env";
-import { registerUpdateManager } from "./update-manager";
 import { registerFocusMode } from "./focus-mode";
 import {
   registerSandboxManager,
@@ -122,10 +125,71 @@ function remoteVmSpawnEnv(): NodeJS.ProcessEnv {
 // That's already on the user's own machine, so not a privacy risk unless they share the bundle externally.
 log.initialize();
 log.transports.file.level = "info";
+// 1 MB (the default) plus a single main.old.log is too small a window now that
+// the server and the renderer both log here — a busy session rotated the
+// evidence away before anyone could read it.
+log.transports.file.maxSize = 10 * 1024 * 1024;
+// Blocking append per call, stated rather than inherited. This is already the
+// library default, but it is load-bearing enough to be a line of code: the
+// async mode coalesces into a queue that an abrupt teardown discards, and the
+// signature worth capturing — a pty.dispose.begin with no matching end — is
+// exactly the tail such a queue loses. The flag is fixed at construction with
+// no per-call choice, and a second transport on the same path silently inherits
+// whichever mode registered first, so there is no selective split to fall back
+// on. Volume is held down at the source instead: no input events are logged.
+log.transports.file.sync = true;
 // electron-log console writes are synchronous on the main thread and invisible
 // in a packaged app — keep them for dev only. The file transport stays at
 // "info" as the auto-updater debugging trail described above.
 log.transports.console.level = app.isPackaged ? false : "debug";
+
+// Electron only starts Crashpad if this is called, so an abort() — the
+// node-pty ThreadSafeFunction teardown SIGABRT seen on 2026-09-04 — previously
+// left nothing behind but a macOS .ips report, in a TCC-protected directory
+// that reads as empty unless the terminal holds Full Disk Access. Dumps land in
+// <userData>/Crashpad and are never uploaded.
+//
+// Called here, at module scope, and nowhere else: Electron initializes Crashpad
+// for the renderers and child processes from this one call, and a call placed
+// after app-ready captures nothing.
+//
+// Create the directory owner-only first. A dump is a snapshot of the crashed
+// process's memory, so it can contain the API bearer token and sandbox pairing
+// tokens that were resident in it — making this a third sensitive location
+// alongside the log file and the database, and not one to leave at the
+// default mode. Best-effort: Crashpad creates the directory itself if this
+// fails, and losing crash capture to a mkdir would be the worse trade.
+try {
+  fs.mkdirSync(app.getPath("crashDumps"), { recursive: true, mode: 0o700 });
+} catch {
+  /* Crashpad will create it; a permissive dump dir beats no dumps at all */
+}
+crashReporter.start({ uploadToServer: false });
+
+// R8 app lifecycle. Launch is logged here rather than on app-ready so it is the
+// first line of every run — a crash between module load and ready would
+// otherwise leave a log with no indication the app had even started.
+log.info("app.launch", {
+  event: "app.launch",
+  version: app.getVersion(),
+  platform: process.platform,
+  arch: process.arch,
+  packaged: app.isPackaged,
+  electron: process.versions.electron,
+});
+
+// Renderer console → log file. The renderer had no file transport at all, so a
+// UI failure left nothing on disk and the only way to see one was to reproduce
+// it live with DevTools open — which is what TERMINAL_FOCUS_BUG.md's diagnostic
+// plan was reduced to. The level mapping and frame labelling live in
+// renderer-console-log.ts so they are reachable from a test; see that file for
+// why the `details` object is read instead of the deprecated positional
+// arguments.
+app.on("web-contents-created", (_event, contents) => {
+  contents.on("console-message", (details) => {
+    log[rendererLogMethod(details.level)](formatRendererConsoleLine(details));
+  });
+});
 
 // stdout/stderr writes can fail with EPIPE/EIO/EBADF once the controlling
 // terminal or parent pipe goes away — almost always during shutdown. These
@@ -1013,6 +1077,7 @@ async function startProductionServer(): Promise<string> {
 
   const runner = path.join(__dirname, "server-runner.mjs");
 
+  log.info("server.starting", { event: "server.starting", port, origin });
   serverProcess = spawn(process.execPath, [runner], {
     env: {
       ...process.env,
@@ -1038,6 +1103,12 @@ async function startProductionServer(): Promise<string> {
   });
 
   serverProcess.on("exit", (code) => {
+    log.info("server.exited", {
+      event: "server.exited",
+      code,
+      booted: serverBooted,
+      quitting: Boolean((app as any).isQuiting),
+    });
     if (!serverBooted) {
       rejectEarlyExit?.(
         new Error(`Mission Control server exited with code ${code} before it finished starting.`),
@@ -1061,15 +1132,15 @@ async function startProductionServer(): Promise<string> {
   const listeningSignal = new Promise<void>((resolve) => {
     resolveListening = resolve;
   });
-  const forward = (stream: NodeJS.WritableStream, line: string) => {
-    // Don't write to parent stdio during shutdown — the fd may be gone (EIO).
-    if ((app as any).isQuiting) return;
-    try {
-      stream.write(line + "\n");
-    } catch {
-      /* parent stream closed */
-    }
-  };
+  // The bundled server owns the API and the database, so its output is the only
+  // record of what either did. Writing it to the parent's stdout/stderr threw it
+  // away in a packaged build — those fds go nowhere when the app is launched
+  // from Finder — so it goes to the log file instead. The isQuiting guard stays:
+  // it now protects the transport rather than a dead fd.
+  const forward = createServerOutputForwarder({
+    write: (level, line) => log[level](line),
+    isQuitting: () => Boolean((app as any).isQuiting),
+  });
   if (serverProcess.stdout) {
     readline
       .createInterface({ input: serverProcess.stdout })
@@ -1078,13 +1149,13 @@ async function startProductionServer(): Promise<string> {
           resolveListening?.();
           return;
         }
-        forward(process.stdout, line);
+        forward("info", line);
       });
   }
   if (serverProcess.stderr) {
     readline
       .createInterface({ input: serverProcess.stderr })
-      .on("line", (line) => forward(process.stderr, line));
+      .on("line", (line) => forward("error", line));
   }
 
   // Ready the moment the socket is listening (sentinel) or the origin answers
@@ -1797,6 +1868,20 @@ safeHandle(IPC.dialogGrantFolder, async (_evt, requested: unknown) => {
   }
 });
 
+/**
+ * Diagnostics (R17-R19, R26, R27).
+ *
+ * The export is a bundle of the log files plus retained session transcripts, so
+ * a dead-session postmortem does not still need SQL. Transcripts live in the
+ * database, which main cannot read — they come back over the API, the mirror of
+ * the path they crossed on capture. Implementation lives in
+ * ./diagnostics-handlers so it is reachable from a test.
+ */
+registerDiagnosticsHandlers(ipcMain, () => win, {
+  userDataDir: missionControlUserDataDir,
+  runtimePort: () => runtimePort,
+});
+
 safeHandle(IPC.shellOpenPath, async (_evt, p: string) => {
   const decision = resolveSafeOpenPath(p, loadProjectRoots());
   if (!decision.ok) return decision;
@@ -2047,7 +2132,41 @@ app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
-app.on("before-quit", () => {
+/**
+ * How long quit waits for outstanding session-transcript writes (KTD9).
+ *
+ * Roughly two seconds, and capped deliberately: the writes carry no
+ * acknowledgment, so an unresponsive or already-dead server child must not be
+ * able to hang the quit. An app that will not exit and says nothing is the
+ * symptom this work exists to remove; reintroducing it at shutdown for a few
+ * final lines would be a poor trade.
+ */
+const QUIT_TRANSCRIPT_DRAIN_MS = 2_000;
+
+/** Whether the transcript drain below has already run for this quit. */
+let quitDrained = false;
+
+app.on("before-quit", (event) => {
+  // First pass: let the last of each live session's output reach the server
+  // before anything is torn down. Without this every clean quit loses the
+  // closing output of every live session — the server child is killed a few
+  // synchronous lines below, while each PTY's final flush runs in its
+  // asynchronous exit handler, so the last batches arrive after it is gone.
+  //
+  // isQuiting stays unset here on purpose: it silences the server output
+  // forwarder, and the drain wants the server's own lines still reaching the
+  // log while it runs.
+  if (!quitDrained) {
+    quitDrained = true;
+    event.preventDefault();
+    void drainPtyTranscripts(QUIT_TRANSCRIPT_DRAIN_MS).finally(() => app.quit());
+    return;
+  }
+
+  // Logged before isQuiting flips, because that flag is what silences the
+  // server forwarder — and before the teardown below, so a quit that hangs
+  // still shows that a quit was what started it.
+  log.info("app.quit", { event: "app.quit" });
   (app as any).isQuiting = true;
   killAllPtys();
   disposeAllFileWatchers();
@@ -2090,7 +2209,6 @@ app.whenReady().then(() => {
     return true;
   });
   registerProjectImageProtocol();
-  registerUpdateManager(ipcMain, () => win, missionControlUserDataDir);
   registerFocusMode(() => win, missionControlUserDataDir, {
     width: MAIN_WINDOW_MIN_WIDTH,
     height: MAIN_WINDOW_MIN_HEIGHT,

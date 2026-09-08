@@ -192,6 +192,11 @@ export const terminalLogs = sqliteTable(
   },
   (t) => ({
     taskIdx: index("terminal_logs_task_idx").on(t.taskId),
+    // Retention trims oldest-first within a session; the id's encoded
+    // timestamp is base36 and changes width, so creation time is the only
+    // usable sort key. Mirrored as a runtime retrofit in db/client.ts for
+    // databases that predate retention.
+    taskCreatedIdx: index("terminal_logs_task_created_idx").on(t.taskId, t.createdAt),
   })
 );
 

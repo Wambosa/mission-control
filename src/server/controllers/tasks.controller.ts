@@ -1,11 +1,14 @@
 import { z } from "zod";
 import { TASK_AGENTS, TASK_STATUSES } from "~/shared/domain";
 import {
+  appendTerminalOutput,
   archiveTask,
   createTask,
   deleteTask,
   getTask,
+  listRetainedTranscripts,
   listTasksForProject,
+  readTerminalLog,
   restoreTask,
   sweepOrphanedActiveTasks,
   updateStatus,
@@ -51,6 +54,23 @@ const updateTaskBody = z
     claudeBareSession: z.boolean(),
   })
   .partial();
+
+/**
+ * A flush is one coalesced string, so this is slack for a future accumulation
+ * rather than an expected size — and a ceiling on what one request can ask the
+ * server to insert in a single transaction.
+ */
+const MAX_TRANSCRIPT_CHUNKS_PER_BATCH = 64;
+
+/**
+ * Largest single chunk the route accepts.
+ *
+ * Matches PTY_FLUSH_MAX_PENDING_CHARS in electron/pty-output-batch.ts, which is
+ * the batcher's force-flush ceiling and therefore the biggest chunk the real
+ * producer can emit. Capping the count without the size left the request body
+ * effectively unbounded.
+ */
+const MAX_TRANSCRIPT_CHUNK_CHARS = 262_144;
 
 const updateStatusBody = z.object({
   status: z.enum(TASK_STATUSES).optional(),
@@ -175,4 +195,50 @@ export async function restore(rawId: string, request: Request): Promise<Response
   const t = restoreTask(parsed.data);
   if (!t) return notFound();
   return json({ task: t });
+}
+
+const terminalOutputBody = z.object({
+  chunks: z
+    .array(z.string().max(MAX_TRANSCRIPT_CHUNK_CHARS))
+    .max(MAX_TRANSCRIPT_CHUNKS_PER_BATCH),
+});
+
+/**
+ * Ingest a batch of terminal output for retention (R23).
+ *
+ * Main has no database access, so the bytes cross the process boundary here.
+ * The main process posts these fire-and-forget on the PTY batcher's flush
+ * cadence and ignores the response, so the status code exists for tests and
+ * for a human reading the log, not for a caller that will act on it. A batch
+ * whose task has been deleted answers 404 rather than raising the foreign-key
+ * error into the handler.
+ */
+export async function appendTerminalOutputRoute(
+  rawId: string,
+  request: Request,
+): Promise<Response> {
+  const parsed = idParam.safeParse(rawId);
+  if (!parsed.success) return notFound();
+  const body = await parseJsonBody(request, terminalOutputBody);
+  if (!body.ok) return body.response;
+  if (!appendTerminalOutput(parsed.data, body.data.chunks)) return notFound();
+  return noContent();
+}
+
+/**
+ * Every session with retained output (KTD7).
+ *
+ * The diagnostics export calls this: main has no database access, so the only
+ * way an export can include transcripts is to ask the server for them.
+ */
+export function listRetainedTranscriptsRoute(): Response {
+  return json({ transcripts: listRetainedTranscripts() });
+}
+
+/** A session's retained terminal output, for the diagnostics export (R23). */
+export function readTerminalOutputRoute(rawId: string): Response {
+  const parsed = idParam.safeParse(rawId);
+  if (!parsed.success) return notFound();
+  if (!getTask(parsed.data)) return notFound();
+  return json({ output: readTerminalLog(parsed.data) });
 }

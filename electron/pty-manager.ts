@@ -32,7 +32,7 @@ import {
   SpawnPolicyError,
   type SpawnRequest,
 } from "./pty-spawn-policy";
-import { buildSyntheticHookUrl, type PtyHookEnv } from "./pty-hook-env";
+import { buildSyntheticHookUrl, buildTaskApiUrl, type PtyHookEnv } from "./pty-hook-env";
 import { AGENT_HOOK_EVENTS } from "../src/shared/agent-hook-events";
 import { checkAgentCliVersionCached, agentVersionErrorMessage } from "./agent-cli-version";
 import {
@@ -179,6 +179,151 @@ async function postSyntheticHook(p: Pty, event: string, extra?: Record<string, u
   }
 }
 
+/**
+ * Transcript capture (R23, R25).
+ *
+ * The bytes have to cross a process boundary whoever writes them: Electron main
+ * has no database access, because the server runs as a child process. This
+ * rides the output batcher's already-coalesced flush cadence rather than the
+ * per-chunk data handler, so the hot path stays allocation-cheap and no new
+ * timer is introduced.
+ *
+ * Deliberately fire-and-forget. A dropped chunk under load is a better trade
+ * than a write that can stall a terminal, which R25 forbids outright — so
+ * nothing here is awaited on the flush path, and every failure is swallowed.
+ * The pending set exists only so a clean quit can wait for outstanding writes
+ * (KTD9); it is not a retry queue.
+ */
+const pendingTranscriptWrites = new Set<Promise<void>>();
+
+/**
+ * Ceiling on in-flight transcript writes.
+ *
+ * Without one, a server child that accepts connections and stops answering
+ * makes this set grow on the batcher's cadence, each entry holding its
+ * serialized body -- turning a stalled peer into main-process memory growth.
+ * Dropping past the ceiling is what the fire-and-forget contract above already
+ * promises: a dropped chunk beats a write that costs the terminal anything.
+ *
+ * Sized at roughly a second of flushes for several concurrent sessions, so it
+ * is only reached when writes genuinely are not draining.
+ */
+const MAX_PENDING_TRANSCRIPT_WRITES = 64;
+
+/**
+ * The live batcher, so the quit drain can force a final flush.
+ *
+ * registerPtyHandlers() is called once per app run, so this is a handle to that
+ * one instance rather than a registry.
+ */
+let activeOutputBatcher: PtyOutputBatcher | null = null;
+
+/**
+ * Where a flushed batch should be sent, or `null` to drop it.
+ *
+ * Exported for its own sake: every branch here is a silent drop, so the ones
+ * that are correct need to be distinguishable from the ones that would be bugs.
+ */
+export function transcriptCaptureTarget(
+  pty: { shell: boolean; taskId: string },
+  mcEnv: PtyHookEnv | null | undefined,
+  data: string,
+): { url: string; token: string } | null {
+  // Agent sessions only (KTD10). A shell or dashboard terminal's id belongs to
+  // a separate entity, and the retention table's key is an enforced foreign key
+  // to the task table — so an insert for one would be rejected rather than
+  // stored. Dropping it here keeps a guaranteed-failing request off the wire.
+  if (pty.shell) return null;
+  if (!data) return null;
+  if (!mcEnv?.apiUrl || !mcEnv.token) return null;
+  const url = buildTaskApiUrl(mcEnv, pty.taskId, "terminal-output");
+  if (!url) return null;
+  return { url, token: mcEnv.token };
+}
+
+function captureTranscriptBatch(p: Pty, mcEnv: PtyHookEnv | null, data: string): void {
+  const target = transcriptCaptureTarget(p, mcEnv, data);
+  if (!target) return;
+  // Writes are not draining; drop rather than accumulate. Retention is
+  // best-effort by decision, and the alternative is unbounded growth in main.
+  if (pendingTranscriptWrites.size >= MAX_PENDING_TRANSCRIPT_WRITES) return;
+
+  const write = fetch(target.url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${target.token}`,
+    },
+    body: JSON.stringify({ chunks: [data] }),
+  })
+    .then(() => {})
+    .catch(() => {
+      /* swallow — best-effort retention, never the terminal's problem */
+    })
+    .finally(() => {
+      pendingTranscriptWrites.delete(write);
+    });
+  pendingTranscriptWrites.add(write);
+}
+
+/**
+ * Wait for outstanding transcript writes, up to `timeoutMs` (KTD9).
+ *
+ * The bound is not optional. These writes carry no acknowledgment, so an
+ * unresponsive or already-dead server child must not be able to hang the quit —
+ * an app that will not exit and says nothing is the symptom this work exists to
+ * remove, and reintroducing it at shutdown for a few final lines would be a
+ * poor trade.
+ */
+/**
+ * Flush pending PTY output and wait for the transcript writes it produces.
+ *
+ * Called at quit, before the server child is killed (KTD9). Without it every
+ * clean quit loses the closing output of every live session: the quit handler
+ * tears down each PTY and kills the server a few synchronous lines later, while
+ * each PTY's final flush runs in its asynchronous exit handler — so the server
+ * dies before the last batches arrive.
+ *
+ * Bounded, because the writes it waits on carry no acknowledgment.
+ */
+export async function drainPtyTranscripts(timeoutMs: number): Promise<void> {
+  try {
+    activeOutputBatcher?.flushAll();
+  } catch {
+    /* a failed flush must not stop the quit */
+  }
+  await awaitTranscriptWrites(timeoutMs);
+}
+
+/**
+ * Wait for every promise, or give up at `timeoutMs` -- whichever comes first.
+ *
+ * Exported because the deadline is the load-bearing half: these writes carry no
+ * acknowledgment, so a dead server child must not be able to hold the quit
+ * open. A bound that silently stopped working would reintroduce exactly the
+ * hang this work exists to remove, and nothing else would notice.
+ */
+export async function awaitAllSettledWithin(
+  promises: Iterable<Promise<unknown>>,
+  timeoutMs: number,
+): Promise<void> {
+  const pending = [...promises];
+  if (pending.length === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs);
+  });
+  try {
+    await Promise.race([Promise.allSettled(pending).then(() => {}), deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function awaitTranscriptWrites(timeoutMs: number): Promise<void> {
+  await awaitAllSettledWithin(pendingTranscriptWrites, timeoutMs);
+}
+
 const ptys = new Map<string, Pty>();
 const RING_LIMIT_BYTES = 1_000_000;
 
@@ -291,7 +436,16 @@ function killProcessTreeWindows(pid: number | undefined): void {
  * PTYs. Fixed by node-pty 1.2.0-beta.14 (closes slave + guard fds on all
  * paths, master on error). Don't downgrade node-pty below that.
  */
-export function disposePty(proc: import("node-pty").IPty | null | undefined): void {
+export function disposePty(
+  proc: import("node-pty").IPty | null | undefined,
+  // `silent` suppresses this teardown's own begin/end pair. killAllPtys()
+  // brackets the whole sweep instead: it is an unbatched loop over every live
+  // PTY, and each log call is a synchronous open-write-close, so instrumenting
+  // inside it turns closing a busy project into a burst of file writes in one
+  // event-loop turn. The bulk pair still carries the count, so a log that stops
+  // mid-sweep shows how far it got.
+  opts: { silent?: boolean } = {},
+): void {
   if (!proc) return;
   // Capture the pid before destroy() so the tree-kill below still has it.
   const pid = proc.pid;
@@ -302,6 +456,11 @@ export function disposePty(proc: import("node-pty").IPty | null | undefined): vo
   // dispose never fired and one conhost.exe (~8.5 MB, parented to our main
   // process) leaked on every create→delete of a terminal.
   const closable = proc as unknown as { destroy?: () => void };
+  // Bracket the teardown. node-pty can abort() the whole process from inside
+  // its ThreadSafeFunction callback here (a C++ throw that no JS catch can
+  // reach), so a "pty.dispose.begin" with no matching "end" in the log is the
+  // signature of that crash — and names the pid it died on.
+  if (!opts.silent) log.info("pty.dispose.begin", { event: "pty.dispose.begin", pid });
   try {
     if (typeof closable.destroy === "function") {
       closable.destroy();
@@ -311,6 +470,7 @@ export function disposePty(proc: import("node-pty").IPty | null | undefined): vo
   } catch {
     /* already exited or fd already closed */
   }
+  if (!opts.silent) log.info("pty.dispose.end", { event: "pty.dispose.end", pid });
   // Then, on Windows only (no-op elsewhere), tree-kill any survivors: SIGHUP /
   // console-close doesn't reliably reach a grandchild node.exe that re-parented
   // its tool subprocesses and holds the worktree's .claude/ handle. This runs
@@ -367,7 +527,16 @@ export function registerPtyHandlers(
       scanForCodexHookReview(p, haystack);
     }
     send(getWin, IPC.ptyData, { ptyId, data, seq });
+    // Retention rides this flush (R23), and lands after the renderer send so
+    // the terminal is never waiting behind a write — R25.
+    //
+    // Credentials come from getHookEnv(), the accessor already in scope here,
+    // NOT from p.mcEnv: that field is populated only for agent-mode PTYs, so
+    // reading it would silently skip every session spawned without them — a
+    // gap that fails without erroring.
+    if (p) captureTranscriptBatch(p, getHookEnv(), data);
   });
+  activeOutputBatcher = outputBatcher;
   safeHandle(
     IPC.ptySpawn,
     async (_evt, opts: SpawnRequest) => {
@@ -551,6 +720,16 @@ export function registerPtyHandlers(
         lastInputAt: 0,
       };
       ptys.set(id, p);
+      // `live` is the running PTY count — the number that crept toward the ptmx
+      // cap during the fd-leak era, and the one worth having in the log when a
+      // spawn starts failing.
+      log.info("pty.spawned", {
+        event: "pty.spawned",
+        ptyId: id,
+        pid: proc.pid,
+        mode: plan.mode,
+        live: ptys.size,
+      });
 
       // Voice control can seed a fresh agent session with a starting prompt.
       // The agent's TUI isn't ready for input the instant it spawns, so we wait
@@ -617,6 +796,17 @@ export function registerPtyHandlers(
         }
         send(getWin, IPC.ptyExit, { ptyId: id, exitCode, signal });
         ptys.delete(id);
+        // A PTY dying is the last thing that happens before the lockups we're
+        // chasing, and signal/exitCode is the part the renderer never records.
+        // Logged after the delete so `live` is just the map size — killPty may
+        // have already removed this entry, which made arithmetic here wrong.
+        log.info("pty.exited", {
+          event: "pty.exited",
+          ptyId: id,
+          exitCode,
+          signal,
+          live: ptys.size,
+        });
       });
 
       return { ptyId: id };
@@ -692,9 +882,30 @@ export function registerPtyHandlers(
   }, ipcMain);
 }
 
-export function killAllPtys() {
-  for (const p of ptys.values()) {
-    disposePty(p.proc);
+/**
+ * Tear down a set of PTYs under a single bracketed log pair.
+ *
+ * App shutdown and closing a project both tear every PTY down back-to-back,
+ * which is the densest concentration of the teardown abort disposePty()
+ * describes. One pair brackets the whole sweep and carries the count, so a log
+ * that stops mid-sweep still shows how far it got — while the per-PTY pairs
+ * stay silenced, because each log call is a synchronous open-write-close and an
+ * unbatched loop over every live PTY would turn closing a busy project into a
+ * burst of file writes in one event-loop turn, on exactly the path that is
+ * already the most crash-prone.
+ */
+export function disposeAllPtys(
+  procs: readonly (import("node-pty").IPty | null | undefined)[],
+): void {
+  const live = procs.length;
+  log.info("pty.killAll.begin", { event: "pty.killAll.begin", live });
+  for (const proc of procs) {
+    disposePty(proc, { silent: true });
   }
+  log.info("pty.killAll.end", { event: "pty.killAll.end", live });
+}
+
+export function killAllPtys() {
+  disposeAllPtys([...ptys.values()].map((p) => p.proc));
   ptys.clear();
 }

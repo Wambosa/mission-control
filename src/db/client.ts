@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as schema from "./schema";
 import { resolveElectronBetterSqlite3NativeBinding } from "./better-sqlite3-native-binding";
 import { migrateMultiSandbox } from "./migrate-multi-sandbox";
+import { logServerEvent } from "~/server/log-event";
 import { DEFAULT_BRANCH, DEFAULT_TASK_STATUS } from "~/shared/domain";
 import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
 
@@ -145,6 +146,7 @@ function runMigrations(
     }
     return;
   }
+  const justApplied: string[] = [];
   for (const name of names) {
     if (applied.has(name)) continue;
     const sql = migrationFiles[`./migrations/${name}`];
@@ -155,6 +157,13 @@ function runMigrations(
         .run(name, Date.now());
     });
     tx();
+    justApplied.push(name);
+  }
+  // Only when something actually ran. A boot that applies nothing is the normal
+  // case and does not need a line; a boot that migrates is the one worth having
+  // in the log when behaviour changes underneath the operator.
+  if (justApplied.length > 0) {
+    logServerEvent("app.migrations", { applied: justApplied });
   }
 }
 
@@ -464,6 +473,10 @@ function ensureSchema(sqlite: Database.Database) {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS terminal_logs_task_idx ON terminal_logs(task_id);
+    -- Retention trims oldest-first within a session, so the sort key is
+    -- (task_id, created_at). Without this the trim orders the session's whole
+    -- row set on every pass.
+    CREATE INDEX IF NOT EXISTS terminal_logs_task_created_idx ON terminal_logs(task_id, created_at);
 
     CREATE TABLE IF NOT EXISTS task_diagrams (
       id TEXT PRIMARY KEY,
@@ -716,6 +729,11 @@ function ensureSchema(sqlite: Database.Database) {
   // and sorts separately; this lets it satisfy the filter + order in one index
   // scan.
   sqlite.exec("CREATE INDEX IF NOT EXISTS tasks_project_created_idx ON tasks(project_id, created_at);");
+  // Retention trims a session's chunks oldest-first, so the sort key is
+  // (task_id, created_at); the table only indexed its task column before
+  // transcript retention shipped, which left the trim ordering the session's
+  // whole row set.
+  sqlite.exec("CREATE INDEX IF NOT EXISTS terminal_logs_task_created_idx ON terminal_logs(task_id, created_at);");
   ensureColumn(sqlite, "user_terminals", "scope_id", `TEXT NOT NULL DEFAULT '${LOCAL_SCOPE_ID}'`);
   sqlite.exec("CREATE INDEX IF NOT EXISTS user_terminals_project_worktree_scope_idx ON user_terminals(project_id, worktree_id, scope_id);");
   sqlite.exec("CREATE INDEX IF NOT EXISTS user_terminals_scope_idx ON user_terminals(scope_id);");

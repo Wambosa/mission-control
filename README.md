@@ -71,7 +71,6 @@ mission-control/
 ## Download
 
 - **GitHub Releases:** [AgentSystemLabs/mission-control/releases](https://github.com/AgentSystemLabs/mission-control/releases) — signed macOS / Windows / Linux installers attached automatically when a `v*` tag ships (manual install / dogfooding)
-- **Stable + in-app updates:** [agentsystem.dev](https://agentsystem.dev) — same installers after a release is **approved** there; the Electron updater and in-app Update UI only advance on approval
 - **PR CI Artifacts:** pull requests build an unsigned Linux AppImage (`MissionControl-linux-x64`) — open the workflow run → **Artifacts**
 
 After download: macOS open the `.dmg` and drag the app to Applications; Windows run the Setup `.exe`; Linux make the `.AppImage` executable (`chmod +x`) and run it (FUSE 2 may be required on some distros).
@@ -175,26 +174,60 @@ within Mission Control. `/api/events` (SSE) uses a short-lived ticket from
 
 ## Observability
 
-Main-process logs are written via `electron-log`. In a packaged build they persist to:
+Everything the app records goes to one file. In a packaged build it persists to:
 
 - **macOS:** `~/Library/Logs/MissionControl/main.log`
 - **Windows:** `%USERPROFILE%\AppData\Roaming\MissionControl\logs\main.log`
 - **Linux:** `~/.config/MissionControl/logs/main.log`
 
-In dev (`pnpm dev`) the same lines are written to stdout/stderr.
+**Settings → Diagnostics** exports the logs and retained session transcripts as
+one bundle, and reveals the log directory in the OS file manager. Crash dumps
+land separately, in `Crashpad/` under the same user-data directory.
 
-### Event prefixes
+Four producers write to that one file, three of which used to discard their
+output: the main process, the renderer (via a `console-message` hook and
+electron-log's renderer transport), the bundled server child (its stdout and
+stderr, forwarded under a `[server]` prefix), and PTY lifecycle from
+`electron/pty-manager.ts`.
 
-| Prefix | Surface | Dispatch sites |
-| --- | --- | --- |
-| `update.check.*` | Auto-updater check lifecycle (entry, failure) | `electron/update-manager.ts:safeCheck` |
-| `update.download.*` | Auto-updater download lifecycle | `electron/update-manager.ts:safeDownload` |
-| `update.install.*` | Auto-updater install lifecycle | `electron/update-manager.ts:safeInstall` |
-| `update.state.*` | Auto-updater UpdateState transitions (sampled at 10% boundaries for downloading) | `electron/update-manager.ts:broadcast` |
-| `update.error.*` | Errors emitted by electron-updater itself | `electron/update-manager.ts:wireEvents` |
-| `update.load.*` | electron-updater module load failure | `electron/update-manager.ts:loadUpdater` |
+### Event families
 
-When investigating "the update never installed," start with `rg 'event: "update\.' ~/Library/Logs/MissionControl/main.log`. electron-updater's own internal log stream (URL resolution, signature verification, retries) is also routed into the same file.
+Every event carries a name and the ids needed to narrow one incident to one
+session: `{ event, ...ids }`. Individual event names are not listed here — they
+change with the code and the family is the stable part.
+
+| Family | Covers |
+| --- | --- |
+| `app.*` | Launch (version, platform, arch), quit, migrations applied |
+| `server.*` | The bundled server child starting and exiting |
+| `pty.*` | PTY spawn, exit, teardown, and bulk teardown at shutdown |
+| `session.*` | Sessions created, archived, restored, deleted, pinned |
+| `project.*` | Projects created, edited, deleted, opened, rebound to another host |
+| `group.*` | Project groups created, edited, deleted |
+| `setting.changed` | One settings mutation, with the key and both values |
+| `nav.route` | One line per navigation |
+| `sandbox.*` | Sandbox state and provisioning |
+
+**Input events are never logged** — no keystrokes, pointer movement, scroll, or
+activation of a control that changes no state. That exclusion is what keeps the
+file readable and keeps its synchronous write path affordable.
+
+Events emitted by the server child are single-line JSON behind an `[mc-event]`
+marker, so machine events can be separated from the free-text server
+diagnostics sharing the file:
+
+```
+rg 'mc-event' ~/Library/Logs/MissionControl/main.log
+```
+
+Two values are held back on purpose. Setting values are redacted by key
+(anything looking like a token, secret, password or credential) and capped by
+length — the diagnostics export ships unscrubbed, and the database already
+holds those secrets in cleartext without needing a second copy in a file with a
+wider audience. Retained transcripts are raw terminal output and carry whatever
+a shell or agent printed, so treat an exported bundle accordingly.
+
+In dev (`pnpm dev`) the same lines also go to stdout/stderr.
 
 ## Skill file for external CLIs
 

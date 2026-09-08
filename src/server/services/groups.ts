@@ -2,6 +2,7 @@ import type { Group } from "~/db/schema";
 import { getSqlite } from "~/db/client";
 import { GROUP_COLORS } from "~/lib/design-meta";
 import { events } from "../events";
+import { logServerEvent } from "../log-event";
 import { ValidationError } from "../errors";
 import {
   deleteGroupRow,
@@ -32,6 +33,7 @@ export function createGroup(input: { name: string; color?: string }): Group {
     createdAt: Date.now(),
   };
   insertGroup(row);
+  logServerEvent("group.created", { groupId: row.id });
   events.emit("group:created", { id: row.id });
   return row;
 }
@@ -41,6 +43,14 @@ export function updateGroup(id: string, patch: Partial<Pick<Group, "name" | "col
   if (!existing) return null;
   const next = { ...existing, ...patch };
   updateGroupRow(id, next);
+  // Name and colour are the only patchable fields; report which of them moved
+  // rather than firing on a save that changed nothing.
+  const changedFields = Object.keys(patch).filter(
+    (field) => next[field as keyof Group] !== existing[field as keyof Group],
+  );
+  if (changedFields.length > 0) {
+    logServerEvent("group.edited", { groupId: id, fields: changedFields });
+  }
   events.emit("group:updated", { id });
   return next;
 }
@@ -73,6 +83,7 @@ export function deleteGroup(id: string): boolean {
   // orphan projects to ungrouped
   orphanProjectsByGroupId(id);
   const changes = deleteGroupRow(id);
+  if (changes > 0) logServerEvent("group.deleted", { groupId: id });
   events.emit("group:deleted", { id });
   return changes > 0;
 }

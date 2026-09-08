@@ -12,6 +12,9 @@ import { Icon } from "~/components/ui/Icon";
 import { SessionIcon } from "~/components/ui/SessionIcon";
 import { AgentGlyph } from "~/components/ui/AgentGlyph";
 import { Kbd } from "~/components/ui/Kbd";
+import { ContextMenuPopover } from "~/components/ui/ContextMenuPopover";
+import { DropdownMenuItem } from "~/components/ui/DropdownMenuItem";
+import { useCopy } from "~/components/views/SettingsParts";
 import { usePromptSearch } from "~/queries";
 import { formatRelativeTime } from "~/lib/format-relative-time";
 import { requestSessionOpenById } from "~/lib/session-notification-store";
@@ -20,8 +23,23 @@ import type { PromptSearchResult } from "~/shared/prompts";
 const DEBOUNCE_MS = 150;
 
 // Single-line preview: collapse whitespace so multi-line prompts read cleanly.
-function previewText(text: string): string {
+export function previewText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The text a row's copy action puts on the clipboard: the stored prompt,
+ * untouched (R22).
+ *
+ * A separate function from previewText() on purpose. The row's two-line
+ * truncation is presentational — previewText collapses whitespace and the clamp
+ * is styling — so it would be easy to copy what is displayed instead of what
+ * was stored, and the difference is invisible until someone needs the prompt
+ * back. Recovering a prompt from a session that died is the whole point, so it
+ * gets its own name and its own test rather than sharing the preview's.
+ */
+export function copyText(text: string): string {
+  return text;
 }
 
 // Wrap case-insensitive matches of `query` in the preview so the hit is visible.
@@ -57,6 +75,11 @@ export function PromptSearchPalette({ open, onClose }: { open: boolean; onClose:
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [highlightIdx, setHighlightIdx] = useState(0);
+  // Right-click only, per the decision to leave this to the mouse: the palette
+  // is otherwise keyboard-driven, and this action is not worth a shortcut to
+  // maintain.
+  const [menu, setMenu] = useState<{ x: number; y: number; row: PromptSearchResult } | null>(null);
+  const { copied, copy } = useCopy();
   const inputRef = useRef<HTMLInputElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   // Stable "now" per open so relative times don't churn between renders
@@ -93,6 +116,11 @@ export function PromptSearchPalette({ open, onClose }: { open: boolean; onClose:
     if (!open) return;
     itemRefs.current[highlightIdx]?.scrollIntoView({ block: "nearest" });
   }, [open, highlightIdx]);
+
+  // A menu must not survive the palette that opened it.
+  useEffect(() => {
+    if (!open) setMenu(null);
+  }, [open]);
 
   const select = (row: PromptSearchResult) => {
     onClose();
@@ -204,6 +232,12 @@ export function PromptSearchPalette({ open, onClose }: { open: boolean; onClose:
                   itemRefs.current[i] = el;
                 }}
                 onClick={() => select(row)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setHighlightIdx(i);
+                  setMenu({ x: e.clientX, y: e.clientY, row });
+                }}
                 onMouseMove={() => setHighlightIdx(i)}
                 style={{
                   width: "100%",
@@ -282,9 +316,34 @@ export function PromptSearchPalette({ open, onClose }: { open: boolean; onClose:
           })}
         </div>
       )}
+      {menu && (
+        <ContextMenuPopover
+          anchor={menu}
+          label="Prompt actions"
+          minWidth={PROMPT_MENU_WIDTH}
+          onClose={() => setMenu(null)}
+        >
+          <DropdownMenuItem
+            icon={copied === menu.row.promptId ? "check" : "copy"}
+            autoFocus
+            onClick={() => {
+              // The stored text, not the preview the row renders — the clamp is
+              // styling and the preview collapses whitespace, so copying what
+              // is displayed would silently truncate the recovery this exists
+              // for.
+              copy(copyText(menu.row.text), menu.row.promptId);
+              setMenu(null);
+            }}
+          >
+            Copy prompt
+          </DropdownMenuItem>
+        </ContextMenuPopover>
+      )}
     </Modal>
   );
 }
+
+const PROMPT_MENU_WIDTH = 176;
 
 const emptyStyle = {
   padding: 20,

@@ -114,10 +114,6 @@ export function ThemeSettingsPage() {
       settings?.sessionFinishOsNotificationEnabled ?? false,
     notificationSoundEnabled: settings?.notificationSoundEnabled ?? true,
     launchOverlayEnabled,
-    automaticUpdateDownloadsEnabled:
-      settings?.automaticUpdateDownloadsEnabled ?? false,
-    automaticUpdateInstallOnQuitEnabled:
-      settings?.automaticUpdateInstallOnQuitEnabled ?? false,
     gitDiffChangedFilesView: settings?.gitDiffChangedFilesView ?? null,
     gitDiffChangedFilesWidth: settings?.gitDiffChangedFilesWidth ?? null,
     projectsDashboardView: settings?.projectsDashboardView ?? null,

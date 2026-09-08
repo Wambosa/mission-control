@@ -11,6 +11,7 @@ import {
   nativeImage,
   powerMonitor,
   systemPreferences,
+  crashReporter,
   type NativeImage,
 } from "electron";
 import log from "electron-log/main";
@@ -23,6 +24,8 @@ import * as readline from "node:readline";
 import * as os from "node:os";
 import { spawn, ChildProcess, spawnSync } from "node:child_process";
 import { registerPtyHandlers, killAllPtys } from "./pty-manager";
+import { formatRendererConsoleLine, rendererLogMethod } from "./renderer-console-log";
+import { createServerOutputForwarder } from "./server-output-forwarder";
 import { setPtyStreamHidden, setPtyStreamPowerSave } from "./pty-output-batch";
 import { setAppThemeFromBackground } from "./app-theme";
 import { registerFileHandlers, disposeAllFileWatchers } from "./file-handlers";
@@ -122,10 +125,59 @@ function remoteVmSpawnEnv(): NodeJS.ProcessEnv {
 // That's already on the user's own machine, so not a privacy risk unless they share the bundle externally.
 log.initialize();
 log.transports.file.level = "info";
+// 1 MB (the default) plus a single main.old.log is too small a window now that
+// the server and the renderer both log here — a busy session rotated the
+// evidence away before anyone could read it.
+log.transports.file.maxSize = 10 * 1024 * 1024;
+// Blocking append per call, stated rather than inherited. This is already the
+// library default, but it is load-bearing enough to be a line of code: the
+// async mode coalesces into a queue that an abrupt teardown discards, and the
+// signature worth capturing — a pty.dispose.begin with no matching end — is
+// exactly the tail such a queue loses. The flag is fixed at construction with
+// no per-call choice, and a second transport on the same path silently inherits
+// whichever mode registered first, so there is no selective split to fall back
+// on. Volume is held down at the source instead: no input events are logged.
+log.transports.file.sync = true;
 // electron-log console writes are synchronous on the main thread and invisible
 // in a packaged app — keep them for dev only. The file transport stays at
 // "info" as the auto-updater debugging trail described above.
 log.transports.console.level = app.isPackaged ? false : "debug";
+
+// Electron only starts Crashpad if this is called, so an abort() — the
+// node-pty ThreadSafeFunction teardown SIGABRT seen on 2026-09-04 — previously
+// left nothing behind but a macOS .ips report, in a TCC-protected directory
+// that reads as empty unless the terminal holds Full Disk Access. Dumps land in
+// <userData>/Crashpad and are never uploaded.
+//
+// Called here, at module scope, and nowhere else: Electron initializes Crashpad
+// for the renderers and child processes from this one call, and a call placed
+// after app-ready captures nothing.
+//
+// Create the directory owner-only first. A dump is a snapshot of the crashed
+// process's memory, so it can contain the API bearer token and sandbox pairing
+// tokens that were resident in it — making this a third sensitive location
+// alongside the log file and the database, and not one to leave at the
+// default mode. Best-effort: Crashpad creates the directory itself if this
+// fails, and losing crash capture to a mkdir would be the worse trade.
+try {
+  fs.mkdirSync(app.getPath("crashDumps"), { recursive: true, mode: 0o700 });
+} catch {
+  /* Crashpad will create it; a permissive dump dir beats no dumps at all */
+}
+crashReporter.start({ uploadToServer: false });
+
+// Renderer console → log file. The renderer had no file transport at all, so a
+// UI failure left nothing on disk and the only way to see one was to reproduce
+// it live with DevTools open — which is what TERMINAL_FOCUS_BUG.md's diagnostic
+// plan was reduced to. The level mapping and frame labelling live in
+// renderer-console-log.ts so they are reachable from a test; see that file for
+// why the `details` object is read instead of the deprecated positional
+// arguments.
+app.on("web-contents-created", (_event, contents) => {
+  contents.on("console-message", (details) => {
+    log[rendererLogMethod(details.level)](formatRendererConsoleLine(details));
+  });
+});
 
 // stdout/stderr writes can fail with EPIPE/EIO/EBADF once the controlling
 // terminal or parent pipe goes away — almost always during shutdown. These
@@ -1061,15 +1113,15 @@ async function startProductionServer(): Promise<string> {
   const listeningSignal = new Promise<void>((resolve) => {
     resolveListening = resolve;
   });
-  const forward = (stream: NodeJS.WritableStream, line: string) => {
-    // Don't write to parent stdio during shutdown — the fd may be gone (EIO).
-    if ((app as any).isQuiting) return;
-    try {
-      stream.write(line + "\n");
-    } catch {
-      /* parent stream closed */
-    }
-  };
+  // The bundled server owns the API and the database, so its output is the only
+  // record of what either did. Writing it to the parent's stdout/stderr threw it
+  // away in a packaged build — those fds go nowhere when the app is launched
+  // from Finder — so it goes to the log file instead. The isQuiting guard stays:
+  // it now protects the transport rather than a dead fd.
+  const forward = createServerOutputForwarder({
+    write: (level, line) => log[level](line),
+    isQuitting: () => Boolean((app as any).isQuiting),
+  });
   if (serverProcess.stdout) {
     readline
       .createInterface({ input: serverProcess.stdout })
@@ -1078,13 +1130,13 @@ async function startProductionServer(): Promise<string> {
           resolveListening?.();
           return;
         }
-        forward(process.stdout, line);
+        forward("info", line);
       });
   }
   if (serverProcess.stderr) {
     readline
       .createInterface({ input: serverProcess.stderr })
-      .on("line", (line) => forward(process.stderr, line));
+      .on("line", (line) => forward("error", line));
   }
 
   // Ready the moment the socket is listening (sentinel) or the origin answers

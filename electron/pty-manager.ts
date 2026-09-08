@@ -291,7 +291,16 @@ function killProcessTreeWindows(pid: number | undefined): void {
  * PTYs. Fixed by node-pty 1.2.0-beta.14 (closes slave + guard fds on all
  * paths, master on error). Don't downgrade node-pty below that.
  */
-export function disposePty(proc: import("node-pty").IPty | null | undefined): void {
+export function disposePty(
+  proc: import("node-pty").IPty | null | undefined,
+  // `silent` suppresses this teardown's own begin/end pair. killAllPtys()
+  // brackets the whole sweep instead: it is an unbatched loop over every live
+  // PTY, and each log call is a synchronous open-write-close, so instrumenting
+  // inside it turns closing a busy project into a burst of file writes in one
+  // event-loop turn. The bulk pair still carries the count, so a log that stops
+  // mid-sweep shows how far it got.
+  opts: { silent?: boolean } = {},
+): void {
   if (!proc) return;
   // Capture the pid before destroy() so the tree-kill below still has it.
   const pid = proc.pid;
@@ -302,6 +311,11 @@ export function disposePty(proc: import("node-pty").IPty | null | undefined): vo
   // dispose never fired and one conhost.exe (~8.5 MB, parented to our main
   // process) leaked on every create→delete of a terminal.
   const closable = proc as unknown as { destroy?: () => void };
+  // Bracket the teardown. node-pty can abort() the whole process from inside
+  // its ThreadSafeFunction callback here (a C++ throw that no JS catch can
+  // reach), so a "pty.dispose.begin" with no matching "end" in the log is the
+  // signature of that crash — and names the pid it died on.
+  if (!opts.silent) log.info("pty.dispose.begin", { event: "pty.dispose.begin", pid });
   try {
     if (typeof closable.destroy === "function") {
       closable.destroy();
@@ -311,6 +325,7 @@ export function disposePty(proc: import("node-pty").IPty | null | undefined): vo
   } catch {
     /* already exited or fd already closed */
   }
+  if (!opts.silent) log.info("pty.dispose.end", { event: "pty.dispose.end", pid });
   // Then, on Windows only (no-op elsewhere), tree-kill any survivors: SIGHUP /
   // console-close doesn't reliably reach a grandchild node.exe that re-parented
   // its tool subprocesses and holds the worktree's .claude/ handle. This runs
@@ -551,6 +566,16 @@ export function registerPtyHandlers(
         lastInputAt: 0,
       };
       ptys.set(id, p);
+      // `live` is the running PTY count — the number that crept toward the ptmx
+      // cap during the fd-leak era, and the one worth having in the log when a
+      // spawn starts failing.
+      log.info("pty.spawned", {
+        event: "pty.spawned",
+        ptyId: id,
+        pid: proc.pid,
+        mode: plan.mode,
+        live: ptys.size,
+      });
 
       // Voice control can seed a fresh agent session with a starting prompt.
       // The agent's TUI isn't ready for input the instant it spawns, so we wait
@@ -617,6 +642,17 @@ export function registerPtyHandlers(
         }
         send(getWin, IPC.ptyExit, { ptyId: id, exitCode, signal });
         ptys.delete(id);
+        // A PTY dying is the last thing that happens before the lockups we're
+        // chasing, and signal/exitCode is the part the renderer never records.
+        // Logged after the delete so `live` is just the map size — killPty may
+        // have already removed this entry, which made arithmetic here wrong.
+        log.info("pty.exited", {
+          event: "pty.exited",
+          ptyId: id,
+          exitCode,
+          signal,
+          live: ptys.size,
+        });
       });
 
       return { ptyId: id };
@@ -692,9 +728,30 @@ export function registerPtyHandlers(
   }, ipcMain);
 }
 
-export function killAllPtys() {
-  for (const p of ptys.values()) {
-    disposePty(p.proc);
+/**
+ * Tear down a set of PTYs under a single bracketed log pair.
+ *
+ * App shutdown and closing a project both tear every PTY down back-to-back,
+ * which is the densest concentration of the teardown abort disposePty()
+ * describes. One pair brackets the whole sweep and carries the count, so a log
+ * that stops mid-sweep still shows how far it got — while the per-PTY pairs
+ * stay silenced, because each log call is a synchronous open-write-close and an
+ * unbatched loop over every live PTY would turn closing a busy project into a
+ * burst of file writes in one event-loop turn, on exactly the path that is
+ * already the most crash-prone.
+ */
+export function disposeAllPtys(
+  procs: readonly (import("node-pty").IPty | null | undefined)[],
+): void {
+  const live = procs.length;
+  log.info("pty.killAll.begin", { event: "pty.killAll.begin", live });
+  for (const proc of procs) {
+    disposePty(proc, { silent: true });
   }
+  log.info("pty.killAll.end", { event: "pty.killAll.end", live });
+}
+
+export function killAllPtys() {
+  disposeAllPtys([...ptys.values()].map((p) => p.proc));
   ptys.clear();
 }

@@ -1242,6 +1242,23 @@ export function TerminalPane({
         const initialInput = !useSandbox && shouldInjectInitialInput(task.agent, isResume)
           ? takePendingInitialInput(descriptor.taskId)
           : undefined;
+        // A local spawn waits on the launch permission sweep, which can sit for
+        // tens of seconds behind a consent dialog the operator has not seen —
+        // it can land on another display, or behind another app. Say so, so the
+        // pane reads as waiting rather than as broken. Remote spawns never wait
+        // (their scaffolding is on another machine), so they never say this.
+        if (!useSandbox) {
+          try {
+            const permissions = await electron.fsPermissions.get();
+            if (permissions.supported && !permissions.resolved) {
+              term.writeln(
+                "\x1b[2m[waiting for macOS folder-access prompts — answer them to start, or this continues on its own shortly]\x1b[0m",
+              );
+            }
+          } catch {
+            /* the notice is a courtesy; never let it stop a spawn */
+          }
+        }
         let spawnResult: { ptyId: string };
         try {
           spawnResult = useSandbox

@@ -6,6 +6,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from "react";
+import { expandTilde } from "~/shared/tilde-path";
 import { Icon } from "~/components/ui/Icon";
 import { Kbd } from "~/components/ui/Kbd";
 import { Btn } from "~/components/ui/Btn";
@@ -355,7 +356,7 @@ export function FolderBrowser({
       path: (() => {
         const partial = segs.slice(0, i + 1).join("/");
         const p = isAbs ? "/" + partial : partial;
-        return p.startsWith("~") ? home + p.slice(1) : p;
+        return expandTilde(p, home);
       })(),
     }));
   }, [listing, home]);

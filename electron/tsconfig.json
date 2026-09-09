@@ -26,6 +26,7 @@
     "../src/shared/fs-permission.ts",
     "../src/shared/hang-signatures.ts",
     "../src/shared/terminal-text.ts",
+    "../src/shared/tilde-path.ts",
     "../src/shared/opencode-mission-control-plugin.ts",
     "../src/lib/keybindings/types.ts",
     "../src/lib/keybindings/defaults.ts"

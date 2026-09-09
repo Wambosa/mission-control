@@ -41,6 +41,7 @@ import {
 import { recordFsPermissionOutcomes } from "./fs-permission-state";
 import { openPrivacyPane } from "./privacy-pane";
 import { classifyProbeError } from "./fs-permission-probe";
+import { expandTilde } from "../src/shared/tilde-path";
 import { AttentionSignal } from "./attention-signal";
 import {
   SilenceSweep,
@@ -1806,7 +1807,7 @@ safeHandle(IPC.dialogListFolders, async (_evt, requested: unknown) => {
   const raw = typeof requested === "string" && requested.trim() ? requested : home;
   let dir: string;
   try {
-    dir = await fsp.realpath(path.resolve(raw));
+    dir = await fsp.realpath(path.resolve(expandTilde(raw, home)));
     if (!(await fsp.stat(dir)).isDirectory()) return { ok: false as const, error: "Not a folder" };
   } catch {
     return { ok: false as const, error: "Folder not found" };
@@ -1893,7 +1894,7 @@ safeHandle(IPC.dialogCreateFolder, async (_evt, parentRaw: unknown, nameRaw: unk
   }
   let parent: string;
   try {
-    parent = await fs.promises.realpath(path.resolve(parentRaw));
+    parent = await fs.promises.realpath(path.resolve(expandTilde(parentRaw, app.getPath("home"))));
     if (!(await fs.promises.stat(parent)).isDirectory()) {
       return { ok: false as const, error: "Location is not a folder" };
     }
@@ -1922,7 +1923,7 @@ safeHandle(IPC.dialogCreateFolder, async (_evt, parentRaw: unknown, nameRaw: unk
 safeHandle(IPC.dialogGrantFolder, async (_evt, requested: unknown) => {
   if (typeof requested !== "string" || !requested.trim()) return { ok: false as const };
   try {
-    const dir = fs.realpathSync(path.resolve(requested));
+    const dir = fs.realpathSync(path.resolve(expandTilde(requested, app.getPath("home"))));
     if (!fs.statSync(dir).isDirectory()) return { ok: false as const };
     recordPickedDirectoryGrant(dir);
     return { ok: true as const };

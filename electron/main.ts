@@ -40,6 +40,7 @@ import {
 } from "./fs-permission-preflight";
 import { recordFsPermissionOutcomes } from "./fs-permission-state";
 import { openPrivacyPane } from "./privacy-pane";
+import { classifyProbeError } from "./fs-permission-probe";
 import { AttentionSignal } from "./attention-signal";
 import {
   SilenceSweep,
@@ -1813,7 +1814,20 @@ safeHandle(IPC.dialogListFolders, async (_evt, requested: unknown) => {
   let dirents: fs.Dirent[];
   try {
     dirents = await fsp.readdir(dir, { withFileTypes: true });
-  } catch {
+  } catch (err) {
+    // "Can't read this folder" is true of a privacy block and useless about
+    // it. This is the surface an operator reaches first when adding a project,
+    // so it is the likeliest place to meet a protected location -- and the one
+    // place a generic message costs them the most, because the fix is a click
+    // away and nothing said so.
+    if (classifyProbeError(err) === "privacy-blocked") {
+      return {
+        ok: false as const,
+        error:
+          "macOS is blocking access to this folder. Grant it in Settings \u2192 Diagnostics \u2192 Folder access, then try again.",
+        privacyCategory: fsPermissionCategoryFromText(`${dir}/`, home) ?? undefined,
+      };
+    }
     return { ok: false as const, error: "Can't read this folder" };
   }
   const visible = dirents

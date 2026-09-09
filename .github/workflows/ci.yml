@@ -64,6 +64,7 @@ jobs:
           cache: true
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: pnpm knip:gate
 
   dependency-audit:
     name: Dependency Audit

@@ -172,7 +172,7 @@ export const settingsQueryOptions = () =>
 
 // The api bearer token is fetched over Electron IPC, never HTTP — see
 // electron/api-token-store.ts. Stays cached indefinitely; only invalidated
-// when ApiSettingsPage rotates it. `setApiToken` mirrors the value into the
+// when the API token is rotated. `setApiToken` mirrors the value into the
 // module-level cache that `src/lib/api.ts:req` reads on every fetch, so all
 // HTTP calls authenticate automatically once this resolves.
 export const apiTokenQueryOptions = () =>

@@ -1,6 +1,4 @@
-import { DEFAULT_AGENT_LAUNCHER_CONFIG } from "~/shared/agent-launcher-config";
 import { useId, useRef, useState, type CSSProperties } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   Field,
   SettingCard,
@@ -16,9 +14,7 @@ import {
   DEFAULT_ACCENT_COLOR,
   type AccentColorId,
 } from "~/lib/accent-colors";
-import { api, type AppSettings } from "~/lib/api";
 import { DEFAULT_THEME_STYLE, type ThemeStyle } from "~/shared/theme-style";
-import { DEFAULT_PET_HOME_SIDE } from "~/shared/pet";
 import {
   DEFAULT_SURFACE_TINT,
   SURFACE_TINTS,
@@ -32,18 +28,10 @@ import {
 } from "~/lib/background-image";
 import { applyBackgroundGrid } from "~/lib/background-grid";
 import { useTheme, type Theme } from "~/lib/use-theme";
-import { queryKeys, useSettings } from "~/queries";
-import {
-  hasCachedLaunchIntroPreference,
-  readCachedLaunchIntroEnabled,
-} from "~/lib/launch-intro";
-import { DEFAULT_TERMINAL_ZOOM_LEVEL } from "~/shared/terminal-zoom";
+import { useSettings } from "~/queries";
+import { useSettingsWriter } from "~/lib/settings-mutation";
 import {
   DEFAULT_INTERFACE_FONT_SCALE,
-  DEFAULT_TERMINAL_FONT_WEIGHT,
-  DEFAULT_TERMINAL_FONT_WEIGHT_BOLD,
-  DEFAULT_TERMINAL_LETTER_SPACING,
-  DEFAULT_TERMINAL_LINE_HEIGHT,
   INTERFACE_FONT_SCALES,
   type InterfaceFontScale,
 } from "~/shared/terminal-appearance";
@@ -55,11 +43,8 @@ import {
   INTERFACE_FONT_CANDIDATES,
   useDetectedFonts,
 } from "~/lib/font-detection";
-import { normalizeSessionHeaderButtonVisibility } from "~/shared/session-header-buttons";
-import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
 
 export function ThemeSettingsPage() {
-  const queryClient = useQueryClient();
   const { data: settings } = useSettings();
   const { theme, set: setTheme } = useTheme();
   const accentColor = settings?.accentColor ?? DEFAULT_ACCENT_COLOR;
@@ -77,213 +62,78 @@ export function ThemeSettingsPage() {
     interfaceFontFamily && !detectedInterfaceFonts.includes(interfaceFontFamily)
       ? interfaceFontFamily
       : null;
-  const launchOverlayEnabled = typeof settings?.launchOverlayEnabled === "boolean"
-    ? settings.launchOverlayEnabled
-    : hasCachedLaunchIntroPreference()
-      ? readCachedLaunchIntroEnabled()
-      : false;
 
-  const optimisticSettings = (
-    patch: Partial<
-      Pick<
-        AppSettings,
-        | "accentColor"
-        | "themeStyle"
-        | "surfaceTint"
-        | "backgroundImage"
-        | "showBackgroundGrid"
-        | "minimalTheme"
-        | "interfaceFontFamily"
-        | "interfaceFontScale"
-      >
-    >,
-  ): AppSettings => ({
-    agentSystemBannerDisabled: settings?.agentSystemBannerDisabled ?? false,
-    accentColor,
-    themeStyle,
-    surfaceTint,
-    backgroundImage,
-    minimalTheme,
-    // Every patch through here writes a theme setting, which marks it chosen.
-    themeChosen: true,
-    mouseGradientDisabled: settings?.mouseGradientDisabled ?? false,
-    batterySaverEnabled: settings?.batterySaverEnabled ?? true,
-    spellcheckEnabled: settings?.spellcheckEnabled ?? true,
-    sessionFinishToastEnabled: settings?.sessionFinishToastEnabled ?? true,
-    sessionFinishOsNotificationEnabled:
-      settings?.sessionFinishOsNotificationEnabled ?? false,
-    notificationSoundEnabled: settings?.notificationSoundEnabled ?? true,
-    launchOverlayEnabled,
-    gitDiffChangedFilesView: settings?.gitDiffChangedFilesView ?? null,
-    gitDiffChangedFilesWidth: settings?.gitDiffChangedFilesWidth ?? null,
-    projectsDashboardView: settings?.projectsDashboardView ?? null,
-    activeProjectGroup: settings?.activeProjectGroup ?? null,
-    collapsedProjectGroups: settings?.collapsedProjectGroups ?? null,
-    terminalZoomLevel: settings?.terminalZoomLevel ?? DEFAULT_TERMINAL_ZOOM_LEVEL,
-    terminalFontFamily: settings?.terminalFontFamily ?? null,
-    terminalFontWeight: settings?.terminalFontWeight ?? DEFAULT_TERMINAL_FONT_WEIGHT,
-    terminalFontWeightBold:
-      settings?.terminalFontWeightBold ?? DEFAULT_TERMINAL_FONT_WEIGHT_BOLD,
-    terminalLineHeight: settings?.terminalLineHeight ?? DEFAULT_TERMINAL_LINE_HEIGHT,
-    terminalLetterSpacing:
-      settings?.terminalLetterSpacing ?? DEFAULT_TERMINAL_LETTER_SPACING,
-    interfaceFontFamily: settings?.interfaceFontFamily ?? null,
-    interfaceFontScale: settings?.interfaceFontScale ?? DEFAULT_INTERFACE_FONT_SCALE,
-    sessionHeaderButtons:
-      normalizeSessionHeaderButtonVisibility(settings?.sessionHeaderButtons),
-    headerButtons: settings?.headerButtons ?? DEFAULT_HEADER_BUTTON_VISIBILITY,
-    defaultAgent: settings?.defaultAgent ?? "claude-code",
-    defaultModel: settings?.defaultModel ?? null,
-    annotationAgent: settings?.annotationAgent ?? "claude-code",
-    annotationModel: settings?.annotationModel ?? null,
-    questionOverlayEnabled: settings?.questionOverlayEnabled ?? true,
-    claudeUsageLimitsEnabled: settings?.claudeUsageLimitsEnabled ?? false,
-    claudeUsageLimitsShowSession: settings?.claudeUsageLimitsShowSession ?? true,
-    claudeUsageLimitsShowWeekly: settings?.claudeUsageLimitsShowWeekly ?? true,
-    providerUsageEnabled: settings?.providerUsageEnabled ?? false,
-    providerUsageIds: settings?.providerUsageIds ?? ["claude", "codex", "cursor"],
-    agentLauncherConfig: settings?.agentLauncherConfig ?? DEFAULT_AGENT_LAUNCHER_CONFIG,
-    recallEnabled: settings?.recallEnabled ?? false,
-    recallAutoCaptureEnabled: settings?.recallAutoCaptureEnabled ?? true,
-    recallEngineEnabled: settings?.recallEngineEnabled ?? true,
-    recallEngineHarness: settings?.recallEngineHarness ?? "claude-code",
-    recallEngineModel: settings?.recallEngineModel ?? null,
-    recallAgentWriteEnabled: settings?.recallAgentWriteEnabled ?? true,
-    recallInjectBriefEnabled: settings?.recallInjectBriefEnabled ?? true,
-    recallCodeGraphEnabled: settings?.recallCodeGraphEnabled ?? true,
-    recallProactiveRecallEnabled: settings?.recallProactiveRecallEnabled ?? true,
-    recallLearnedToastEnabled: settings?.recallLearnedToastEnabled ?? true,
-    petEnabled: settings?.petEnabled ?? true,
-    petMessagesEnabled: settings?.petMessagesEnabled ?? true,
-    petSoundsEnabled: settings?.petSoundsEnabled ?? false,
-    petMultiplayerEnabled: settings?.petMultiplayerEnabled ?? false,
-    petHomeSide: settings?.petHomeSide ?? DEFAULT_PET_HOME_SIDE,
-    petState: settings?.petState ?? null,
-    showGroupSwitcher: settings?.showGroupSwitcher ?? true,
-    showProjectHeaderGroup: settings?.showProjectHeaderGroup ?? true,
-    showBackgroundGrid,
-    ...queryClient.getQueryData<AppSettings>(queryKeys.settings),
-    worktreesEnabled: true,
-    ...patch,
-  });
+  const writeSetting = useSettingsWriter();
 
   const setAccentColor = async (nextAccentColor: AccentColorId) => {
     applyAccentColor(nextAccentColor);
-    const previous = queryClient.getQueryData<AppSettings>(queryKeys.settings);
-    const optimistic = optimisticSettings({ accentColor: nextAccentColor });
-    queryClient.setQueryData(queryKeys.settings, optimistic);
-    try {
-      const next = await api.updateSettings({ accentColor: nextAccentColor });
-      queryClient.setQueryData(queryKeys.settings, { ...optimistic, ...next });
-    } catch (error) {
-      if (previous) queryClient.setQueryData(queryKeys.settings, previous);
-      throw error;
-    }
+    await writeSetting({ accentColor: nextAccentColor });
   };
 
   const setThemeStyle = async (next: ThemeStyle) => {
-    const previous = queryClient.getQueryData<AppSettings>(queryKeys.settings);
     // The accent is a separate choice and survives style switches — only the
     // first-run onboarding overlay defaults flat to terracotta.
-    const optimistic = optimisticSettings({
-      themeStyle: next,
-      minimalTheme: next !== "painted",
-    });
-    queryClient.setQueryData(queryKeys.settings, optimistic);
-    try {
-      const updated = await api.updateSettings({ themeStyle: next });
-      queryClient.setQueryData(queryKeys.settings, { ...optimistic, ...updated });
-    } catch (error) {
-      if (previous) queryClient.setQueryData(queryKeys.settings, previous);
-      throw error;
-    }
+    await writeSetting(
+      { themeStyle: next },
+      { derived: { minimalTheme: next !== "painted" } },
+    );
   };
 
   const setSurfaceTint = async (next: SurfaceTint) => {
     applySurfaceTint(next);
-    const previous = queryClient.getQueryData<AppSettings>(queryKeys.settings);
-    const optimistic = optimisticSettings({ surfaceTint: next });
-    queryClient.setQueryData(queryKeys.settings, optimistic);
-    try {
-      const updated = await api.updateSettings({ surfaceTint: next });
-      queryClient.setQueryData(queryKeys.settings, { ...optimistic, ...updated });
-    } catch (error) {
-      if (previous) {
-        queryClient.setQueryData(queryKeys.settings, previous);
-        applySurfaceTint(previous.surfaceTint ?? DEFAULT_SURFACE_TINT);
-      }
-      throw error;
-    }
+    await writeSetting(
+      { surfaceTint: next },
+      {
+        rollback: (restored) =>
+          applySurfaceTint(restored.surfaceTint ?? DEFAULT_SURFACE_TINT),
+      },
+    );
   };
 
   const setBackgroundImage = async (next: string | null) => {
     applyBackgroundImage(next);
-    const previous = queryClient.getQueryData<AppSettings>(queryKeys.settings);
-    const optimistic = optimisticSettings({ backgroundImage: next });
-    queryClient.setQueryData(queryKeys.settings, optimistic);
-    try {
-      const updated = await api.updateSettings({ backgroundImage: next });
-      queryClient.setQueryData(queryKeys.settings, { ...optimistic, ...updated });
-    } catch (error) {
-      if (previous) {
-        queryClient.setQueryData(queryKeys.settings, previous);
-        applyBackgroundImage(previous.backgroundImage ?? null);
-      }
-      throw error;
-    }
+    await writeSetting(
+      { backgroundImage: next },
+      {
+        rollback: (restored) =>
+          applyBackgroundImage(restored.backgroundImage ?? null),
+      },
+    );
   };
 
   const setShowBackgroundGrid = async (next: boolean) => {
     applyBackgroundGrid(next);
-    const previous = queryClient.getQueryData<AppSettings>(queryKeys.settings);
-    const optimistic = optimisticSettings({ showBackgroundGrid: next });
-    queryClient.setQueryData(queryKeys.settings, optimistic);
-    try {
-      const updated = await api.updateSettings({ showBackgroundGrid: next });
-      queryClient.setQueryData(queryKeys.settings, { ...optimistic, ...updated });
-    } catch (error) {
-      if (previous) {
-        queryClient.setQueryData(queryKeys.settings, previous);
-        applyBackgroundGrid(previous.showBackgroundGrid ?? true);
-      }
-      throw error;
-    }
+    await writeSetting(
+      { showBackgroundGrid: next },
+      {
+        rollback: (restored) =>
+          applyBackgroundGrid(restored.showBackgroundGrid ?? true),
+      },
+    );
   };
 
   const setInterfaceFontFamily = async (next: string | null) => {
     applyInterfaceFontFamily(next);
-    const previous = queryClient.getQueryData<AppSettings>(queryKeys.settings);
-    const optimistic = optimisticSettings({ interfaceFontFamily: next });
-    queryClient.setQueryData(queryKeys.settings, optimistic);
-    try {
-      const updated = await api.updateSettings({ interfaceFontFamily: next });
-      queryClient.setQueryData(queryKeys.settings, { ...optimistic, ...updated });
-    } catch (error) {
-      if (previous) {
-        queryClient.setQueryData(queryKeys.settings, previous);
-        applyInterfaceFontFamily(previous.interfaceFontFamily ?? null);
-      }
-      throw error;
-    }
+    await writeSetting(
+      { interfaceFontFamily: next },
+      {
+        rollback: (restored) =>
+          applyInterfaceFontFamily(restored.interfaceFontFamily ?? null),
+      },
+    );
   };
 
   const setInterfaceFontScale = async (next: InterfaceFontScale) => {
     applyInterfaceFontScale(next);
-    const previous = queryClient.getQueryData<AppSettings>(queryKeys.settings);
-    const optimistic = optimisticSettings({ interfaceFontScale: next });
-    queryClient.setQueryData(queryKeys.settings, optimistic);
-    try {
-      const updated = await api.updateSettings({ interfaceFontScale: next });
-      queryClient.setQueryData(queryKeys.settings, { ...optimistic, ...updated });
-    } catch (error) {
-      if (previous) {
-        queryClient.setQueryData(queryKeys.settings, previous);
-        applyInterfaceFontScale(
-          previous.interfaceFontScale ?? DEFAULT_INTERFACE_FONT_SCALE,
-        );
-      }
-      throw error;
-    }
+    await writeSetting(
+      { interfaceFontScale: next },
+      {
+        rollback: (restored) =>
+          applyInterfaceFontScale(
+            restored.interfaceFontScale ?? DEFAULT_INTERFACE_FONT_SCALE,
+          ),
+      },
+    );
   };
 
   return (

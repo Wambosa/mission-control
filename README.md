@@ -64,7 +64,7 @@ mission-control/
 │       ├── electron.ts     window.electronAPI typed bridge
 │       └── design-meta.ts  Agent + status metadata
 ├── designs/                Original HTML+JSX prototype (source of truth)
-├── SPEC.md                 Approved product spec
+├── docs/                   Current reference docs (archive/ holds superseded ones)
 └── README.md
 ```
 

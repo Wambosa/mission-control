@@ -828,7 +828,6 @@ function Shell() {
             ["WebkitAppRegion" as any]: "drag",
           }}
         />
-        {/* Banner hidden for now — toggle also removed from Settings. */}
         <TopBar
           crumbs={crumbs}
           onHome={goHome}

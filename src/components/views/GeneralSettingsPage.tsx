@@ -1,4 +1,3 @@
-import { DEFAULT_AGENT_LAUNCHER_CONFIG } from "~/shared/agent-launcher-config";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Btn } from "~/components/ui/Btn";
@@ -6,30 +5,18 @@ import { Field, SettingsSection, ToggleRow } from "~/components/views/SettingsPa
 import { getElectron } from "~/lib/electron";
 import { api, type AppSettings } from "~/lib/api";
 import { queryKeys, useSettings } from "~/queries";
+import { useSettingsWriter } from "~/lib/settings-mutation";
 import { CURRENT_MC_VERSION } from "~/queries/mission-control-version";
-import { DEFAULT_ACCENT_COLOR } from "~/lib/accent-colors";
 import {
   readCachedLaunchIntroEnabled,
   writeCachedLaunchIntroEnabled,
 } from "~/lib/launch-intro";
-import { DEFAULT_TERMINAL_ZOOM_LEVEL } from "~/shared/terminal-zoom";
-import { DEFAULT_PET_HOME_SIDE } from "~/shared/pet";
-import {
-  DEFAULT_INTERFACE_FONT_SCALE,
-  DEFAULT_TERMINAL_FONT_WEIGHT,
-  DEFAULT_TERMINAL_FONT_WEIGHT_BOLD,
-  DEFAULT_TERMINAL_LETTER_SPACING,
-  DEFAULT_TERMINAL_LINE_HEIGHT,
-} from "~/shared/terminal-appearance";
-import { DEFAULT_SURFACE_TINT } from "~/shared/surface-tint";
 import {
   readOsNotificationPermission,
   requestOsNotificationPermission,
   type OsNotificationPermission,
 } from "~/lib/os-notifications";
 import { isElectron } from "~/lib/electron";
-import { normalizeSessionHeaderButtonVisibility } from "~/shared/session-header-buttons";
-import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
 
 export function GeneralSettingsPage() {
   const queryClient = useQueryClient();
@@ -66,87 +53,7 @@ export function GeneralSettingsPage() {
     writeCachedLaunchIntroEnabled(settings.launchOverlayEnabled);
   }, [settings?.launchOverlayEnabled]);
 
-  const optimisticSettings = (
-    patch: Partial<
-      Pick<
-        AppSettings,
-        | "agentSystemBannerDisabled"
-        | "mouseGradientDisabled"
-        | "batterySaverEnabled"
-        | "spellcheckEnabled"
-        | "sessionFinishToastEnabled"
-        | "sessionFinishOsNotificationEnabled"
-        | "notificationSoundEnabled"
-        | "launchOverlayEnabled"
-      >
-    >,
-  ): AppSettings => ({
-    agentSystemBannerDisabled: settings?.agentSystemBannerDisabled ?? false,
-    accentColor: settings?.accentColor ?? DEFAULT_ACCENT_COLOR,
-    themeStyle: settings?.themeStyle ?? "painted",
-    surfaceTint: settings?.surfaceTint ?? DEFAULT_SURFACE_TINT,
-    backgroundImage: settings?.backgroundImage ?? null,
-    minimalTheme: settings?.minimalTheme ?? false,
-    themeChosen: settings?.themeChosen ?? false,
-    mouseGradientDisabled: settings?.mouseGradientDisabled ?? false,
-    batterySaverEnabled,
-    spellcheckEnabled,
-    sessionFinishToastEnabled: toastEnabled,
-    sessionFinishOsNotificationEnabled: osNotificationEnabled,
-    notificationSoundEnabled,
-    launchOverlayEnabled,
-    gitDiffChangedFilesView: settings?.gitDiffChangedFilesView ?? null,
-    gitDiffChangedFilesWidth: settings?.gitDiffChangedFilesWidth ?? null,
-    projectsDashboardView: settings?.projectsDashboardView ?? null,
-    activeProjectGroup: settings?.activeProjectGroup ?? null,
-    collapsedProjectGroups: settings?.collapsedProjectGroups ?? null,
-    terminalZoomLevel: settings?.terminalZoomLevel ?? DEFAULT_TERMINAL_ZOOM_LEVEL,
-    terminalFontFamily: settings?.terminalFontFamily ?? null,
-    terminalFontWeight: settings?.terminalFontWeight ?? DEFAULT_TERMINAL_FONT_WEIGHT,
-    terminalFontWeightBold:
-      settings?.terminalFontWeightBold ?? DEFAULT_TERMINAL_FONT_WEIGHT_BOLD,
-    terminalLineHeight: settings?.terminalLineHeight ?? DEFAULT_TERMINAL_LINE_HEIGHT,
-    terminalLetterSpacing:
-      settings?.terminalLetterSpacing ?? DEFAULT_TERMINAL_LETTER_SPACING,
-    interfaceFontFamily: settings?.interfaceFontFamily ?? null,
-    interfaceFontScale: settings?.interfaceFontScale ?? DEFAULT_INTERFACE_FONT_SCALE,
-    sessionHeaderButtons:
-      normalizeSessionHeaderButtonVisibility(settings?.sessionHeaderButtons),
-    headerButtons: settings?.headerButtons ?? DEFAULT_HEADER_BUTTON_VISIBILITY,
-    defaultAgent: settings?.defaultAgent ?? "claude-code",
-    defaultModel: settings?.defaultModel ?? null,
-    annotationAgent: settings?.annotationAgent ?? "claude-code",
-    annotationModel: settings?.annotationModel ?? null,
-    questionOverlayEnabled: settings?.questionOverlayEnabled ?? true,
-    claudeUsageLimitsEnabled: settings?.claudeUsageLimitsEnabled ?? false,
-    claudeUsageLimitsShowSession: settings?.claudeUsageLimitsShowSession ?? true,
-    claudeUsageLimitsShowWeekly: settings?.claudeUsageLimitsShowWeekly ?? true,
-    providerUsageEnabled: settings?.providerUsageEnabled ?? false,
-    providerUsageIds: settings?.providerUsageIds ?? ["claude", "codex", "cursor"],
-    agentLauncherConfig: settings?.agentLauncherConfig ?? DEFAULT_AGENT_LAUNCHER_CONFIG,
-    recallEnabled: settings?.recallEnabled ?? false,
-    recallAutoCaptureEnabled: settings?.recallAutoCaptureEnabled ?? true,
-    recallEngineEnabled: settings?.recallEngineEnabled ?? true,
-    recallEngineHarness: settings?.recallEngineHarness ?? "claude-code",
-    recallEngineModel: settings?.recallEngineModel ?? null,
-    recallAgentWriteEnabled: settings?.recallAgentWriteEnabled ?? true,
-    recallInjectBriefEnabled: settings?.recallInjectBriefEnabled ?? true,
-    recallCodeGraphEnabled: settings?.recallCodeGraphEnabled ?? true,
-    recallProactiveRecallEnabled: settings?.recallProactiveRecallEnabled ?? true,
-    recallLearnedToastEnabled: settings?.recallLearnedToastEnabled ?? true,
-    petEnabled: settings?.petEnabled ?? true,
-    petMessagesEnabled: settings?.petMessagesEnabled ?? true,
-    petSoundsEnabled: settings?.petSoundsEnabled ?? false,
-    petMultiplayerEnabled: settings?.petMultiplayerEnabled ?? false,
-    petHomeSide: settings?.petHomeSide ?? DEFAULT_PET_HOME_SIDE,
-    petState: settings?.petState ?? null,
-    showGroupSwitcher: settings?.showGroupSwitcher ?? true,
-    showProjectHeaderGroup: settings?.showProjectHeaderGroup ?? true,
-    showBackgroundGrid: settings?.showBackgroundGrid ?? true,
-    ...queryClient.getQueryData<AppSettings>(queryKeys.settings),
-    worktreesEnabled: true,
-    ...patch,
-  });
+  const writeSetting = useSettingsWriter();
 
   const updateSettings = async (
     patch: Partial<
@@ -163,16 +70,7 @@ export function GeneralSettingsPage() {
       >
     >,
   ) => {
-    const previous = queryClient.getQueryData<AppSettings>(queryKeys.settings);
-    const optimistic = optimisticSettings(patch);
-    queryClient.setQueryData(queryKeys.settings, optimistic);
-    try {
-      const next = await api.updateSettings(patch);
-      queryClient.setQueryData(queryKeys.settings, { ...optimistic, ...next });
-    } catch (error) {
-      if (previous) queryClient.setQueryData(queryKeys.settings, previous);
-      throw error;
-    }
+    await writeSetting(patch);
   };
 
   const setMouseGradientEnabled = async (enabled: boolean) => {
@@ -207,7 +105,7 @@ export function GeneralSettingsPage() {
       .updateSettings({ launchOverlayEnabled: enabled })
       .then((next) => {
         queryClient.setQueryData<AppSettings>(queryKeys.settings, (current) => ({
-          ...(current ?? optimisticSettings({})),
+          ...(current ?? ({} as AppSettings)),
           ...next,
           launchOverlayEnabled: enabled,
         }));

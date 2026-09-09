@@ -1,0 +1,38 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/client.tsx",
+    "src/server.ts",
+    "src/ssr.tsx",
+    "src/router.tsx",
+    "src/routes/**/*.tsx",
+    "electron/main.ts",
+    "electron/preload.ts",
+    "electron/server-runner.mjs",
+    "scripts/**/*.mjs",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "drizzle.config.ts",
+    "eslint.config.mjs",
+    "screenshot.mjs",
+    "**/*.{test,spec}.{ts,tsx}"
+  ],
+  "project": ["src/**/*.{ts,tsx}", "electron/**/*.ts", "scripts/**/*.mjs"],
+  "ignore": [
+    "src/routeTree.gen.ts",
+    "dist/**",
+    "dist-electron/**",
+    "docs/archive/**"
+  ],
+  "ignoreBinaries": ["corepack", "electron-rebuild", "screencapture", "netstat", "sips", "iconutil"],
+  "ignoreDependencies": [
+    "better-sqlite3",
+    "node-pty",
+    "tailwindcss",
+    "@fontsource/geist-mono",
+    "@fontsource/jetbrains-mono",
+    "@fontsource/plus-jakarta-sans",
+    "@fontsource/space-grotesk",
+    "@vscode/tree-sitter-wasm"
+  ]
+}

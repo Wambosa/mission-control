@@ -1,6 +1,7 @@
 import log from "electron-log/main";
 import type { PtyHookEnv } from "./pty-hook-env";
 import { supportsMemoryInjection, writeAgentMemoryFile } from "../src/shared/agent-memory-file";
+import type { MemoryFileFs } from "../src/shared/scaffolding-fs";
 
 // Fetch the rendered Session Brief from the local API server (which owns the DB)
 // and write it into the agent's auto-load file BEFORE the PTY spawns, so the
@@ -14,8 +15,10 @@ export async function installAgentMemoryBrief(params: {
   cwd: string;
   taskId: string;
   mcEnv: PtyHookEnv | null;
+  /** Injected so the cwd-scoped writes stay asynchronous and testable. */
+  fs?: MemoryFileFs;
 }): Promise<void> {
-  const { agent, cwd, taskId, mcEnv } = params;
+  const { agent, cwd, taskId, mcEnv, fs } = params;
   if (!supportsMemoryInjection(agent) || !mcEnv?.apiUrl || !mcEnv?.token || !taskId) return;
 
   let brief = "";
@@ -44,7 +47,7 @@ export async function installAgentMemoryBrief(params: {
       error: err instanceof Error ? err.message : String(err),
     });
     try {
-      writeAgentMemoryFile(agent, cwd, "");
+      await writeAgentMemoryFile(agent, cwd, "", fs);
     } catch {
       /* writer is already fail-soft */
     }
@@ -55,7 +58,7 @@ export async function installAgentMemoryBrief(params: {
 
   try {
     // Empty brief (no memories / Recall off) strips any stale managed block.
-    writeAgentMemoryFile(agent, cwd, brief);
+    await writeAgentMemoryFile(agent, cwd, brief, fs);
   } catch {
     /* writer is already fail-soft */
   }

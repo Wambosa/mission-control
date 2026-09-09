@@ -1,6 +1,7 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TaskAgent } from "../src/shared/domain";
+import type { ScaffoldingFs } from "../src/shared/scaffolding-fs";
+import { nodeScaffoldingFs } from "./node-scaffolding-fs";
 
 // The managed key in the project's `.mcp.json`. Using a fixed key is the marker:
 // we overwrite exactly this entry on each spawn (idempotent) and never touch any
@@ -34,10 +35,10 @@ function scriptCandidates(appPath: string): string[] {
   return candidates;
 }
 
-function resolveMcpScript(appPath: string): string | null {
+async function resolveMcpScript(appPath: string, fs: ScaffoldingFs): Promise<string | null> {
   for (const candidate of scriptCandidates(appPath)) {
     try {
-      if (fs.existsSync(candidate)) return candidate;
+      if (await fs.exists(candidate)) return candidate;
     } catch {
       /* unreadable candidate — keep looking */
     }
@@ -51,14 +52,14 @@ function resolveMcpScript(appPath: string): string | null {
  * and is regenerated every session, so it should never be committed. Best-effort;
  * never throws. Mirrors ensureGitIgnored in src/shared/agent-memory-file.ts.
  */
-function ensureMcpConfigGitIgnored(cwd: string): void {
+async function ensureMcpConfigGitIgnored(cwd: string, fs: ScaffoldingFs): Promise<void> {
   try {
     // `.git` is a dir at a repo root and a file inside a worktree — both count.
-    if (!fs.existsSync(path.join(cwd, ".git"))) return;
+    if (!(await fs.exists(path.join(cwd, ".git")))) return;
     const gitignore = path.join(cwd, ".gitignore");
     let content = "";
     try {
-      content = fs.readFileSync(gitignore, "utf8");
+      content = await fs.readFile(gitignore);
     } catch {
       /* no .gitignore yet */
     }
@@ -66,15 +67,15 @@ function ensureMcpConfigGitIgnored(cwd: string): void {
     if (existing.has(".mcp.json") || existing.has("/.mcp.json")) return;
     const prefix = content && !content.endsWith("\n") ? "\n" : "";
     const addition = `${prefix}\n# Mission Control Recall (code graph MCP) — machine-specific, do not commit\n.mcp.json\n`;
-    fs.writeFileSync(gitignore, content + addition, "utf8");
+    await fs.writeFile(gitignore, content + addition);
   } catch {
     /* best-effort */
   }
 }
 
-function readJsonObject(file: string): Record<string, unknown> {
+async function readJsonObject(file: string, fs: ScaffoldingFs): Promise<Record<string, unknown>> {
   try {
-    const raw = fs.readFileSync(file, "utf8");
+    const raw = await fs.readFile(file);
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
@@ -94,19 +95,20 @@ function readJsonObject(file: string): Record<string, unknown> {
  * overwritten. The spawned server inherits MC_API_URL / MC_API_TOKEN /
  * MC_TASK_ID from the session env. Fully fail-soft — never blocks PTY spawn.
  */
-export function ensureRecallMcpForAgent(
+export async function ensureRecallMcpForAgent(
   appPath: string,
   cwd: string,
   agent: TaskAgent | undefined,
-): void {
+  fs: ScaffoldingFs = nodeScaffoldingFs,
+): Promise<void> {
   // 4a: Claude Code only. Other harnesses get the query-skill fallback later.
   if (agent !== "claude-code") return;
-  const script = resolveMcpScript(appPath);
+  const script = await resolveMcpScript(appPath, fs);
   if (!script) return;
 
   try {
     const configPath = path.join(cwd, ".mcp.json");
-    const config = readJsonObject(configPath);
+    const config = await readJsonObject(configPath, fs);
     const servers =
       config.mcpServers && typeof config.mcpServers === "object" && !Array.isArray(config.mcpServers)
         ? (config.mcpServers as Record<string, unknown>)
@@ -135,8 +137,8 @@ export function ensureRecallMcpForAgent(
     delete servers[LEGACY_SERVER_KEY];
     servers[MANAGED_SERVER_KEY] = desired;
     config.mcpServers = servers;
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
-    ensureMcpConfigGitIgnored(cwd);
+    await fs.writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
+    await ensureMcpConfigGitIgnored(cwd, fs);
   } catch {
     /* swallow — MCP config write must never block PTY spawn */
   }
@@ -151,13 +153,17 @@ export function ensureRecallMcpForAgent(
  * leaves nothing but an empty `mcpServers`, the whole file is deleted (it's
  * machine-generated and gitignored). Fully fail-soft.
  */
-export function removeRecallMcpForAgent(cwd: string, agent: TaskAgent | undefined): void {
+export async function removeRecallMcpForAgent(
+  cwd: string,
+  agent: TaskAgent | undefined,
+  fs: ScaffoldingFs = nodeScaffoldingFs,
+): Promise<void> {
   if (agent !== "claude-code") return;
   try {
     const configPath = path.join(cwd, ".mcp.json");
     let raw: string;
     try {
-      raw = fs.readFileSync(configPath, "utf8");
+      raw = await fs.readFile(configPath);
     } catch {
       return; // no config — nothing to remove
     }
@@ -178,10 +184,10 @@ export function removeRecallMcpForAgent(cwd: string, agent: TaskAgent | undefine
     delete servers[MANAGED_SERVER_KEY];
     delete servers[LEGACY_SERVER_KEY];
     if (Object.keys(servers).length === 0 && Object.keys(config).length === 1) {
-      fs.rmSync(configPath, { force: true });
+      await fs.rm(configPath);
       return;
     }
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
+    await fs.writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
   } catch {
     /* swallow — cleanup must never block PTY spawn */
   }

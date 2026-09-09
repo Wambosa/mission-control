@@ -131,7 +131,7 @@ describe("Recall live injection pipeline (real HTTP socket)", () => {
     expect(memoryIds.length).toBe(4);
 
     // 5) The REAL writer drops the managed block into the agent's auto-load file.
-    const wrote = writeAgentMemoryFile("claude-code", projectDir, brief);
+    const wrote = await writeAgentMemoryFile("claude-code", projectDir, brief);
     expect(wrote).toBe(true);
 
     const claudeFile = path.join(projectDir, "CLAUDE.local.md");

@@ -1,6 +1,7 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TaskAgent } from "../src/shared/domain";
+import type { ScaffoldingFs } from "../src/shared/scaffolding-fs";
+import { nodeScaffoldingFs } from "./node-scaffolding-fs";
 
 // Per-harness skill folder segments (mirrors DIAGRAM_SKILL_INSTALL_TARGETS).
 // The Recall skill is just instructions, so it installs into whichever CLI's
@@ -27,24 +28,31 @@ function bundledRecallSkillSourceDirs(appPath: string): string[] {
   ];
 }
 
-function resolveBundledRecallSkillSource(appPath: string): string | null {
+async function resolveBundledRecallSkillSource(
+  appPath: string,
+  fs: ScaffoldingFs,
+): Promise<string | null> {
   for (const candidate of bundledRecallSkillSourceDirs(appPath)) {
-    if (fs.existsSync(path.join(candidate, "SKILL.md"))) return candidate;
+    if (await fs.exists(path.join(candidate, "SKILL.md"))) return candidate;
   }
   return null;
 }
 
-function copySkillTree(sourceDir: string, targetDir: string): void {
-  fs.mkdirSync(targetDir, { recursive: true });
-  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+async function copySkillTree(
+  sourceDir: string,
+  targetDir: string,
+  fs: ScaffoldingFs,
+): Promise<void> {
+  await fs.mkdir(targetDir);
+  for (const entry of await fs.readdir(sourceDir)) {
     const from = path.join(sourceDir, entry.name);
     const to = path.join(targetDir, entry.name);
     if (entry.isDirectory()) {
-      copySkillTree(from, to);
+      await copySkillTree(from, to, fs);
       continue;
     }
     if (!entry.isFile()) continue;
-    fs.copyFileSync(from, to);
+    await fs.copyFile(from, to);
   }
 }
 
@@ -63,23 +71,24 @@ function recallSkillTargetPaths(cwd: string, agent: TaskAgent): string[] {
  * Recall. Agents only discover skills from on-disk folders. Fully fail-soft —
  * installing a skill must never block or delay PTY spawn.
  */
-export function ensureRecallSkillForAgent(
+export async function ensureRecallSkillForAgent(
   appPath: string,
   cwd: string,
   agent: TaskAgent | undefined,
-): void {
+  fs: ScaffoldingFs = nodeScaffoldingFs,
+): Promise<void> {
   if (!agent) return;
   const targets = recallSkillTargetPaths(cwd, agent);
   if (!targets.length) return;
 
-  const sourceDir = resolveBundledRecallSkillSource(appPath);
+  const sourceDir = await resolveBundledRecallSkillSource(appPath, fs);
   if (!sourceDir) return;
 
   for (const targetDir of targets) {
-    if (fs.existsSync(path.join(targetDir, "SKILL.md"))) continue;
+    if (await fs.exists(path.join(targetDir, "SKILL.md"))) continue;
     try {
-      fs.rmSync(targetDir, { recursive: true, force: true });
-      copySkillTree(sourceDir, targetDir);
+      await fs.rm(targetDir);
+      await copySkillTree(sourceDir, targetDir, fs);
     } catch {
       /* swallow — skill install must never block PTY spawn */
     }
@@ -90,9 +99,9 @@ export function ensureRecallSkillForAgent(
 // Recall skill — every bundled version has carried both phrases. The installer
 // above never overwrites an existing SKILL.md, so a user-authored skill that
 // happens to live at the same path must survive removal.
-function isManagedRecallSkill(skillFile: string): boolean {
+async function isManagedRecallSkill(skillFile: string, fs: ScaffoldingFs): Promise<boolean> {
   try {
-    const content = fs.readFileSync(skillFile, "utf8");
+    const content = await fs.readFile(skillFile);
     return content.includes("Mission Control") && content.includes("Recall");
   } catch {
     return false;
@@ -105,12 +114,16 @@ function isManagedRecallSkill(skillFile: string): boolean {
  * Recall instructions. Only removes copies that pass the ownership check.
  * Fully fail-soft — cleanup must never block PTY spawn.
  */
-export function removeRecallSkillForAgent(cwd: string, agent: TaskAgent | undefined): void {
+export async function removeRecallSkillForAgent(
+  cwd: string,
+  agent: TaskAgent | undefined,
+  fs: ScaffoldingFs = nodeScaffoldingFs,
+): Promise<void> {
   if (!agent) return;
   for (const targetDir of recallSkillTargetPaths(cwd, agent)) {
     try {
-      if (!isManagedRecallSkill(path.join(targetDir, "SKILL.md"))) continue;
-      fs.rmSync(targetDir, { recursive: true, force: true });
+      if (!(await isManagedRecallSkill(path.join(targetDir, "SKILL.md"), fs))) continue;
+      await fs.rm(targetDir);
     } catch {
       /* swallow */
     }

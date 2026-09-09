@@ -1,5 +1,6 @@
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import type { MemoryFileFs } from "./scaffolding-fs";
 
 // Recall injection — writes the Session Brief into the file each agent auto-loads
 // at startup, as a marker-delimited managed block (mirrors agent-hooks.ts's
@@ -12,10 +13,32 @@ import * as path from "node:path";
 // the Phase 1 target. Other agents lack a guaranteed private auto-load file, so
 // they are intentionally omitted here until a private channel is settled for
 // each (adding one is a single entry in AGENT_MEMORY_TARGETS).
+//
+// Every filesystem call here is asynchronous and takes its filesystem as a
+// parameter: this file runs against the session's working directory, which may
+// sit under a macOS-protected location where a synchronous read would park the
+// Electron main thread behind a consent prompt.
 
 const MC_RECALL_START = "<!-- mc:recall:start (managed by Mission Control — do not edit inside these markers) -->";
 const MC_RECALL_END = "<!-- mc:recall:end -->";
 const MC_RECALL_START_PREFIX = "<!-- mc:recall:start";
+
+/** The real filesystem, asynchronous. */
+export const nodeMemoryFileFs: MemoryFileFs = {
+  async exists(target) {
+    try {
+      await fsp.access(target);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  readFile: (file) => fsp.readFile(file, "utf8"),
+  writeFile: (file, data) => fsp.writeFile(file, data, "utf8"),
+  async mkdir(dir) {
+    await fsp.mkdir(dir, { recursive: true });
+  },
+};
 
 type MemoryTarget = {
   /** Path segments of the auto-loaded file, relative to the session cwd. */
@@ -49,14 +72,18 @@ function stripRecallBlock(content: string): string {
  * Append `relPath` to the repo's `.gitignore` if the session cwd is a git root
  * and the path isn't already ignored. Best-effort; never throws.
  */
-function ensureGitIgnored(cwd: string, relPath: string): void {
+async function ensureGitIgnored(
+  cwd: string,
+  relPath: string,
+  fs: MemoryFileFs,
+): Promise<void> {
   try {
     // `.git` is a dir at a repo root and a file inside a worktree — both count.
-    if (!fs.existsSync(path.join(cwd, ".git"))) return;
+    if (!(await fs.exists(path.join(cwd, ".git")))) return;
     const gitignore = path.join(cwd, ".gitignore");
     let content = "";
     try {
-      content = fs.readFileSync(gitignore, "utf8");
+      content = await fs.readFile(gitignore);
     } catch {
       /* no .gitignore yet */
     }
@@ -64,7 +91,7 @@ function ensureGitIgnored(cwd: string, relPath: string): void {
     if (existing.has(relPath) || existing.has(`/${relPath}`)) return;
     const prefix = content && !content.endsWith("\n") ? "\n" : "";
     const addition = `${prefix}\n# Mission Control Recall (project memory) — private, do not commit\n${relPath}\n`;
-    fs.writeFileSync(gitignore, content + addition, "utf8");
+    await fs.writeFile(gitignore, content + addition);
   } catch {
     /* best-effort */
   }
@@ -75,11 +102,12 @@ function ensureGitIgnored(cwd: string, relPath: string): void {
  * `brief` removes the block. Returns true when a supported agent's file was
  * touched. Never throws — injection must never block a session from starting.
  */
-export function writeAgentMemoryFile(
+export async function writeAgentMemoryFile(
   agent: string | undefined,
   cwd: string,
   brief: string,
-): boolean {
+  fs: MemoryFileFs = nodeMemoryFileFs,
+): Promise<boolean> {
   if (!agent) return false;
   const target = AGENT_MEMORY_TARGETS[agent];
   if (!target) return false;
@@ -87,7 +115,7 @@ export function writeAgentMemoryFile(
   const file = path.join(cwd, ...target.file);
   let existing = "";
   try {
-    existing = fs.readFileSync(file, "utf8");
+    existing = await fs.readFile(file);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") return false;
   }
@@ -105,17 +133,21 @@ export function writeAgentMemoryFile(
   try {
     // Nothing to write and no file existed → don't create an empty file.
     if (!next && !existing) return false;
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, next, "utf8");
+    await fs.mkdir(path.dirname(file));
+    await fs.writeFile(file, next);
   } catch {
     return false;
   }
 
-  if (trimmed && target.gitIgnore) ensureGitIgnored(cwd, target.file.join("/"));
+  if (trimmed && target.gitIgnore) await ensureGitIgnored(cwd, target.file.join("/"), fs);
   return true;
 }
 
 /** Strip the Recall block from the agent's file (e.g. when Recall is disabled). */
-export function removeAgentMemoryFile(agent: string | undefined, cwd: string): void {
-  writeAgentMemoryFile(agent, cwd, "");
+export async function removeAgentMemoryFile(
+  agent: string | undefined,
+  cwd: string,
+  fs: MemoryFileFs = nodeMemoryFileFs,
+): Promise<void> {
+  await writeAgentMemoryFile(agent, cwd, "", fs);
 }

@@ -4,6 +4,7 @@ import { TITLE_GENERATING, TITLE_WAITING, isSentinelTitle } from "~/lib/task-sen
 import { SESSION_ICON_OPTIONS, isSessionIcon } from "~/lib/session-icons";
 import { runCli } from "./claude-cli";
 import { getTask, updateTask } from "./tasks";
+import { stripTerminalControlText } from "~/shared/terminal-text";
 
 /**
  * Leading sentence of the title meta-prompt. Exported (via
@@ -112,19 +113,6 @@ function* candidateJsonBlocks(s: string): Generator<string> {
 const TITLE_MAX_WORDS = 7;
 const TITLE_MAX_LEN = 80;
 const FALLBACK_TITLE_MAX_LEN = 60;
-const ANSI_ESCAPE_REGEX =
-  /(?:\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b[PX^_].*?(?:\x1b\\)|\x1b[@-_])/g;
-const CONTROL_CHARS_REGEX = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
-const ORPHANED_TERMINAL_RGB_RESPONSE_REGEX =
-  /(?:\]?\d{1,2};)?rgb:[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}/g;
-
-function stripTerminalControlText(raw: string): string {
-  return raw
-    .replace(ANSI_ESCAPE_REGEX, "")
-    .replace(ORPHANED_TERMINAL_RGB_RESPONSE_REGEX, "")
-    .replace(CONTROL_CHARS_REGEX, "");
-}
-
 function sanitizeTitle(raw: string): string {
   let t = stripTerminalControlText(raw).trim();
   t = t.replace(/^["'`]+|["'`]+$/g, "");

@@ -252,3 +252,30 @@ describe("probeDirectoryQueued", () => {
     ).resolves.toBe("pending");
   });
 });
+
+describe("recovering from stuck probes", () => {
+  it("starts probing again once a stuck probe finally answers", async () => {
+    // Answering the consent dialog is exactly this: a probe counted as stuck
+    // comes back. Leaving it counted would make answering a prompt degrade the
+    // app for the life of the process.
+    let release: ((value: unknown[]) => void) | null = null;
+    const slow = probeDirectoryQueued(
+      "/blocked",
+      () => new Promise<unknown[]>((resolve) => (release = resolve)),
+      { deadlineMs: 10 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(__stuckProbeCountForTests()).toBe(1);
+
+    // `slow` already resolved `pending` at its deadline, so awaiting it proves
+    // nothing about the underlying probe; wait for that to settle instead.
+    await expect(slow).resolves.toBe("pending");
+    release!([]);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(__stuckProbeCountForTests()).toBe(0);
+
+    const readdir = vi.fn(async () => []);
+    await expect(probeDirectoryQueued("/readable", readdir)).resolves.toBe("readable");
+    expect(readdir).toHaveBeenCalled();
+  });
+});

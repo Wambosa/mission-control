@@ -219,7 +219,21 @@ export function probeDirectoryQueued(
   if (stuckProbes >= MAX_STUCK_PROBES) return Promise.resolve("pending");
 
   let settled = false;
+  let countedStuck = false;
   const probe = probeChain.then(() => probeDirectory(dir, readdir));
+
+  // A probe counted as stuck can still come back — that is exactly what
+  // happens when the operator finally answers the dialog. Releasing the count
+  // is what lets the app start probing again; without it, answering a prompt
+  // would leave every later probe short-circuiting to `pending` for the life
+  // of the process, which is the failure this counter exists to prevent.
+  const release = () => {
+    settled = true;
+    if (countedStuck) {
+      countedStuck = false;
+      stuckProbes = Math.max(0, stuckProbes - 1);
+    }
+  };
 
   // The chain must advance when this probe's deadline passes, not only when the
   // probe answers. A consent prompt has no timeout, so waiting for the answer
@@ -228,7 +242,10 @@ export function probeDirectoryQueued(
   // perfectly well, which would then skip its scaffolding for no reason.
   const deadline = new Promise<void>((advance) => {
     const timer = setTimeout(() => {
-      if (!settled) stuckProbes += 1;
+      if (!settled) {
+        countedStuck = true;
+        stuckProbes += 1;
+      }
       advance();
     }, deadlineMs);
     // Never hold the event loop open for a probe nobody is waiting on.
@@ -251,12 +268,12 @@ export function probeDirectoryQueued(
     timer.unref?.();
     void probe.then(
       (outcome) => {
-        settled = true;
+        release();
         clearTimeout(timer);
         resolve(outcome);
       },
       () => {
-        settled = true;
+        release();
         clearTimeout(timer);
         resolve("never-probed");
       },

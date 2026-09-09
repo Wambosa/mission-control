@@ -154,3 +154,35 @@ describe("the session-start gate", () => {
     expect(source).not.toContain("awaitSpawnGate");
   });
 });
+
+describe("two spawns parked for the same task", () => {
+  it("cancels both, and neither can un-register the other", async () => {
+    // Keyed by task id, the second registration replaced the first, and the
+    // first's cleanup then deleted the second — leaving a parked spawn nothing
+    // could cancel, which is the failure the mechanism exists to prevent.
+    const sweep = stalledSweep();
+    const first = awaitSpawnGate("t-1", "/projects/a", () => false);
+    const second = awaitSpawnGate("t-1", "/projects/a", () => false);
+
+    await settle();
+    expect(cancelPendingSpawn("t-1")).toBe(true);
+
+    await sweep.releaseAll();
+    await expect(first).resolves.toBe(false);
+    await expect(second).resolves.toBe(false);
+  });
+
+  it("cancels both when their project is torn down", async () => {
+    const sweep = stalledSweep();
+    const root = path.resolve("/projects/closing");
+    const first = awaitSpawnGate("t-1", root, () => false);
+    const second = awaitSpawnGate("t-1", path.join(root, "pkg"), () => false);
+
+    await settle();
+    cancelPendingSpawnsUnderPath(root);
+
+    await sweep.releaseAll();
+    await expect(first).resolves.toBe(false);
+    await expect(second).resolves.toBe(false);
+  });
+});

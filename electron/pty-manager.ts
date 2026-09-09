@@ -545,19 +545,28 @@ async function killPtysUnderPath(root: string): Promise<number> {
  * the only place in spawn that can wait for tens of seconds, so it is the only
  * place that needs this.
  */
-type PendingSpawn = { cwd: string; cancelled: boolean };
-const pendingGateWaits = new Map<string, PendingSpawn>();
+// Keyed per spawn, not per task. Two spawns for the same task can overlap
+// while the gate is open — a retry after a transient failure, or two panes
+// bound to one task — and keying by task id let the second overwrite the
+// first's registration, after which the first's cleanup deleted the second's.
+// The survivor was then uncancellable, which is the exact thing this prevents.
+type PendingSpawn = { taskId: string; cwd: string; cancelled: boolean };
+const pendingGateWaits = new Map<symbol, PendingSpawn>();
 
+/** Cancel every spawn parked for this task. Returns whether any was waiting. */
 export function cancelPendingSpawn(taskId: string): boolean {
-  const pending = pendingGateWaits.get(taskId);
-  if (!pending) return false;
-  pending.cancelled = true;
-  return true;
+  let cancelled = false;
+  for (const pending of pendingGateWaits.values()) {
+    if (pending.taskId !== taskId) continue;
+    pending.cancelled = true;
+    cancelled = true;
+  }
+  return cancelled;
 }
 
 export function cancelPendingSpawnsUnderPath(root: string): void {
-  for (const [taskId, pending] of pendingGateWaits) {
-    if (isCwdWithin(pending.cwd, root)) cancelPendingSpawn(taskId);
+  for (const pending of pendingGateWaits.values()) {
+    if (isCwdWithin(pending.cwd, root)) pending.cancelled = true;
   }
 }
 
@@ -585,12 +594,13 @@ export async function awaitSpawnGate(
   isQuitting: () => boolean = appIsQuitting,
 ): Promise<boolean> {
   if (isFsPermissionPreflightResolved()) return true;
-  const pending: PendingSpawn = { cwd, cancelled: false };
-  pendingGateWaits.set(taskId, pending);
+  const key = Symbol("pending-spawn");
+  const pending: PendingSpawn = { taskId, cwd, cancelled: false };
+  pendingGateWaits.set(key, pending);
   try {
     await awaitFsPermissionPreflight();
   } finally {
-    pendingGateWaits.delete(taskId);
+    pendingGateWaits.delete(key);
   }
   if (pending.cancelled) return false;
   // The quit handler tears down every PTY it can see; one created after it ran

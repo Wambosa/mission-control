@@ -49,6 +49,13 @@ import type { SandboxConfig, OpResult } from "./sandbox-types";
 import { SandboxAgentClient } from "./sandbox-agent-client";
 import { ensureRemoteClaudeShiftEnterBinding } from "./remote-shift-enter";
 import { PtyOutputBatcher } from "./pty-output-batch";
+import {
+  TailRing,
+  markPtyTransportDown,
+  recordPtyOutput,
+  trackPty,
+  untrackPty,
+} from "./silence-tracker";
 import { buildSandboxHookRelayUrl } from "./pty-hook-env";
 import {
   SANDBOX_AGENT_UPGRADE_COMMAND,
@@ -120,6 +127,12 @@ const pendingReplays = new Map<string, (r: { data: string; nextSeq: number }) =>
 const remotePtyLastInputAt = new Map<string, number>();
 const REMOTE_PTY_INTERACTIVE_WINDOW_MS = 10_000;
 
+// A few kilobytes of recent output per remote PTY, kept HERE rather than
+// fetched when an alert fires. Replay is an RPC that resolves empty on timeout,
+// which would make the tail unavailable exactly when a session is unreachable —
+// the case where the alert matters most.
+const remoteTailRings = new Map<string, TailRing>();
+
 // Phase 2: one remote agent connection per sandbox. The registry owns the
 // per-sandbox state machine (sandbox-registry.ts); this module supplies the
 // agent side effects and routes IPC.
@@ -131,6 +144,62 @@ const clients = new Map<string, SandboxAgentClient>();
 // ptyId → owning sandbox id, so write/resize/kill/replay reach the right agent
 // even if the active scope changed since the pty was spawned.
 const ptyOwner = new Map<string, string>();
+
+/**
+ * Drop every trace of one remote PTY.
+ *
+ * Three maps and a tracker entry used to be cleaned in three different places
+ * and not at all on a fourth path; one function is what makes "every teardown
+ * path clears its entry" checkable.
+ */
+export function forgetRemotePtyState(ptyId: string): void {
+  ptyOwner.delete(ptyId);
+  remotePtyLastInputAt.delete(ptyId);
+  remoteTailRings.delete(ptyId);
+  untrackPty(ptyId);
+}
+
+/** Test-only: seed the per-PTY state a live remote spawn would have created. */
+export function __trackRemotePtyForTests(
+  ptyId: string,
+  sandboxId: string,
+  taskId: string,
+): void {
+  ptyOwner.set(ptyId, sandboxId);
+  remotePtyLastInputAt.set(ptyId, Date.now());
+  remoteTailRings.set(ptyId, new TailRing());
+  trackPty(ptyId, {
+    transport: "remote",
+    taskId,
+    readTail: () => remoteTailRings.get(ptyId)?.read() ?? "",
+  });
+}
+
+/** Test-only: whether any per-PTY state survives for this id. */
+export function __remotePtyStateExistsForTests(ptyId: string): boolean {
+  return ptyOwner.has(ptyId) || remotePtyLastInputAt.has(ptyId) || remoteTailRings.has(ptyId);
+}
+
+/** Test-only: push output into a remote PTY's tail ring. */
+export function __pushRemoteTailForTests(ptyId: string, data: string): void {
+  remoteTailRings.get(ptyId)?.push(data);
+  recordPtyOutput(ptyId);
+}
+
+/**
+ * The connection to a sandbox is gone and no exit event is coming.
+ *
+ * The sessions are not silent, they are unreachable, and the difference is
+ * reportable: mark them transport-down first so anything deciding on their
+ * state sees a reason, then release the per-PTY state they can no longer use.
+ */
+export function releaseRemotePtysForSandbox(sandboxId: string): void {
+  for (const [ptyId, owner] of [...ptyOwner]) {
+    if (owner !== sandboxId) continue;
+    markPtyTransportDown(ptyId);
+    forgetRemotePtyState(ptyId);
+  }
+}
 
 const AGENT_UPGRADE_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -359,6 +428,12 @@ function connectAgent(
         onlyIfNoProgress: true,
       });
       if (clients.get(id) === client) clients.delete(id);
+      // No exit event ever arrives for a dropped connection, so without this
+      // the per-PTY maps kept growing and any consumer of them saw sessions
+      // that no longer had a transport. To the detector those look silent, and
+      // a network blip would produce a burst of alerts and a held dock signal
+      // for sessions that are merely unreachable.
+      releaseRemotePtysForSandbox(id);
       cb.onClose();
     },
     onError: (err) => {
@@ -378,6 +453,11 @@ function connectAgent(
     onOutput: (ptyId, seq, data) => {
       noteUpgradeOutput(ptyId, data);
       if (!isSandboxAgentUpgradePty(ptyId)) {
+        // Stamped on the raw callback, not at the batcher flush, for the same
+        // reason as the local path: the batcher's delay would show up as
+        // silence that varies with window state.
+        recordPtyOutput(ptyId);
+        remoteTailRings.get(ptyId)?.push(data);
         const lastInputAt = remotePtyLastInputAt.get(ptyId) ?? 0;
         outputBatcher.push(
           ptyId,
@@ -403,7 +483,7 @@ function connectAgent(
       }
       // Final output must land before the exit event or it's lost.
       outputBatcher.flush(ptyId);
-      remotePtyLastInputAt.delete(ptyId);
+      forgetRemotePtyState(ptyId);
       send(IPC.remotePtyExit, { ptyId, exitCode: exitCode ?? 0, signal });
     },
     onReplayResult: (ptyId, data, nextSeq) => {
@@ -1727,6 +1807,16 @@ export function registerSandboxManager(
       }
       const ptyId = `rpty-${randomUUID()}`;
       if (id) ptyOwner.set(ptyId, id);
+      // The task id was forwarded to the sandbox agent and then dropped; an
+      // alert about a silent remote session could not name it. Keep it.
+      remoteTailRings.set(ptyId, new TailRing());
+      trackPty(ptyId, {
+        transport: "remote",
+        taskId: opts.taskId,
+        shell: opts.shell === true,
+        sandboxInternal: false,
+        readTail: () => remoteTailRings.get(ptyId)?.read() ?? "",
+      });
       const hook = getSandboxHookEnv?.() ?? null;
       client.spawn({
         ptyId,
@@ -1756,8 +1846,7 @@ export function registerSandboxManager(
   }, ipcMain);
   safeHandle(IPC.remotePtyKill, (_e, ptyId: string, sandboxId?: string | null) => {
     const killed = withOwnerClient(ptyId, sandboxId, (c) => c.kill(ptyId));
-    ptyOwner.delete(ptyId);
-    remotePtyLastInputAt.delete(ptyId);
+    forgetRemotePtyState(ptyId);
     return killed;
   }, ipcMain);
   safeHandle(IPC.remotePtyReplay, (_e, ptyId: string, sandboxId?: string | null) => {

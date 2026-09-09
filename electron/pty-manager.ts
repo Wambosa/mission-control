@@ -12,6 +12,11 @@ import {
   isFsPermissionPreflightResolved,
 } from "./fs-permission-preflight";
 import { runSessionScaffolding, unreadableCwdNotice } from "./session-scaffolding";
+import {
+  recordPtyOutput,
+  trackPty,
+  untrackPty,
+} from "./silence-tracker";
 import { IPC } from "./ipc-channels";
 import { safeHandle } from "./ipc-safe-handle";
 import { PtyOutputBatcher } from "./pty-output-batch";
@@ -494,6 +499,7 @@ async function killPty(p: Pty): Promise<boolean> {
     return false;
   } finally {
     ptys.delete(p.id);
+    untrackPty(p.id);
   }
 }
 
@@ -770,6 +776,13 @@ export function registerPtyHandlers(
         lastInputAt: 0,
       };
       ptys.set(id, p);
+      trackPty(id, {
+        transport: "local",
+        taskId: opts.taskId,
+        shell: opts.shell === true,
+        sandboxInternal: false,
+        readTail: () => p.buffer.map((chunk) => chunk.data).join(""),
+      });
       // The session starts either way (R20 asks for a report, not a retry), but
       // an operator staring at a terminal that never does anything deserves to
       // know the app could not read the directory it was pointed at.
@@ -835,6 +848,11 @@ export function registerPtyHandlers(
 
       proc.onData((data: string) => {
         const seq = appendBuffer(p, data);
+        // Stamped here rather than at the batcher flush: the batcher coalesces
+        // and delays -- up to a second when the window is hidden, further under
+        // power saving -- so a flush-time stamp would inject phantom silence
+        // that varies with window state.
+        recordPtyOutput(id);
         outputBatcher.push(id, seq, data, Date.now() - p.lastInputAt < PTY_INTERACTIVE_WINDOW_MS);
         if (initialInput) scheduleInitialInput(INITIAL_INPUT_SETTLE_MS);
       });
@@ -859,6 +877,7 @@ export function registerPtyHandlers(
         }
         send(getWin, IPC.ptyExit, { ptyId: id, exitCode, signal });
         ptys.delete(id);
+        untrackPty(id);
         // A PTY dying is the last thing that happens before the lockups we're
         // chasing, and signal/exitCode is the part the renderer never records.
         // Logged after the delete so `live` is just the map size — killPty may
@@ -905,6 +924,7 @@ export function registerPtyHandlers(
     if (!p) return false;
     disposePty(p.proc);
     ptys.delete(ptyId);
+    untrackPty(ptyId);
     return true;
   }, ipcMain);
 
@@ -973,5 +993,6 @@ export function killAllPtys() {
   // this sweep and spawn a PTY nothing is left to kill.
   cancelAllPendingSpawns();
   disposeAllPtys([...ptys.values()].map((p) => p.proc));
+  for (const id of ptys.keys()) untrackPty(id);
   ptys.clear();
 }

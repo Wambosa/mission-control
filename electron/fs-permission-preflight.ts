@@ -231,6 +231,19 @@ function unansweredLocations(): DeclaredLocation[] {
   });
 }
 
+export type ReprobeScope = {
+  /**
+   * Re-probe every declared location, not only the ones that never answered.
+   *
+   * Access can be taken away as well as given, and nothing tells the app when
+   * it happens — a revoked folder keeps reading as `readable` until something
+   * asks again. Cheap to check: once a decision exists either way, enumeration
+   * returns immediately; only an *unanswered* prompt hangs, and those are
+   * already `pending` and bounded by the probe chain's stuck-probe cap.
+   */
+  all?: boolean;
+};
+
 /**
  * Ask again for the categories that never answered.
  *
@@ -248,10 +261,10 @@ function unansweredLocations(): DeclaredLocation[] {
  * re-probed, through the same one-in-flight chain, and a still-unanswered
  * prompt simply stays pending.
  */
-export async function reprobePendingFsPermissions(): Promise<void> {
+export async function reprobePendingFsPermissions(scope: ReprobeScope = {}): Promise<void> {
   const deps = state.deps;
   if (!deps || !state.started || state.reprobing) return;
-  const pending = unansweredLocations();
+  const pending = scope.all ? [...DECLARED_LOCATIONS] : unansweredLocations();
   if (pending.length === 0) return;
 
   const local = state;
@@ -265,6 +278,7 @@ export async function reprobePendingFsPermissions(): Promise<void> {
       } catch {
         outcome = "never-probed";
       }
+      // `pending` is not an answer, and must never overwrite one.
       if (outcome === "pending") continue;
       local.outcomes.set(location.category, outcome);
       local.checkedAt = deps.now();

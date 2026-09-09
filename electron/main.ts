@@ -1942,9 +1942,12 @@ registerDiagnosticsHandlers(ipcMain, () => win, {
  * a previous build legible as stale.
  */
 safeHandle(IPC.fsPermissionsGet, async () => {
-  // Opening Diagnostics is the operator asking what the state is, which is
-  // exactly the moment to find out rather than repeat a stale "no answer".
-  await reprobePendingFsPermissions();
+  // Opening Diagnostics is the operator asking what the state is, so ask the
+  // filesystem rather than repeat what a launch-time sweep found -- access can
+  // have been taken away since, and nothing announces that. Deliberately not
+  // awaited: the panel opens on what is known now and the rows update from the
+  // push when the answers land, which is what the read/push split is for.
+  void reprobePendingFsPermissions({ all: true });
   return {
     records: currentFsPermissionRecords(missionControlUserDataDir),
     resolved: isFsPermissionPreflightResolved(),

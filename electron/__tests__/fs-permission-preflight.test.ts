@@ -241,3 +241,43 @@ describe("re-probing after the deadline", () => {
     expect(probeLocation).not.toHaveBeenCalled();
   });
 });
+
+describe("noticing access that was taken away", () => {
+  it("re-checks an already-readable category when asked for all", async () => {
+    // Nothing announces a revoked grant. Without asking again, a folder that
+    // has since been refused keeps reading as readable — a claim on screen the
+    // app cannot support, and no privacy jump on the row that needs it.
+    let granted = true;
+    startFsPermissionPreflight(
+      deps({ probeLocation: async () => (granted ? "readable" : "privacy-blocked") }),
+    );
+    await awaitFsPermissionPreflight();
+    expect(fsPermissionPreflightRecords().every((r) => r.outcome === "readable")).toBe(true);
+
+    granted = false;
+    await reprobePendingFsPermissions();
+    expect(
+      fsPermissionPreflightRecords().every((r) => r.outcome === "readable"),
+      "an unanswered-only re-probe must not disturb answered categories",
+    ).toBe(true);
+
+    await reprobePendingFsPermissions({ all: true });
+    expect(fsPermissionPreflightRecords().every((r) => r.outcome === "privacy-blocked")).toBe(
+      true,
+    );
+  });
+
+  it("does not let a still-unanswered prompt erase a known answer", async () => {
+    let answering = true;
+    startFsPermissionPreflight(
+      deps({ probeLocation: async () => (answering ? "privacy-blocked" : "pending") }),
+    );
+    await awaitFsPermissionPreflight();
+
+    answering = false;
+    await reprobePendingFsPermissions({ all: true });
+    expect(fsPermissionPreflightRecords().every((r) => r.outcome === "privacy-blocked")).toBe(
+      true,
+    );
+  });
+});

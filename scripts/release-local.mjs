@@ -123,7 +123,7 @@ function run(cmd, argv, opts = {}) {
   if (res.status !== 0) fail(`command failed: ${cmd} ${argv.join(" ")}`);
 }
 
-const OUT_DIR = join(REPO_ROOT, "dist-electron-out");
+const OUT_DIR = join(REPO_ROOT, "..", "mission-control-build");
 const ARTIFACTS_DIR = join(REPO_ROOT, "artifacts");
 
 rmSync(ARTIFACTS_DIR, { recursive: true, force: true });

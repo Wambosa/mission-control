@@ -1,12 +1,9 @@
-import { DEFAULT_AGENT_LAUNCHER_CONFIG } from "~/shared/agent-launcher-config";
-import { useQueryClient } from "@tanstack/react-query";
 import { SettingCard, SettingsSection, ValueRow } from "~/components/views/SettingsParts";
-import { api, type AppSettings } from "~/lib/api";
-import { queryKeys, useSettings } from "~/queries";
-import { DEFAULT_ACCENT_COLOR } from "~/lib/accent-colors";
+import type { AppSettings } from "~/lib/api";
+import { useSettings } from "~/queries";
+import { useSettingsWriter } from "~/lib/settings-mutation";
 import { TERMINAL_FONT_FAMILY } from "~/lib/terminal-options";
 import { terminalFontStack } from "~/lib/terminal-appearance";
-import { DEFAULT_PET_HOME_SIDE } from "~/shared/pet";
 import {
   BUNDLED_TERMINAL_FONTS,
   SYSTEM_MONO_FONT_CANDIDATES,
@@ -22,7 +19,6 @@ import {
   type TerminalZoomLevel,
 } from "~/shared/terminal-zoom";
 import {
-  DEFAULT_INTERFACE_FONT_SCALE,
   DEFAULT_TERMINAL_FONT_WEIGHT,
   DEFAULT_TERMINAL_FONT_WEIGHT_BOLD,
   DEFAULT_TERMINAL_LETTER_SPACING,
@@ -31,9 +27,6 @@ import {
   TERMINAL_LETTER_SPACINGS,
   TERMINAL_LINE_HEIGHTS,
 } from "~/shared/terminal-appearance";
-import { normalizeSessionHeaderButtonVisibility } from "~/shared/session-header-buttons";
-import { DEFAULT_HEADER_BUTTON_VISIBILITY } from "~/shared/header-buttons";
-import { DEFAULT_SURFACE_TINT } from "~/shared/surface-tint";
 
 type AppearancePatch = Partial<
   Pick<
@@ -136,7 +129,6 @@ function TerminalPreview({
 }
 
 export function TerminalSettingsPage() {
-  const queryClient = useQueryClient();
   const { data: settings } = useSettings();
   const level = settings?.terminalZoomLevel ?? DEFAULT_TERMINAL_ZOOM_LEVEL;
   const fontSize = terminalFontSizeForLevel(level);
@@ -160,84 +152,10 @@ export function TerminalSettingsPage() {
       ? fontFamily
       : null;
 
-  const optimisticSettings = (patch: AppearancePatch): AppSettings => ({
-    agentSystemBannerDisabled: settings?.agentSystemBannerDisabled ?? false,
-    accentColor: settings?.accentColor ?? DEFAULT_ACCENT_COLOR,
-    themeStyle: settings?.themeStyle ?? "painted",
-    surfaceTint: settings?.surfaceTint ?? DEFAULT_SURFACE_TINT,
-    backgroundImage: settings?.backgroundImage ?? null,
-    minimalTheme: settings?.minimalTheme ?? false,
-    themeChosen: settings?.themeChosen ?? false,
-    mouseGradientDisabled: settings?.mouseGradientDisabled ?? false,
-    batterySaverEnabled: settings?.batterySaverEnabled ?? true,
-    spellcheckEnabled: settings?.spellcheckEnabled ?? true,
-    sessionFinishToastEnabled: settings?.sessionFinishToastEnabled ?? true,
-    sessionFinishOsNotificationEnabled:
-      settings?.sessionFinishOsNotificationEnabled ?? false,
-    notificationSoundEnabled: settings?.notificationSoundEnabled ?? true,
-    launchOverlayEnabled: settings?.launchOverlayEnabled ?? false,
-    worktreesEnabled: true,
-    gitDiffChangedFilesView: settings?.gitDiffChangedFilesView ?? null,
-    gitDiffChangedFilesWidth: settings?.gitDiffChangedFilesWidth ?? null,
-    projectsDashboardView: settings?.projectsDashboardView ?? null,
-    activeProjectGroup: settings?.activeProjectGroup ?? null,
-    collapsedProjectGroups: settings?.collapsedProjectGroups ?? null,
-    terminalZoomLevel: level,
-    terminalFontFamily: fontFamily,
-    terminalFontWeight: fontWeight,
-    terminalFontWeightBold: fontWeightBold,
-    terminalLineHeight: lineHeight,
-    terminalLetterSpacing: letterSpacing,
-    interfaceFontFamily: settings?.interfaceFontFamily ?? null,
-    interfaceFontScale: settings?.interfaceFontScale ?? DEFAULT_INTERFACE_FONT_SCALE,
-    sessionHeaderButtons:
-      normalizeSessionHeaderButtonVisibility(settings?.sessionHeaderButtons),
-    headerButtons: settings?.headerButtons ?? DEFAULT_HEADER_BUTTON_VISIBILITY,
-    defaultAgent: settings?.defaultAgent ?? "claude-code",
-    defaultModel: settings?.defaultModel ?? null,
-    annotationAgent: settings?.annotationAgent ?? "claude-code",
-    annotationModel: settings?.annotationModel ?? null,
-    questionOverlayEnabled: settings?.questionOverlayEnabled ?? true,
-    claudeUsageLimitsEnabled: settings?.claudeUsageLimitsEnabled ?? false,
-    claudeUsageLimitsShowSession: settings?.claudeUsageLimitsShowSession ?? true,
-    claudeUsageLimitsShowWeekly: settings?.claudeUsageLimitsShowWeekly ?? true,
-    providerUsageEnabled: settings?.providerUsageEnabled ?? false,
-    providerUsageIds: settings?.providerUsageIds ?? ["claude", "codex", "cursor"],
-    agentLauncherConfig: settings?.agentLauncherConfig ?? DEFAULT_AGENT_LAUNCHER_CONFIG,
-    recallEnabled: settings?.recallEnabled ?? false,
-    recallAutoCaptureEnabled: settings?.recallAutoCaptureEnabled ?? true,
-    recallEngineEnabled: settings?.recallEngineEnabled ?? true,
-    recallEngineHarness: settings?.recallEngineHarness ?? "claude-code",
-    recallEngineModel: settings?.recallEngineModel ?? null,
-    recallAgentWriteEnabled: settings?.recallAgentWriteEnabled ?? true,
-    recallInjectBriefEnabled: settings?.recallInjectBriefEnabled ?? true,
-    recallCodeGraphEnabled: settings?.recallCodeGraphEnabled ?? true,
-    recallProactiveRecallEnabled: settings?.recallProactiveRecallEnabled ?? true,
-    recallLearnedToastEnabled: settings?.recallLearnedToastEnabled ?? true,
-    petEnabled: settings?.petEnabled ?? true,
-    petMessagesEnabled: settings?.petMessagesEnabled ?? true,
-    petSoundsEnabled: settings?.petSoundsEnabled ?? false,
-    petMultiplayerEnabled: settings?.petMultiplayerEnabled ?? false,
-    petHomeSide: settings?.petHomeSide ?? DEFAULT_PET_HOME_SIDE,
-    petState: settings?.petState ?? null,
-    showGroupSwitcher: settings?.showGroupSwitcher ?? true,
-    showProjectHeaderGroup: settings?.showProjectHeaderGroup ?? true,
-    showBackgroundGrid: settings?.showBackgroundGrid ?? true,
-    ...queryClient.getQueryData<AppSettings>(queryKeys.settings),
-    ...patch,
-  });
+  const writeSetting = useSettingsWriter();
 
   const save = async (patch: AppearancePatch) => {
-    const previous = queryClient.getQueryData<AppSettings>(queryKeys.settings);
-    const optimistic = optimisticSettings(patch);
-    queryClient.setQueryData(queryKeys.settings, optimistic);
-    try {
-      const updated = await api.updateSettings(patch);
-      queryClient.setQueryData(queryKeys.settings, { ...optimistic, ...updated });
-    } catch (error) {
-      if (previous) queryClient.setQueryData(queryKeys.settings, previous);
-      throw error;
-    }
+    await writeSetting(patch);
   };
 
   const previewFontFamily = fontFamily

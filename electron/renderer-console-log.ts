@@ -3,7 +3,7 @@
  *
  * The renderer had no file transport at all, so a UI failure left nothing on
  * disk and the only way to see one was to reproduce it live with DevTools open
- * — which is what TERMINAL_FOCUS_BUG.md's diagnostic plan was reduced to.
+ * — which is what past terminal-focus diagnostic work was reduced to.
  *
  * electron-log's own `spyRendererConsole` option would also work today, but it
  * reads the `(event, level, message)` positional arguments Electron marks

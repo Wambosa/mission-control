@@ -180,8 +180,8 @@ log.info("app.launch", {
 
 // Renderer console → log file. The renderer had no file transport at all, so a
 // UI failure left nothing on disk and the only way to see one was to reproduce
-// it live with DevTools open — which is what TERMINAL_FOCUS_BUG.md's diagnostic
-// plan was reduced to. The level mapping and frame labelling live in
+// it live with DevTools open — which is what past terminal-focus diagnostic
+// work was reduced to. The level mapping and frame labelling live in
 // renderer-console-log.ts so they are reachable from a test; see that file for
 // why the `details` object is read instead of the deprecated positional
 // arguments.

@@ -28,6 +28,8 @@ export function GeneralSettingsPage() {
   const osNotificationEnabled =
     settings?.sessionFinishOsNotificationEnabled ?? false;
   const notificationSoundEnabled = settings?.notificationSoundEnabled ?? true;
+  // Defaulted on, unlike the rest of this group -- see AppSettings.silenceAlertsEnabled.
+  const silenceAlertsEnabled = settings?.silenceAlertsEnabled ?? true;
   const [launchOverlayEnabled, setLaunchOverlayEnabledState] = useState(
     () => readCachedLaunchIntroEnabled(),
   );
@@ -66,6 +68,7 @@ export function GeneralSettingsPage() {
         | "sessionFinishToastEnabled"
         | "sessionFinishOsNotificationEnabled"
         | "notificationSoundEnabled"
+        | "silenceAlertsEnabled"
         | "launchOverlayEnabled"
       >
     >,
@@ -93,6 +96,10 @@ export function GeneralSettingsPage() {
 
   const setNotificationSoundEnabled = async (enabled: boolean) => {
     await updateSettings({ notificationSoundEnabled: enabled });
+  };
+
+  const setSilenceAlertsEnabled = async (enabled: boolean) => {
+    await updateSettings({ silenceAlertsEnabled: enabled });
   };
 
   const setLaunchOverlayEnabled = (enabled: boolean) => {
@@ -206,6 +213,20 @@ export function GeneralSettingsPage() {
             checked={launchOverlayEnabled}
             onChange={setLaunchOverlayEnabled}
             label="Enable"
+          />
+        </Field>
+      </SettingsSection>
+      <SettingsSection
+        title="Stuck session alerts"
+        subtitle="Tell me when a session stops producing output, wherever it is running."
+      >
+        <Field label="Silent sessions">
+          <ToggleRow
+            title="Alert on a silent session"
+            description="After five minutes with no output, an alert names the session and shows the last thing it printed. After ten, the dock keeps asking until you come back."
+            checked={silenceAlertsEnabled}
+            onChange={setSilenceAlertsEnabled}
+            label="Alert me"
           />
         </Field>
       </SettingsSection>

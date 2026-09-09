@@ -39,8 +39,16 @@ import {
 } from "./fs-permission-preflight";
 import { recordFsPermissionOutcomes } from "./fs-permission-state";
 import { openPrivacyPane } from "./privacy-pane";
-import { SilenceSweep } from "./silence-sweep";
-import { getTrackedPty, type TrackedPty } from "./silence-tracker";
+import { AttentionSignal } from "./attention-signal";
+import {
+  SilenceSweep,
+  type SilenceAlert,
+  type SilenceAlertSession,
+} from "./silence-sweep";
+import { getTrackedPty, readPtyTail, type TrackedPty } from "./silence-tracker";
+import { extractTerminalTail } from "../src/shared/terminal-text";
+import { matchHangSignature } from "../src/shared/hang-signatures";
+import { fsPermissionCategoryFromText } from "../src/shared/fs-permission";
 import type { SessionFacts } from "./silence-policy";
 import { setPtyStreamHidden, setPtyStreamPowerSave } from "./pty-output-batch";
 import { setAppThemeFromBackground } from "./app-theme";
@@ -1266,6 +1274,8 @@ async function createWindow() {
     },
   });
 
+  win.on("focus", () => attentionSignal.clear());
+
   win.once("ready-to-show", () => {
     win?.show();
     // Ask macOS for the protected locations now: the window exists, so a
@@ -1948,6 +1958,63 @@ safeHandle(IPC.sessionFactsReport, (_evt, report: unknown) => {
   return true;
 });
 
+/**
+ * The dock signal.
+ *
+ * macOS bounces the dock icon at a critical level until the app is activated,
+ * and cancels the request itself at that point. Windows flashes the frame.
+ * Nowhere else has an equivalent, and the module reports that rather than
+ * pretending.
+ */
+const attentionSignal = new AttentionSignal({
+  platform: process.platform,
+  isAppActive: () => Boolean(win?.isFocused()),
+  requestAttention: () => {
+    if (process.platform === "darwin") return app.dock?.bounce("critical") ?? null;
+    win?.flashFrame(true);
+    return null;
+  },
+  cancelAttention: (handle) => {
+    if (process.platform === "darwin") {
+      if (handle !== null) app.dock?.cancelBounce(handle);
+      return;
+    }
+    win?.flashFrame(false);
+  },
+});
+
+/** How many sessions may be named individually before the alert coalesces. */
+const SILENCE_ALERT_COALESCE_AT = 3;
+
+/**
+ * Turn a sweep alert into what the operator sees: the tail of what the session
+ * last printed, and a known signature's remediation where one matches.
+ */
+function describeSilentSession(alert: SilenceAlert): SilenceAlertSession {
+  const described: SilenceAlertSession = {
+    ptyId: alert.ptyId,
+    taskId: alert.taskId,
+    title: alert.title,
+    project: alert.project,
+    silentMs: Math.round(alert.silentMs),
+    awaitingOperator: alert.awaitingOperator,
+  };
+
+  const tail = extractTerminalTail(readPtyTail(alert.ptyId));
+  // Absent rather than empty: a repaint-only tail is reported as having none.
+  if (tail) described.tail = tail;
+  if (!tail) return described;
+
+  const signature = matchHangSignature(tail);
+  if (!signature.match) return described;
+  described.remediation = signature.match.remediation;
+  if (signature.match.id === "macos-file-access") {
+    const category = fsPermissionCategoryFromText(tail, os.homedir());
+    if (category) described.privacyCategory = category;
+  }
+  return described;
+}
+
 const silenceSweep = new SilenceSweep({
   // Enumerated from the two managers that own PTY lifecycle, never from the
   // tracker: a missed teardown there must not become a phantom session here.
@@ -1967,6 +2034,27 @@ const silenceSweep = new SilenceSweep({
         awaitingOperator: alert.awaitingOperator,
       });
     }
+    if (!getBooleanAppSetting(missionControlUserDataDir, "silence_alerts_enabled", true)) return;
+
+    for (const stage of ["hard", "soft"] as const) {
+      const staged = alerts.filter((alert) => alert.stage === stage);
+      if (staged.length === 0) continue;
+      win?.webContents.send(IPC.sessionSilenceAlert, {
+        stage,
+        sessions: staged.map(describeSilentSession),
+        // Several at once become one alert naming the count: a wall of toasts
+        // is not more informative than a single one that lists them.
+        coalesced: staged.length >= SILENCE_ALERT_COALESCE_AT,
+      });
+    }
+  },
+  onTick: ({ sessionsAtHardStage }) => {
+    if (!getBooleanAppSetting(missionControlUserDataDir, "silence_alerts_enabled", true)) return;
+    // A raise skipped because the operator was at their desk is retried until
+    // it lands or output resumes -- the hard stage is sticky for the episode,
+    // but the signal itself must not be lost permanently.
+    if (sessionsAtHardStage.length > 0) attentionSignal.raise();
+    else attentionSignal.clear();
   },
 });
 
@@ -2225,6 +2313,10 @@ app.on("window-all-closed", () => {
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  // The platform has already cancelled the dock request by the time this runs
+  // on macOS, so the job here is resetting local bookkeeping — without it the
+  // guard flag stays set and the next raise never happens.
+  attentionSignal.clear();
 });
 
 /**

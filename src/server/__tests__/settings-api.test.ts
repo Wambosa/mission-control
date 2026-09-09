@@ -598,6 +598,36 @@ describe("settings API", () => {
     });
   });
 
+  it("defaults silence alerts on, unlike the rest of the notification group", async () => {
+    // Reusing the OS-notification toggle would have left stuck-session alerts
+    // invisible for anyone who had not already opted into finish notifications.
+    const response = await handleApiRequest(
+      authedRequest("http://localhost/api/settings"),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(await jsonBody(response!)).toMatchObject({ silenceAlertsEnabled: true });
+  });
+
+  it("persists silence alerts turned off, without touching finish alerts", async () => {
+    const update = await handleApiRequest(
+      authedRequest("http://localhost/api/settings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ silenceAlertsEnabled: false }),
+      }),
+    );
+    const read = await handleApiRequest(
+      authedRequest("http://localhost/api/settings"),
+    );
+
+    expect(update?.status).toBe(200);
+    expect(await jsonBody(read!)).toMatchObject({
+      silenceAlertsEnabled: false,
+      notificationSoundEnabled: true,
+    });
+  });
+
   it("keeps spellcheck enabled by default", async () => {
     const response = await handleApiRequest(
       authedRequest("http://localhost/api/settings"),

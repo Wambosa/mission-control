@@ -5,6 +5,31 @@ import type { FsPermissionCategory, FsPermissionRecord } from "~/shared/fs-permi
 import type { TaskStatus } from "~/shared/domain";
 
 /** Probe outcomes for the protected locations, plus whether they can mean anything here. */
+/** One silent session, as the alert describes it. */
+export type SilenceAlertSession = {
+  ptyId: string;
+  taskId: string | null;
+  title: string;
+  project: string | null;
+  /** Awake milliseconds of silence when the threshold was crossed. */
+  silentMs: number;
+  /** The operator typed more recently than the session spoke. */
+  awaitingOperator: boolean;
+  /** Stripped recent output. Absent when nothing legible survived. */
+  tail?: string;
+  /** A matched hang signature's fixed advice. */
+  remediation?: string;
+  /** Set when that advice is a privacy block the operator can act on directly. */
+  privacyCategory?: FsPermissionCategory;
+};
+
+export type SilenceAlertPayload = {
+  stage: "soft" | "hard";
+  sessions: SilenceAlertSession[];
+  /** Several sessions crossed in one sweep and are reported as one alert. */
+  coalesced: boolean;
+};
+
 /** What the renderer knows about one live session, pushed into main. */
 export type SessionFactsEntry = {
   title: string;
@@ -466,6 +491,10 @@ export type ElectronBridge = {
     revealLogs: () => Promise<{ ok: true } | { ok: false; error: string }>;
     /** The log directory's path, for display. */
     logDirectory: () => Promise<string>;
+  };
+  sessionSilence: {
+    /** Fires when a session crosses a silence threshold. */
+    onAlert: (cb: (payload: SilenceAlertPayload) => void) => () => void;
   };
   sessionFacts: {
     /** Report every live session's facts. Sent on change, not on a tick. */

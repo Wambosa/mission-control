@@ -28,6 +28,22 @@ export type FsPermissionsSnapshotBridge = {
   supported: boolean;
 };
 
+export type SilenceAlertPayloadBridge = {
+  stage: "soft" | "hard";
+  sessions: Array<{
+    ptyId: string;
+    taskId: string | null;
+    title: string;
+    project: string | null;
+    silentMs: number;
+    awaitingOperator: boolean;
+    tail?: string;
+    remediation?: string;
+    privacyCategory?: FsPermissionCategory;
+  }>;
+  coalesced: boolean;
+};
+
 export type SessionFactsReportBridge = Record<
   string,
   { title: string; project: string | null; status: string; focused: boolean }
@@ -548,6 +564,11 @@ const electronAPI = {
       ipcRenderer.invoke(IPC.diagnosticsRevealLogs),
     /** The log directory's path, for display. */
     logDirectory: (): Promise<string> => ipcRenderer.invoke(IPC.diagnosticsLogDirectory),
+  },
+  sessionSilence: {
+    /** Fires when a session crosses a silence threshold. */
+    onAlert: (cb: (payload: SilenceAlertPayloadBridge) => void) =>
+      subscribe<SilenceAlertPayloadBridge>(IPC.sessionSilenceAlert, cb),
   },
   sessionFacts: {
     /** Report every live session's facts. Sent on change, not on a tick. */

@@ -99,6 +99,16 @@ export type AppSettings = {
   sessionFinishOsNotificationEnabled: boolean;
   /** Ding when a session-finish or diagram-ready notification arrives. */
   notificationSoundEnabled: boolean;
+  /**
+   * Alert when a session goes silent past the soft threshold.
+   *
+   * Defaulted ON, unlike its neighbours in this group. Reusing the OS-notification
+   * toggle would have left stuck-session alerts invisible for anyone who had not
+   * already opted into finish notifications, which defeats the point of having
+   * them; and an operator who wants to silence stuck alerts should not lose
+   * finish alerts to do it.
+   */
+  silenceAlertsEnabled: boolean;
   launchOverlayEnabled: boolean;
   /** Git worktrees per project (always on). */
   worktreesEnabled: boolean;
@@ -636,6 +646,7 @@ export const api = {
         | "sessionFinishToastEnabled"
         | "sessionFinishOsNotificationEnabled"
         | "notificationSoundEnabled"
+        | "silenceAlertsEnabled"
         | "launchOverlayEnabled"
         | "worktreesEnabled"
         | "questionOverlayEnabled"

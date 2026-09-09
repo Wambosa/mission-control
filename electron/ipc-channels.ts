@@ -40,6 +40,8 @@ export const IPC = {
   // focused; the silence sweep in main consumes them. Same direction as the
   // battery-saver and spellcheck pushes.
   sessionFactsReport: "sessionFacts:report",
+  /** Main pushes a silence alert; the renderer renders it as a toast. */
+  sessionSilenceAlert: "sessionSilence:alert",
   appSetBackgroundColor: "app:setBackgroundColor",
   powerGetOnBattery: "power:getOnBattery",
   powerOnBatteryChange: "power:on-battery-change",

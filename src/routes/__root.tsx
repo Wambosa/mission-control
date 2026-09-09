@@ -23,6 +23,7 @@ import { THEME_CACHE_KEY, useTheme } from "~/lib/use-theme";
 import { usePowerSaveController } from "~/lib/power-save";
 import { useWindowIdleController } from "~/lib/window-idle";
 import { SessionFactsReporter } from "~/lib/session-facts-reporter";
+import { useSilenceNotifications } from "~/lib/use-silence-notifications";
 import {
   TerminalProvider,
   useTerminals,
@@ -425,6 +426,8 @@ function Shell() {
 
   useNavigationSwipe();
   const sessionNotifications = useSessionFinishNotifications();
+  // A silent session surfaces as a toast on the same surface as a finished one.
+  useSilenceNotifications();
   const diagramNotificationList = useDiagramReadyNotificationList();
   const appNotifications = useMemo(
     () =>

@@ -117,3 +117,28 @@ export function isFsPermissionCategory(value: unknown): value is FsPermissionCat
     (FS_PERMISSION_CATEGORIES as readonly string[]).includes(value)
   );
 }
+
+/**
+ * The protected category a path mentioned in some text belongs to, if any.
+ *
+ * Used to point a silence alert at the right privacy pane. Deliberately
+ * conservative: it only claims a category for a path that plainly sits under
+ * one, because offering the wrong row is worse than offering none.
+ */
+export function fsPermissionCategoryFromText(
+  text: string,
+  homeDir: string,
+): FsPermissionCategory | null {
+  const haystack = text.toLowerCase();
+  const home = homeDir.toLowerCase().replace(/\/+$/, "");
+  for (const location of DECLARED_LOCATIONS) {
+    if (!location.homeRelativePath) continue;
+    if (haystack.includes(`${home}/${location.homeRelativePath.toLowerCase()}/`)) {
+      return location.category;
+    }
+  }
+  // A mount point cannot be told apart from a network share by its path alone,
+  // so /Volumes resolves to the removable row and the parent pane covers the rest.
+  if (haystack.includes("/volumes/")) return "removable-volumes";
+  return null;
+}

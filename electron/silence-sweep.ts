@@ -5,6 +5,7 @@ import {
   type SilenceStage,
 } from "./silence-policy";
 import { monotonicNow, type TrackedPty } from "./silence-tracker";
+import type { FsPermissionCategory } from "../src/shared/fs-permission";
 
 /**
  * One sweep over every session, on one interval.
@@ -56,12 +57,38 @@ export type SilenceAlert = {
   awaitingOperator: boolean;
 };
 
+/** One silent session, as the alert describes it to the renderer. */
+export type SilenceAlertSession = {
+  ptyId: string;
+  taskId: string | null;
+  title: string;
+  project: string | null;
+  /** Awake milliseconds of silence when the threshold was crossed. */
+  silentMs: number;
+  /** The operator typed more recently than the session spoke. */
+  awaitingOperator: boolean;
+  /** Stripped recent output. Absent when nothing legible survived. */
+  tail?: string;
+  /** A matched hang signature's fixed advice. */
+  remediation?: string;
+  /** Set when that advice is a privacy block the operator can act on directly. */
+  privacyCategory?: FsPermissionCategory;
+};
+
 export type SilenceSweepDeps = {
   /** Live sessions, enumerated from the managers that own PTY lifecycle. */
   listSessions: () => readonly TrackedPty[];
   /** Session facts most recently pushed by the renderer, keyed by pty id. */
   facts: () => ReadonlyMap<string, SessionFacts>;
   onAlerts: (alerts: SilenceAlert[]) => void;
+  /**
+   * Called at the end of every sweep, whether or not anything alerted.
+   *
+   * A raise skipped because the app was frontmost has to be retried, and the
+   * alert callback fires only on a threshold crossing — so the retry needs a
+   * per-tick hook rather than an alert-shaped one.
+   */
+  onTick?: (state: { sessionsAtHardStage: string[] }) => void;
   now?: () => number;
   intervalMs?: number;
   softThresholdMs?: number;
@@ -77,8 +104,8 @@ type Episode = {
 };
 
 export class SilenceSweep {
-  private readonly deps: Required<Omit<SilenceSweepDeps, "onAlerts">> &
-    Pick<SilenceSweepDeps, "onAlerts">;
+  private readonly deps: Required<Omit<SilenceSweepDeps, "onAlerts" | "onTick">> &
+    Pick<SilenceSweepDeps, "onAlerts" | "onTick">;
   private readonly episodes = new Map<string, Episode>();
   private unavailableTotalMs = 0;
   private lastSweepAt: number | null = null;
@@ -202,6 +229,7 @@ export class SilenceSweep {
     }
 
     if (alerts.length > 0) this.deps.onAlerts(alerts);
+    this.deps.onTick?.({ sessionsAtHardStage: this.sessionsAtHardStage() });
   }
 
   /** Test-only view of the credited unavailable total. */

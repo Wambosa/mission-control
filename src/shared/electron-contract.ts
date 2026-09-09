@@ -2,8 +2,22 @@ import type { AgentCliUpdateRun } from "~/shared/agent-cli-update";
 import type { GitStatus, GitDiff } from "~/shared/git-status";
 import type { SshProbeOutcome, SshProvisionResult } from "~/shared/ssh-provision";
 import type { FsPermissionCategory, FsPermissionRecord } from "~/shared/fs-permission";
+import type { TaskStatus } from "~/shared/domain";
 
 /** Probe outcomes for the protected locations, plus whether they can mean anything here. */
+/** What the renderer knows about one live session, pushed into main. */
+export type SessionFactsEntry = {
+  title: string;
+  project: string | null;
+  /** The task's status. Comes from hook events, never from inspecting output. */
+  status: TaskStatus;
+  /** This session is the visible pane of a focused window. */
+  focused: boolean;
+};
+
+/** Keyed by pty id. */
+export type SessionFactsReport = Record<string, SessionFactsEntry>;
+
 export type FsPermissionsUpdate = {
   records: FsPermissionRecord[];
   resolved: boolean;
@@ -452,6 +466,10 @@ export type ElectronBridge = {
     revealLogs: () => Promise<{ ok: true } | { ok: false; error: string }>;
     /** The log directory's path, for display. */
     logDirectory: () => Promise<string>;
+  };
+  sessionFacts: {
+    /** Report every live session's facts. Sent on change, not on a tick. */
+    report: (facts: SessionFactsReport) => Promise<boolean>;
   };
   fsPermissions: {
     /** Probe outcomes for every declared protected location. */

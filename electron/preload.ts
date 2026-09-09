@@ -28,6 +28,11 @@ export type FsPermissionsSnapshotBridge = {
   supported: boolean;
 };
 
+export type SessionFactsReportBridge = Record<
+  string,
+  { title: string; project: string | null; status: string; focused: boolean }
+>;
+
 export type FsPermissionsUpdateBridge = {
   records: FsPermissionRecord[];
   resolved: boolean;
@@ -543,6 +548,11 @@ const electronAPI = {
       ipcRenderer.invoke(IPC.diagnosticsRevealLogs),
     /** The log directory's path, for display. */
     logDirectory: (): Promise<string> => ipcRenderer.invoke(IPC.diagnosticsLogDirectory),
+  },
+  sessionFacts: {
+    /** Report every live session's facts. Sent on change, not on a tick. */
+    report: (facts: SessionFactsReportBridge): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.sessionFactsReport, facts),
   },
   fsPermissions: {
     /** Probe outcomes for every declared protected location, newest known first. */

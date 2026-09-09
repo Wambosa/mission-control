@@ -52,6 +52,7 @@ import { PtyOutputBatcher } from "./pty-output-batch";
 import {
   TailRing,
   markPtyTransportDown,
+  recordPtyInput,
   recordPtyOutput,
   trackPty,
   untrackPty,
@@ -157,6 +158,16 @@ export function forgetRemotePtyState(ptyId: string): void {
   remotePtyLastInputAt.delete(ptyId);
   remoteTailRings.delete(ptyId);
   untrackPty(ptyId);
+}
+
+/**
+ * Live remote PTY ids.
+ *
+ * Same reason as the local list: ownership is the lifecycle authority and the
+ * silence tracker is a side table, so the sweep asks the owner what exists.
+ */
+export function liveRemotePtyIds(): string[] {
+  return [...ptyOwner.keys()].filter((ptyId) => !isSandboxAgentUpgradePty(ptyId));
 }
 
 /** Test-only: seed the per-PTY state a live remote spawn would have created. */
@@ -1839,6 +1850,7 @@ export function registerSandboxManager(
   );
   safeHandle(IPC.remotePtyWrite, (_e, ptyId: string, data: string, sandboxId?: string | null) => {
     remotePtyLastInputAt.set(ptyId, Date.now());
+    recordPtyInput(ptyId);
     return withOwnerClient(ptyId, sandboxId, (c) => c.write(ptyId, data));
   }, ipcMain);
   safeHandle(IPC.remotePtyResize, (_e, ptyId: string, cols: number, rows: number, sandboxId?: string | null) => {

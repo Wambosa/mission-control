@@ -36,6 +36,10 @@ export const IPC = {
   fsPermissionsGet: "fsPermissions:get",
   fsPermissionsChanged: "fsPermissions:changed",
   fsPermissionsOpenPrivacyPane: "fsPermissions:openPrivacyPane",
+  // The renderer owns session titles, projects, statuses and which pane is
+  // focused; the silence sweep in main consumes them. Same direction as the
+  // battery-saver and spellcheck pushes.
+  sessionFactsReport: "sessionFacts:report",
   appSetBackgroundColor: "app:setBackgroundColor",
   powerGetOnBattery: "power:getOnBattery",
   powerOnBatteryChange: "power:on-battery-change",

@@ -22,6 +22,7 @@ import { useNavigationSwipe } from "~/lib/use-navigation-swipe";
 import { THEME_CACHE_KEY, useTheme } from "~/lib/use-theme";
 import { usePowerSaveController } from "~/lib/power-save";
 import { useWindowIdleController } from "~/lib/window-idle";
+import { SessionFactsReporter } from "~/lib/session-facts-reporter";
 import {
   TerminalProvider,
   useTerminals,
@@ -258,6 +259,10 @@ function RootComponent() {
                        */}
                       <ClientOnly fallback={null}>
                         <Shell />
+                        {/* Pushes session titles, statuses and the focused pane
+                         * into main, which owns the silence decision. Mounted
+                         * beside Shell so it survives focus mode's early return. */}
+                        <SessionFactsReporter />
                         {/* Sibling of Shell so the pet controller mounts once
                          * and survives Shell's focus-mode early return. */}
                         <Suspense fallback={null}>

@@ -23,7 +23,12 @@ import * as nodeNet from "node:net";
 import * as readline from "node:readline";
 import * as os from "node:os";
 import { spawn, ChildProcess, spawnSync } from "node:child_process";
-import { registerPtyHandlers, killAllPtys, drainPtyTranscripts } from "./pty-manager";
+import {
+  registerPtyHandlers,
+  killAllPtys,
+  drainPtyTranscripts,
+  liveLocalPtyIds,
+} from "./pty-manager";
 import { formatRendererConsoleLine, rendererLogMethod } from "./renderer-console-log";
 import { createServerOutputForwarder } from "./server-output-forwarder";
 import { registerDiagnosticsHandlers } from "./diagnostics-handlers";
@@ -34,6 +39,9 @@ import {
 } from "./fs-permission-preflight";
 import { recordFsPermissionOutcomes } from "./fs-permission-state";
 import { openPrivacyPane } from "./privacy-pane";
+import { SilenceSweep } from "./silence-sweep";
+import { getTrackedPty, type TrackedPty } from "./silence-tracker";
+import type { SessionFacts } from "./silence-policy";
 import { setPtyStreamHidden, setPtyStreamPowerSave } from "./pty-output-batch";
 import { setAppThemeFromBackground } from "./app-theme";
 import { registerFileHandlers, disposeAllFileWatchers } from "./file-handlers";
@@ -46,6 +54,7 @@ import {
   registerSandboxManager,
   disposeSandboxManager,
   agentCliUpdateTargetFor,
+  liveRemotePtyIds,
 } from "./sandbox-manager";
 import {
   disposeApiTokenStore,
@@ -1920,6 +1929,47 @@ safeHandle(IPC.fsPermissionsGet, async () => ({
   supported: process.platform === "darwin",
 }));
 
+/**
+ * Session facts pushed by the renderer, and the sweep that consumes them.
+ *
+ * The renderer owns titles, projects, statuses and which pane is focused; main
+ * owns output timing and the decision. The focused-pane fact in particular has
+ * no other source — neither main nor the server knows which terminal the
+ * operator is looking at.
+ */
+const sessionFacts = new Map<string, SessionFacts>();
+
+safeHandle(IPC.sessionFactsReport, (_evt, report: unknown) => {
+  if (!report || typeof report !== "object") return false;
+  sessionFacts.clear();
+  for (const [ptyId, entry] of Object.entries(report as Record<string, SessionFacts>)) {
+    if (entry && typeof entry === "object") sessionFacts.set(ptyId, entry);
+  }
+  return true;
+});
+
+const silenceSweep = new SilenceSweep({
+  // Enumerated from the two managers that own PTY lifecycle, never from the
+  // tracker: a missed teardown there must not become a phantom session here.
+  listSessions: () =>
+    [...liveLocalPtyIds(), ...liveRemotePtyIds()]
+      .map((ptyId) => getTrackedPty(ptyId))
+      .filter((entry): entry is TrackedPty => entry !== undefined),
+  facts: () => sessionFacts,
+  onAlerts: (alerts) => {
+    for (const alert of alerts) {
+      log.info("session.silent", {
+        event: "session.silent",
+        ptyId: alert.ptyId,
+        taskId: alert.taskId,
+        stage: alert.stage,
+        silentMs: Math.round(alert.silentMs),
+        awaitingOperator: alert.awaitingOperator,
+      });
+    }
+  },
+});
+
 safeHandle(IPC.fsPermissionsOpenPrivacyPane, async (_evt, category: unknown) =>
   openPrivacyPane(category, {
     platform: process.platform,
@@ -2253,6 +2303,11 @@ app.whenReady().then(() => {
     session.defaultSession.setSpellCheckerEnabled(enabled === true);
     return true;
   });
+  // Silence detection. Registered here because powerMonitor is only usable
+  // after 'ready', and the resume event is what classifies a sweep gap as the
+  // machine having been away rather than the app having stalled.
+  powerMonitor.on("resume", () => silenceSweep.noteSystemResume());
+  silenceSweep.start();
   registerProjectImageProtocol();
   registerFocusMode(() => win, missionControlUserDataDir, {
     width: MAIN_WINDOW_MIN_WIDTH,

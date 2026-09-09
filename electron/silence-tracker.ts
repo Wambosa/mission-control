@@ -32,6 +32,16 @@ export type TrackedPty = {
   transportDown: boolean;
   /** Monotonic milliseconds. Never subtract a wall-clock stamp from this. */
   lastOutputMonotonicMs: number;
+  /**
+   * When the operator last typed into this session, on the SAME monotonic
+   * clock as the output stamp.
+   *
+   * Both managers already keep a wall-clock input stamp for the battery-saver
+   * pump. This is a second one rather than a reuse precisely so the two can be
+   * compared: subtracting a wall-clock stamp from a monotonic one produces a
+   * number that looks plausible and means nothing.
+   */
+  lastInputMonotonicMs: number;
 };
 
 export type TrackedPtyInit = {
@@ -76,6 +86,7 @@ export function trackPty(ptyId: string, init: TrackedPtyInit): void {
     sandboxInternal: init.sandboxInternal ?? false,
     transportDown: false,
     lastOutputMonotonicMs: init.at ?? monotonicNow(),
+    lastInputMonotonicMs: 0,
     readTail: init.readTail,
   });
 }
@@ -95,6 +106,12 @@ export function recordPtyOutput(ptyId: string, at: number = monotonicNow()): voi
   entry.lastOutputMonotonicMs = at;
   // Output arriving is proof the transport came back.
   if (entry.transportDown) entry.transportDown = false;
+}
+
+/** Note a renderer keystroke, on the output stamp's clock. */
+export function recordPtyInput(ptyId: string, at: number = monotonicNow()): void {
+  const entry = tracked.get(ptyId);
+  if (entry) entry.lastInputMonotonicMs = at;
 }
 
 export function untrackPty(ptyId: string): void {

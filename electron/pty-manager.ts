@@ -13,6 +13,7 @@ import {
 } from "./fs-permission-preflight";
 import { runSessionScaffolding, unreadableCwdNotice } from "./session-scaffolding";
 import {
+  recordPtyInput,
   recordPtyOutput,
   trackPty,
   untrackPty,
@@ -900,6 +901,7 @@ export function registerPtyHandlers(
     const p = ptys.get(ptyId);
     if (!p) return false;
     p.lastInputAt = Date.now();
+    recordPtyInput(ptyId);
     p.proc.write(data);
     return true;
   }, ipcMain);
@@ -986,6 +988,17 @@ export function disposeAllPtys(
     disposePty(proc, { silent: true });
   }
   log.info("pty.killAll.end", { event: "pty.killAll.end", live });
+}
+
+/**
+ * Live local PTY ids.
+ *
+ * The silence sweep enumerates from here rather than from the tracker, so a
+ * missed teardown in the tracker cannot turn a stale entry into a phantom
+ * session. This map is the lifecycle authority; the tracker is a side table.
+ */
+export function liveLocalPtyIds(): string[] {
+  return [...ptys.keys()];
 }
 
 export function killAllPtys() {

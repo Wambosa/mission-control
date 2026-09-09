@@ -48,6 +48,7 @@ function harness(
   const installHooks = vi.fn();
   const ensureStatuslineTap = vi.fn();
   const installMemoryBrief = vi.fn(async () => {});
+  const installPermissionNote = vi.fn(async () => {});
   const fetchRecallEnabled = vi.fn(async () => null as boolean | null);
 
   const deps: SessionScaffoldingDeps = {
@@ -57,6 +58,7 @@ function harness(
     installHooks,
     ensureStatuslineTap,
     installMemoryBrief,
+    installPermissionNote,
     ...depOverrides,
   };
 
@@ -69,11 +71,20 @@ function harness(
       mcEnv: null,
       petEnabled: true,
       isAgentSession: true,
+      fsPermissionRecords: [],
       ...params,
       deps,
     });
 
-  return { run, calls, installHooks, ensureStatuslineTap, installMemoryBrief, fetchRecallEnabled };
+  return {
+    run,
+    calls,
+    installHooks,
+    ensureStatuslineTap,
+    installMemoryBrief,
+    installPermissionNote,
+    fetchRecallEnabled,
+  };
 }
 
 describe("blocksScaffolding", () => {
@@ -122,6 +133,7 @@ describe("runSessionScaffolding", () => {
     expect(h.fetchRecallEnabled).not.toHaveBeenCalled();
     expect(h.ensureStatuslineTap).not.toHaveBeenCalled();
     expect(h.installMemoryBrief).not.toHaveBeenCalled();
+    expect(h.installPermissionNote).not.toHaveBeenCalled();
   });
 
   it("issues nothing for a filesystem block or an unanswered probe either", async () => {

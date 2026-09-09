@@ -8,6 +8,7 @@ import { getAppTheme } from "./app-theme";
 import { getBooleanAppSetting } from "./app-settings-store";
 import {
   awaitFsPermissionPreflight,
+  currentFsPermissionRecords,
   isFsPermissionPreflightResolved,
 } from "./fs-permission-preflight";
 import { runSessionScaffolding, unreadableCwdNotice } from "./session-scaffolding";
@@ -697,6 +698,7 @@ export function registerPtyHandlers(
         mcEnv,
         petEnabled,
         isAgentSession: plan.mode === "agent",
+        fsPermissionRecords: currentFsPermissionRecords(app.getPath("userData")),
       });
 
       // Theme hint for the agent: prefer main's authoritative app theme over

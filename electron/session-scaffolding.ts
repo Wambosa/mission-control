@@ -1,5 +1,6 @@
 import { installAgentHooks } from "./agent-hooks";
 import { installAgentMemoryBrief } from "./agent-memory-brief";
+import { installBlockedLocationNote } from "./blocked-location-note";
 import { ensureDiagramSkillForAgent } from "./ensure-diagram-skill";
 import { ensureRecallMcpForAgent, removeRecallMcpForAgent } from "./ensure-recall-mcp";
 import { ensureRecallSkillForAgent, removeRecallSkillForAgent } from "./ensure-recall-skill";
@@ -9,7 +10,7 @@ import type { PtyHookEnv } from "./pty-hook-env";
 import { fetchRecallEnabled as defaultFetchRecallEnabled } from "./recall-enabled";
 import { ensureStatuslineTap } from "../src/shared/statusline-tap";
 import type { TaskAgent } from "../src/shared/domain";
-import type { FsPermissionOutcome } from "../src/shared/fs-permission";
+import type { FsPermissionOutcome, FsPermissionRecord } from "../src/shared/fs-permission";
 import type { ScaffoldingFs } from "../src/shared/scaffolding-fs";
 
 /**
@@ -50,6 +51,7 @@ export type SessionScaffoldingDeps = {
   installHooks: typeof installAgentHooks;
   ensureStatuslineTap: (cwd: string) => void;
   installMemoryBrief: typeof installAgentMemoryBrief;
+  installPermissionNote: typeof installBlockedLocationNote;
 };
 
 export type SessionScaffoldingParams = {
@@ -61,6 +63,8 @@ export type SessionScaffoldingParams = {
   petEnabled: boolean;
   /** Shell terminals get hooks only; the agent scaffolding does not apply. */
   isAgentSession: boolean;
+  /** What the last check of each protected location found, for the agent note. */
+  fsPermissionRecords: readonly FsPermissionRecord[];
   deps?: Partial<SessionScaffoldingDeps>;
 };
 
@@ -89,6 +93,7 @@ export async function runSessionScaffolding(
   const installHooks = params.deps?.installHooks ?? installAgentHooks;
   const statuslineTap = params.deps?.ensureStatuslineTap ?? ensureStatuslineTap;
   const memoryBrief = params.deps?.installMemoryBrief ?? installAgentMemoryBrief;
+  const permissionNote = params.deps?.installPermissionNote ?? installBlockedLocationNote;
 
   const outcome = await probeCwd(cwd);
   if (blocksScaffolding(outcome)) return { ran: false, reason: outcome };
@@ -123,6 +128,11 @@ export async function runSessionScaffolding(
   // Recall — inject the project's Session Brief into the agent's auto-load file
   // BEFORE spawning so the agent reads current project memory on startup.
   await memoryBrief({ agent, cwd, taskId, mcEnv, fs });
+
+  // A separate block in the same file. Order matters only in that the note is
+  // written after the brief, so a failed brief fetch (which clears the brief's
+  // block) cannot be mistaken for having cleared this one.
+  await permissionNote({ agent, cwd, records: params.fsPermissionRecords, fs });
 
   return { ran: true };
 }

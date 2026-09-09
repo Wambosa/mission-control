@@ -28,15 +28,11 @@ import { formatRendererConsoleLine, rendererLogMethod } from "./renderer-console
 import { createServerOutputForwarder } from "./server-output-forwarder";
 import { registerDiagnosticsHandlers } from "./diagnostics-handlers";
 import {
-  fsPermissionPreflightRecords,
+  currentFsPermissionRecords,
   isFsPermissionPreflightResolved,
   startFsPermissionPreflight,
 } from "./fs-permission-preflight";
-import {
-  mergeFsPermissionRecords,
-  readFsPermissionRecords,
-  recordFsPermissionOutcomes,
-} from "./fs-permission-state";
+import { recordFsPermissionOutcomes } from "./fs-permission-state";
 import { openPrivacyPane } from "./privacy-pane";
 import { setPtyStreamHidden, setPtyStreamPowerSave } from "./pty-output-batch";
 import { setAppThemeFromBackground } from "./app-theme";
@@ -1919,12 +1915,7 @@ registerDiagnosticsHandlers(ipcMain, () => win, {
  * a previous build legible as stale.
  */
 safeHandle(IPC.fsPermissionsGet, async () => ({
-  records: isFsPermissionPreflightResolved()
-    ? fsPermissionPreflightRecords()
-    : mergeFsPermissionRecords(
-        readFsPermissionRecords(missionControlUserDataDir),
-        fsPermissionPreflightRecords(),
-      ),
+  records: currentFsPermissionRecords(missionControlUserDataDir),
   resolved: isFsPermissionPreflightResolved(),
   supported: process.platform === "darwin",
 }));

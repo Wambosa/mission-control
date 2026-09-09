@@ -1,4 +1,5 @@
 import { createProbeDeps, probeDeclaredLocationQueued } from "./fs-permission-probe";
+import { mergeFsPermissionRecords, readFsPermissionRecords } from "./fs-permission-state";
 import {
   DECLARED_LOCATIONS,
   type FsPermissionCategory,
@@ -186,4 +187,18 @@ export function startFsPermissionPreflight(overrides: Partial<PreflightDeps> = {
     clearTimeout(deadline);
     finish();
   })();
+}
+
+/**
+ * The truest view available right now: this launch's sweep where it has
+ * answered, and what an earlier launch recorded everywhere else.
+ *
+ * Both readers need the same answer — the Diagnostics rows and the note written
+ * into a session's context — and a session spawned mid-sweep must not be told
+ * "never checked" about a location a previous launch found blocked.
+ */
+export function currentFsPermissionRecords(userDataDir: string): FsPermissionRecord[] {
+  const live = fsPermissionPreflightRecords();
+  if (state.resolved) return live;
+  return mergeFsPermissionRecords(readFsPermissionRecords(userDataDir), live);
 }

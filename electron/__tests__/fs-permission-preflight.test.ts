@@ -4,6 +4,7 @@ import {
   awaitFsPermissionPreflight,
   fsPermissionPreflightRecords,
   isFsPermissionPreflightResolved,
+  reprobePendingFsPermissions,
   startFsPermissionPreflight,
   type PreflightDeps,
 } from "../fs-permission-preflight";
@@ -187,5 +188,56 @@ describe("fs-permission pre-flight sweep", () => {
     });
     await Promise.resolve();
     expect(resolvedSynchronously).toBe(true);
+  });
+});
+
+describe("re-probing after the deadline", () => {
+  it("picks up an answer the operator gave after the sweep gave up", async () => {
+    // The live failure this exists for: the queued probe resolves `pending` at
+    // its own deadline, so when the enumeration finally returns nobody is
+    // listening. Without asking again, the app sits on "no answer" for the
+    // rest of the launch while access has in fact been granted.
+    vi.useFakeTimers();
+    let answered = false;
+    const recordOutcomes = vi.fn();
+    startFsPermissionPreflight(
+      deps({
+        recordOutcomes,
+        probeLocation: async () => (answered ? "readable" : "pending"),
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    await awaitFsPermissionPreflight();
+    expect(fsPermissionPreflightRecords().every((r) => r.outcome === "pending")).toBe(true);
+
+    answered = true;
+    vi.useRealTimers();
+    await reprobePendingFsPermissions();
+
+    expect(fsPermissionPreflightRecords().every((r) => r.outcome === "readable")).toBe(true);
+    expect(recordOutcomes).toHaveBeenCalled();
+  });
+
+  it("never writes `pending` down, so it cannot bury a recorded block", async () => {
+    const recordOutcomes = vi.fn();
+    startFsPermissionPreflight(
+      deps({ recordOutcomes, probeLocation: async () => "pending" }),
+    );
+    await awaitFsPermissionPreflight();
+    await reprobePendingFsPermissions();
+
+    for (const [outcomes] of recordOutcomes.mock.calls) {
+      expect(outcomes).toEqual([]);
+    }
+  });
+
+  it("does nothing when every category already answered", async () => {
+    const probeLocation = vi.fn(async () => "readable" as FsPermissionOutcome);
+    startFsPermissionPreflight(deps({ probeLocation }));
+    await awaitFsPermissionPreflight();
+    probeLocation.mockClear();
+
+    await reprobePendingFsPermissions();
+    expect(probeLocation).not.toHaveBeenCalled();
   });
 });

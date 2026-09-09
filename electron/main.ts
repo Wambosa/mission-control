@@ -35,6 +35,7 @@ import { registerDiagnosticsHandlers } from "./diagnostics-handlers";
 import {
   currentFsPermissionRecords,
   isFsPermissionPreflightResolved,
+  reprobePendingFsPermissions,
   startFsPermissionPreflight,
 } from "./fs-permission-preflight";
 import { recordFsPermissionOutcomes } from "./fs-permission-state";
@@ -1274,7 +1275,12 @@ async function createWindow() {
     },
   });
 
-  win.on("focus", () => attentionSignal.clear());
+  win.on("focus", () => {
+    attentionSignal.clear();
+    // Coming back to the app is the likeliest moment to have just answered a
+    // consent dialog somewhere else on screen.
+    void reprobePendingFsPermissions();
+  });
 
   win.once("ready-to-show", () => {
     win?.show();
@@ -1935,11 +1941,16 @@ registerDiagnosticsHandlers(ipcMain, () => win, {
  * what a launch before this one left behind, which is what makes a grant from
  * a previous build legible as stale.
  */
-safeHandle(IPC.fsPermissionsGet, async () => ({
-  records: currentFsPermissionRecords(missionControlUserDataDir),
-  resolved: isFsPermissionPreflightResolved(),
-  supported: process.platform === "darwin",
-}));
+safeHandle(IPC.fsPermissionsGet, async () => {
+  // Opening Diagnostics is the operator asking what the state is, which is
+  // exactly the moment to find out rather than repeat a stale "no answer".
+  await reprobePendingFsPermissions();
+  return {
+    records: currentFsPermissionRecords(missionControlUserDataDir),
+    resolved: isFsPermissionPreflightResolved(),
+    supported: process.platform === "darwin",
+  };
+});
 
 /**
  * Session facts pushed by the renderer, and the sweep that consumes them.

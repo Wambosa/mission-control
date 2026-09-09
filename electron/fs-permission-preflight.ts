@@ -60,6 +60,9 @@ type PreflightState = {
   checkedAt: number | null;
   gate: Promise<void>;
   openGate: () => void;
+  /** Retained so a re-probe can reuse the sweep's own probe and store. */
+  deps: PreflightDeps | null;
+  reprobing: boolean;
 };
 
 function freshState(): PreflightState {
@@ -67,7 +70,16 @@ function freshState(): PreflightState {
   const gate = new Promise<void>((resolve) => {
     openGate = resolve;
   });
-  return { started: false, resolved: false, outcomes: new Map(), checkedAt: null, gate, openGate };
+  return {
+    started: false,
+    resolved: false,
+    outcomes: new Map(),
+    checkedAt: null,
+    gate,
+    openGate,
+    deps: null,
+    reprobing: false,
+  };
 }
 
 let state = freshState();
@@ -122,6 +134,7 @@ export function startFsPermissionPreflight(overrides: Partial<PreflightDeps> = {
   };
 
   const local = state;
+  local.deps = deps;
   const publish = () => {
     local.checkedAt = deps.now();
     try {
@@ -208,4 +221,72 @@ export function currentFsPermissionRecords(userDataDir: string): FsPermissionRec
   // better than none -- carrying its own older timestamp, so it reads as the
   // stale claim it is.
   return mergeFsPermissionRecords(readFsPermissionRecords(userDataDir), fsPermissionPreflightRecords());
+}
+
+/** Categories that still have no answer: the sweep gave up, or never asked. */
+function unansweredLocations(): DeclaredLocation[] {
+  return DECLARED_LOCATIONS.filter((location) => {
+    const outcome = state.outcomes.get(location.category);
+    return outcome === undefined || outcome === "pending";
+  });
+}
+
+/**
+ * Ask again for the categories that never answered.
+ *
+ * The sweep resolves at its deadline with those marked `pending`, and that has
+ * to be final for the sweep — a session cannot wait on a dialog forever. But
+ * `pending` is not an answer, and the operator answering the prompt a minute
+ * later is the normal case, not an edge one: the prompt can surface on a second
+ * display or behind another app.
+ *
+ * Nothing notices that on its own. The queued probe resolved `pending` at its
+ * own deadline, so when the underlying enumeration finally returns there is no
+ * longer anyone listening — the app would sit on "no answer" for the rest of
+ * the launch while the operator had in fact granted access. Asking again is
+ * what closes that loop, and it is nearly free: only unanswered categories are
+ * re-probed, through the same one-in-flight chain, and a still-unanswered
+ * prompt simply stays pending.
+ */
+export async function reprobePendingFsPermissions(): Promise<void> {
+  const deps = state.deps;
+  if (!deps || !state.started || state.reprobing) return;
+  const pending = unansweredLocations();
+  if (pending.length === 0) return;
+
+  const local = state;
+  local.reprobing = true;
+  try {
+    let learned = false;
+    for (const location of pending) {
+      let outcome: FsPermissionOutcome;
+      try {
+        outcome = await deps.probeLocation(location);
+      } catch {
+        outcome = "never-probed";
+      }
+      if (outcome === "pending") continue;
+      local.outcomes.set(location.category, outcome);
+      local.checkedAt = deps.now();
+      learned = true;
+    }
+    if (!learned) return;
+    try {
+      deps.recordOutcomes(
+        [...local.outcomes]
+          .filter(([, outcome]) => outcome !== "pending")
+          .map(([category, outcome]) => ({ category, outcome })),
+        local.checkedAt ?? deps.now(),
+      );
+    } catch {
+      /* the store is a convenience here */
+    }
+    try {
+      deps.onUpdate?.(fsPermissionPreflightRecords());
+    } catch {
+      /* a renderer push must never break a re-probe */
+    }
+  } finally {
+    local.reprobing = false;
+  }
 }

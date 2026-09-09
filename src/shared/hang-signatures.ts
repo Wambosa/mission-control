@@ -132,6 +132,11 @@ function matches(entry: HangSignatureEntry, haystack: string): boolean {
   if ("literals" in entry.match) {
     return entry.match.literals.some((literal) => haystack.includes(literal));
   }
+  // The entry holds one long-lived RegExp. A `g` or `y` flag would make `test`
+  // advance `lastIndex` and match only every other call -- alerts losing their
+  // remediation on alternating sweeps, with no error anywhere. The shape tests
+  // reject those flags; this makes the object stateless regardless.
+  entry.match.pattern.lastIndex = 0;
   return entry.match.pattern.test(haystack);
 }
 

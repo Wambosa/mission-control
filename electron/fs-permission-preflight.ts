@@ -133,7 +133,14 @@ export function startFsPermissionPreflight(overrides: Partial<PreflightDeps> = {
   const persist = () => {
     try {
       deps.recordOutcomes(
-        [...local.outcomes].map(([category, outcome]) => ({ category, outcome })),
+        // `pending` is this launch's runtime state, not an answer. Writing it
+        // down would overwrite a previous launch's recorded `privacy-blocked`
+        // with "we did not hear back", losing knowledge the app had and
+        // silently dropping the agent note and the privacy jump that depend
+        // on it.
+        [...local.outcomes]
+          .filter(([, outcome]) => outcome !== "pending")
+          .map(([category, outcome]) => ({ category, outcome })),
         local.checkedAt ?? deps.now(),
       );
     } catch {
@@ -196,7 +203,9 @@ export function startFsPermissionPreflight(overrides: Partial<PreflightDeps> = {
  * "never checked" about a location a previous launch found blocked.
  */
 export function currentFsPermissionRecords(userDataDir: string): FsPermissionRecord[] {
-  const live = fsPermissionPreflightRecords();
-  if (state.resolved) return live;
-  return mergeFsPermissionRecords(readFsPermissionRecords(userDataDir), live);
+  // Always merged, resolved or not: a category the sweep gave up on is
+  // `pending`, which is not an answer, and a previous launch's real answer is
+  // better than none -- carrying its own older timestamp, so it reads as the
+  // stale claim it is.
+  return mergeFsPermissionRecords(readFsPermissionRecords(userDataDir), fsPermissionPreflightRecords());
 }

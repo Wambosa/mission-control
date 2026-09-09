@@ -170,8 +170,15 @@ export class TailRing {
 
   push(data: string): void {
     if (!data) return;
-    const bytes = Buffer.byteLength(data, "utf8");
-    this.chunks.push({ data, bytes });
+    // A single write can be far larger than the whole ring — an agent dumping a
+    // file, or `cat` on a build log. Keeping it whole would pin it for the
+    // PTY's lifetime and leave the tail permanently stale, since every later
+    // chunk would be evicted the moment it arrived. Only its end was ever
+    // recent output anyway.
+    const trimmed =
+      Buffer.byteLength(data, "utf8") > this.limitBytes ? data.slice(-this.limitBytes) : data;
+    const bytes = Buffer.byteLength(trimmed, "utf8");
+    this.chunks.push({ data: trimmed, bytes });
     this.totalBytes += bytes;
     while (this.totalBytes > this.limitBytes && this.chunks.length > 1) {
       this.totalBytes -= this.chunks.shift()!.bytes;

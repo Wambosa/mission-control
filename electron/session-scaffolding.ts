@@ -35,8 +35,17 @@ import { nodeScaffoldingFs, type ScaffoldingFs } from "../src/shared/scaffolding
  *
  * The asynchronous conversion is the second layer, for the window between the
  * probe and the reads. A lint rule bans synchronous filesystem calls in this
- * module and the helpers it drives, so the next scaffolding step added here
- * cannot quietly reintroduce the freeze.
+ * module and the async helpers it drives, so the next one added there cannot
+ * quietly reintroduce the freeze.
+ *
+ * Two steps are NOT covered by that rule and are still synchronous:
+ * `installAgentHooks` and `ensureStatuslineTap`, which read and write a
+ * settings file under the cwd through `src/shared/json-settings-file.ts`. They
+ * are protected by the probe above and nothing else, so a grant revoked in the
+ * window between the probe and the call can still block the main thread.
+ * Converting them reaches into shared modules the server's tests also drive,
+ * which is why it has not been done here — but do not read the rule as
+ * covering them.
  */
 
 export type SessionScaffoldingResult =

@@ -228,8 +228,19 @@ export class SilenceSweep {
       if (!live.has(ptyId)) this.episodes.delete(ptyId);
     }
 
-    if (alerts.length > 0) this.deps.onAlerts(alerts);
-    this.deps.onTick?.({ sessionsAtHardStage: this.sessionsAtHardStage() });
+    // Both callbacks reach out of this module -- to the renderer, to the dock,
+    // to the settings store. A throw from any of them would escape the interval
+    // as an uncaught main-process exception and end detection for the session.
+    try {
+      if (alerts.length > 0) this.deps.onAlerts(alerts);
+    } catch {
+      /* an alert that could not be delivered must not stop the next sweep */
+    }
+    try {
+      this.deps.onTick?.({ sessionsAtHardStage: this.sessionsAtHardStage() });
+    } catch {
+      /* same */
+    }
   }
 
   /** Test-only view of the credited unavailable total. */

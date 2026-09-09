@@ -133,9 +133,14 @@ export function fsPermissionCategoryFromText(
   const home = homeDir.toLowerCase().replace(/\/+$/, "");
   for (const location of DECLARED_LOCATIONS) {
     if (!location.homeRelativePath) continue;
-    if (haystack.includes(`${home}/${location.homeRelativePath.toLowerCase()}/`)) {
-      return location.category;
-    }
+    const prefix = `${home}/${location.homeRelativePath.toLowerCase()}`;
+    const at = haystack.indexOf(prefix);
+    if (at === -1) continue;
+    // The path may continue into the folder or stop at it — the commonest real
+    // error names the folder itself and then quotes or ends the line. What must
+    // not match is a longer sibling name like `Documents-old`.
+    const next = haystack[at + prefix.length];
+    if (next === undefined || !/[a-z0-9_-]/.test(next)) return location.category;
   }
   // A mount point cannot be told apart from a network share by its path alone,
   // so /Volumes resolves to the removable row and the parent pane covers the rest.

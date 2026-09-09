@@ -137,15 +137,22 @@ describe("TailRing", () => {
     expect(Buffer.byteLength(out, "utf8")).toBeLessThanOrEqual(10);
   });
 
-  it("keeps a single oversized chunk rather than dropping everything", () => {
+  it("trims a single oversized chunk to the bound rather than pinning it", () => {
+    // Left whole it would sit there for the PTY's lifetime and evict every
+    // later chunk on arrival, so the tail would stop reflecting recent output
+    // at exactly the point an alert needs it.
     const ring = new TailRing(4);
     ring.push("a much longer line than the bound");
-    expect(ring.read()).toBe("a much longer line than the bound");
+    expect(ring.read()).toBe("ound");
+
+    ring.push("xy");
+    expect(ring.read()).toBe("xy");
   });
 
   it("defaults to the extractor's scan cap, so it never holds bytes that get thrown away", () => {
     const ring = new TailRing();
     ring.push("x".repeat(REMOTE_TAIL_LIMIT_BYTES * 2));
+    expect(Buffer.byteLength(ring.read(), "utf8")).toBe(REMOTE_TAIL_LIMIT_BYTES);
     ring.push("y");
     expect(ring.read()).toBe("y");
   });

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __resetProbeQueueForTests,
+  __stuckProbeCountForTests,
   classifyProbeError,
   mountedVolumesOfClass,
   parseMountEntries,
@@ -207,14 +208,42 @@ describe("probeDirectoryQueued", () => {
     await expect(second).resolves.toBe("readable");
   });
 
-  it("reports pending rather than waiting forever behind a probe that never settles", async () => {
-    // The blocked probe deliberately keeps its slot: a consent prompt has no
-    // timeout and an abort signal cannot cancel a syscall already in flight.
-    // What must not happen is the caller waiting on it indefinitely.
-    void probeDirectoryQueued("/blocked", () => new Promise<never>(() => {}));
+  it("lets a later probe through once a stuck one passes its deadline", async () => {
+    // The stuck probe keeps its thread -- a consent prompt has no timeout and
+    // an abort signal cannot cancel a syscall already in flight. What must not
+    // happen is it parking every later probe in the process behind it: a
+    // session whose directory reads perfectly well would then be told its
+    // working directory is unreadable, for the life of the app.
+    void probeDirectoryQueued("/blocked", () => new Promise<never>(() => {}), {
+      deadlineMs: 10,
+    });
     await expect(
-      probeDirectoryQueued("/behind-it", async () => [], { deadlineMs: 20 }),
-    ).resolves.toBe("pending");
+      probeDirectoryQueued("/readable", async () => [], { deadlineMs: 200 }),
+    ).resolves.toBe("readable");
+  });
+
+  it("counts a probe abandoned at its deadline as still holding a thread", async () => {
+    expect(__stuckProbeCountForTests()).toBe(0);
+    void probeDirectoryQueued("/blocked", () => new Promise<never>(() => {}), {
+      deadlineMs: 10,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(__stuckProbeCountForTests()).toBe(1);
+  });
+
+  it("stops issuing syscalls once enough probes are known to be stuck", async () => {
+    // The pool is four threads. Past a couple held, refusing to probe and
+    // saying so beats consuming the pool to find out.
+    for (let i = 0; i < 2; i += 1) {
+      void probeDirectoryQueued(`/blocked-${i}`, () => new Promise<never>(() => {}), {
+        deadlineMs: 10,
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    const readdir = vi.fn(async () => []);
+    await expect(probeDirectoryQueued("/anywhere", readdir)).resolves.toBe("pending");
+    expect(readdir).not.toHaveBeenCalled();
   });
 
   it("reports pending for a probe of its own that outlives the deadline", async () => {

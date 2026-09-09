@@ -134,6 +134,19 @@ const REMOTE_PTY_INTERACTIVE_WINDOW_MS = 10_000;
 // the case where the alert matters most.
 const remoteTailRings = new Map<string, TailRing>();
 
+/**
+ * Remote PTYs whose connection dropped with no exit event coming.
+ *
+ * They are unreachable, not silent, and the difference has to be *observable* —
+ * clearing their state outright would suppress their alerts by making them
+ * vanish, which looks the same from outside but leaves nothing able to say why.
+ * Keeping the ids here lets the sweep still see them and report the reason,
+ * while the ownership and timing maps they no longer need are released.
+ * Cleared on kill and when the sandbox reconnects, so it cannot grow without
+ * bound the way those maps did.
+ */
+const remotePtyTransportDown = new Set<string>();
+
 // Phase 2: one remote agent connection per sandbox. The registry owns the
 // per-sandbox state machine (sandbox-registry.ts); this module supplies the
 // agent side effects and routes IPC.
@@ -157,6 +170,7 @@ export function forgetRemotePtyState(ptyId: string): void {
   ptyOwner.delete(ptyId);
   remotePtyLastInputAt.delete(ptyId);
   remoteTailRings.delete(ptyId);
+  remotePtyTransportDown.delete(ptyId);
   untrackPty(ptyId);
 }
 
@@ -167,7 +181,9 @@ export function forgetRemotePtyState(ptyId: string): void {
  * silence tracker is a side table, so the sweep asks the owner what exists.
  */
 export function liveRemotePtyIds(): string[] {
-  return [...ptyOwner.keys()].filter((ptyId) => !isSandboxAgentUpgradePty(ptyId));
+  return [...ptyOwner.keys(), ...remotePtyTransportDown].filter(
+    (ptyId) => !isSandboxAgentUpgradePty(ptyId),
+  );
 }
 
 /** Test-only: seed the per-PTY state a live remote spawn would have created. */
@@ -207,9 +223,21 @@ export function __pushRemoteTailForTests(ptyId: string, data: string): void {
 export function releaseRemotePtysForSandbox(sandboxId: string): void {
   for (const [ptyId, owner] of [...ptyOwner]) {
     if (owner !== sandboxId) continue;
+    // Mark first and keep the tracker entry: the sweep has to be able to see
+    // this session and report it unreachable. Only the routing and timing
+    // state -- the part that leaked, because no exit event is coming -- goes.
     markPtyTransportDown(ptyId);
-    forgetRemotePtyState(ptyId);
+    remotePtyTransportDown.add(ptyId);
+    ptyOwner.delete(ptyId);
+    remotePtyLastInputAt.delete(ptyId);
+    remoteTailRings.delete(ptyId);
   }
+}
+
+/** The sandbox is back: its previously-dropped PTYs are no longer anyone's problem. */
+function clearTransportDownForSandbox(): void {
+  for (const ptyId of remotePtyTransportDown) untrackPty(ptyId);
+  remotePtyTransportDown.clear();
 }
 
 const AGENT_UPGRADE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -397,6 +425,7 @@ function connectAgent(
   });
   const client = new SandboxAgentClient(agentUrl, token, {
     onReady: (version, agents) => {
+      clearTransportDownForSandbox();
       cb.onReady(version, agents);
       const agentVersionCurrent = isSandboxAgentVersionCurrent(version);
       log.info("sandbox.agent-creds.connect", {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useRouterState } from "@tanstack/react-router";
 import { getElectron } from "~/lib/electron";
 import { useTerminals } from "~/lib/terminal-store";
 import type { SessionFactsReport } from "~/shared/electron-contract";
@@ -41,15 +42,38 @@ function useWindowFocused(): boolean {
   return focused;
 }
 
+/** The project whose panel is on screen, from the route. */
+function useVisibleProjectId(): string | null {
+  return useRouterState({
+    select: (state) => {
+      const match = /^\/projects\/([^/?#]+)/.exec(state.location.pathname);
+      return match ? decodeURIComponent(match[1]) : null;
+    },
+  });
+}
+
 export function SessionFactsReporter() {
   const { sessions, activeFor } = useTerminals();
   const windowFocused = useWindowFocused();
+  const visibleProjectId = useVisibleProjectId();
+
+  /**
+   * Exactly one session can be the one the operator is looking at.
+   *
+   * Asking each session whether it is its *own* project's active pane would
+   * mark the active session of every open project as focused, which suppresses
+   * an alert for every project the operator is not looking at — the feature's
+   * primary case is several agents running while one is watched. Only the
+   * active pane of the project on screen qualifies.
+   *
+   * Resolved to a plain id during render so it can drive the effect: it changes
+   * when the operator switches panes, which the sessions array does not.
+   */
+  const focusedPtyId =
+    windowFocused && visibleProjectId ? (activeFor(visibleProjectId)?.ptyId ?? null) : null;
+
   const lastSent = useRef<string>("");
 
-  // Built inside the effect rather than in a memo. `sessions` changes on hot
-  // paths and `activeFor` is only as stable as the store's own state, so a memo
-  // would rebuild and re-serialize this on renders that changed nothing about
-  // it. Keyed on the two things that actually alter the report.
   useEffect(() => {
     const api = getElectron();
     if (!api?.sessionFacts) return;
@@ -61,7 +85,7 @@ export function SessionFactsReporter() {
         title: session.task.title,
         project: session.project.name ?? null,
         status: session.task.status,
-        focused: windowFocused && activeFor(session.project.id)?.ptyId === session.ptyId,
+        focused: session.ptyId === focusedPtyId,
       };
     }
 
@@ -71,9 +95,7 @@ export function SessionFactsReporter() {
     if (serialized === lastSent.current) return;
     lastSent.current = serialized;
     void api.sessionFacts.report(report);
-    // `activeFor` reads current store state; it is called here rather than
-    // depended on, so its identity never drives a resend.
-  }, [sessions, windowFocused]);
+  }, [sessions, focusedPtyId]);
 
   return null;
 }

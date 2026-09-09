@@ -1286,11 +1286,13 @@ async function createWindow() {
     startFsPermissionPreflight({
       recordOutcomes: (outcomes, checkedAt) =>
         recordFsPermissionOutcomes(app.getPath("userData"), outcomes, checkedAt),
-      onUpdate: (records) =>
-        win?.webContents.send(IPC.fsPermissionsChanged, {
+      onUpdate: (records) => {
+        if (!win || win.isDestroyed()) return;
+        win.webContents.send(IPC.fsPermissionsChanged, {
           records,
           resolved: isFsPermissionPreflightResolved(),
-        }),
+        });
+      },
     });
   });
 
@@ -2035,11 +2037,12 @@ const silenceSweep = new SilenceSweep({
       });
     }
     if (!getBooleanAppSetting(missionControlUserDataDir, "silence_alerts_enabled", true)) return;
+    if (!win || win.isDestroyed()) return;
 
     for (const stage of ["hard", "soft"] as const) {
       const staged = alerts.filter((alert) => alert.stage === stage);
       if (staged.length === 0) continue;
-      win?.webContents.send(IPC.sessionSilenceAlert, {
+      win.webContents.send(IPC.sessionSilenceAlert, {
         stage,
         sessions: staged.map(describeSilentSession),
         // Several at once become one alert naming the count: a wall of toasts
@@ -2056,7 +2059,13 @@ const silenceSweep = new SilenceSweep({
       attentionSignal.clear();
       return;
     }
-    if (!getBooleanAppSetting(missionControlUserDataDir, "silence_alerts_enabled", true)) return;
+    // Turning the setting off has to stop a bounce already running. Returning
+    // early without clearing would leave the dock asking until the operator
+    // focused the window -- the one thing they turned it off to avoid.
+    if (!getBooleanAppSetting(missionControlUserDataDir, "silence_alerts_enabled", true)) {
+      attentionSignal.clear();
+      return;
+    }
     // A raise skipped because the operator was at their desk is retried until
     // it lands or output resumes -- the hard stage is sticky for the episode,
     // but the signal itself must not be lost permanently.

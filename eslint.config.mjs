@@ -77,6 +77,12 @@ export default tseslint.config(
     //
     // The real filesystem lives behind `ScaffoldingFs`; add operations there
     // rather than reaching for `node:fs` here.
+    //
+    // This list is the async-converted set, not every module that runs against
+    // a session cwd: `src/shared/agent-hooks.ts`, `src/shared/statusline-tap.ts`
+    // and `src/shared/json-settings-file.ts` still use synchronous calls there
+    // and are covered only by the caller's cwd probe. Adding them here means
+    // converting them first.
     files: [
       "electron/session-scaffolding.ts",
       "electron/ensure-diagram-skill.ts",

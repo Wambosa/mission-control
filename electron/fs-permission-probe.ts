@@ -158,9 +158,35 @@ export async function probeDeclaredLocation(
 
 let probeChain: Promise<unknown> = Promise.resolve();
 
+/**
+ * Probes that passed their deadline and never came back.
+ *
+ * Each one is holding a libuv pool thread for the life of the process, so this
+ * is the number that actually has to be bounded. It is not the same thing as
+ * "one probe at a time": the chain serialises probes so a *burst* cannot take
+ * the pool, and this counter stops the process issuing more syscalls once
+ * enough of them are known to be stuck.
+ */
+let stuckProbes = 0;
+
+/**
+ * How many abandoned probes before the app stops issuing new ones.
+ *
+ * The pool is four threads. Two held still leaves room for the rest of main's
+ * promise-based filesystem work; past that, refusing to probe and reporting
+ * `pending` is better than consuming the pool to find out.
+ */
+const MAX_STUCK_PROBES = 2;
+
 /** Test-only: drop a chain a deliberately-stuck probe is still holding. */
 export function __resetProbeQueueForTests(): void {
   probeChain = Promise.resolve();
+  stuckProbes = 0;
+}
+
+/** Test-only: how many probes are currently abandoned past their deadline. */
+export function __stuckProbeCountForTests(): number {
+  return stuckProbes;
 }
 
 export type QueuedProbeOptions = {
@@ -188,22 +214,49 @@ export function probeDirectoryQueued(
 ): Promise<FsPermissionOutcome> {
   const deadlineMs = options.deadlineMs ?? DEFAULT_PROBE_DEADLINE_MS;
 
-  const queued = probeChain.then(() => probeDirectory(dir, readdir));
-  // The chain advances on the probe, so a stuck probe holds the queue — that is
-  // the cap doing its job. `catch` only guards against an unexpected throw
-  // breaking the chain for everyone behind it.
-  probeChain = queued.catch(() => undefined);
+  // Enough threads are already held that issuing another syscall would be
+  // spending the pool to learn nothing. Answer without touching the filesystem.
+  if (stuckProbes >= MAX_STUCK_PROBES) return Promise.resolve("pending");
+
+  let settled = false;
+  const probe = probeChain.then(() => probeDirectory(dir, readdir));
+
+  // The chain must advance when this probe's deadline passes, not only when the
+  // probe answers. A consent prompt has no timeout, so waiting for the answer
+  // would let one unanswered dialog park every later probe in the process
+  // behind it -- including the cwd probe of a session whose directory reads
+  // perfectly well, which would then skip its scaffolding for no reason.
+  const deadline = new Promise<void>((advance) => {
+    const timer = setTimeout(() => {
+      if (!settled) stuckProbes += 1;
+      advance();
+    }, deadlineMs);
+    // Never hold the event loop open for a probe nobody is waiting on.
+    timer.unref?.();
+    void probe.then(
+      () => {
+        clearTimeout(timer);
+        advance();
+      },
+      () => {
+        clearTimeout(timer);
+        advance();
+      },
+    );
+  });
+  probeChain = deadline;
 
   return new Promise<FsPermissionOutcome>((resolve) => {
     const timer = setTimeout(() => resolve("pending"), deadlineMs);
-    // Never hold the event loop open for a probe nobody is waiting on.
     timer.unref?.();
-    void queued.then(
+    void probe.then(
       (outcome) => {
+        settled = true;
         clearTimeout(timer);
         resolve(outcome);
       },
       () => {
+        settled = true;
         clearTimeout(timer);
         resolve("never-probed");
       },

@@ -12,6 +12,7 @@ import {
   __trackRemotePtyForTests,
   __remotePtyStateExistsForTests,
   __pushRemoteTailForTests,
+  liveRemotePtyIds,
 } from "../sandbox-manager";
 import {
   __resetSilenceTrackerForTests,
@@ -174,14 +175,36 @@ describe("remote PTY state on a dropped transport", () => {
 
     releaseRemotePtysForSandbox("sandbox-1");
 
+    // The routing and timing state -- the part that leaked, because no exit
+    // event is coming -- is gone.
     expect(__remotePtyStateExistsForTests("rpty-a")).toBe(false);
     expect(__remotePtyStateExistsForTests("rpty-b")).toBe(false);
-    expect(getTrackedPty("rpty-a")).toBeUndefined();
-    expect(getTrackedPty("rpty-b")).toBeUndefined();
+
+    // But the sessions are still visible to the sweep, marked unreachable
+    // rather than silently vanished -- otherwise nothing could say why they
+    // stopped alerting.
+    expect(getTrackedPty("rpty-a")?.transportDown).toBe(true);
+    expect(getTrackedPty("rpty-b")?.transportDown).toBe(true);
+    expect(liveRemotePtyIds()).toEqual(
+      expect.arrayContaining(["rpty-a", "rpty-b", "rpty-other"]),
+    );
 
     // A sandbox that did not drop keeps everything.
     expect(__remotePtyStateExistsForTests("rpty-other")).toBe(true);
+    expect(getTrackedPty("rpty-other")?.transportDown).toBe(false);
     expect(getTrackedPty("rpty-other")?.taskId).toBe("task-c");
+    __resetSilenceTrackerForTests();
+  });
+
+  it("stops tracking a dropped PTY once it is explicitly torn down", () => {
+    __resetSilenceTrackerForTests();
+    __trackRemotePtyForTests("rpty-a", "sandbox-1", "task-a");
+    releaseRemotePtysForSandbox("sandbox-1");
+    expect(liveRemotePtyIds()).toContain("rpty-a");
+
+    forgetRemotePtyState("rpty-a");
+    expect(liveRemotePtyIds()).not.toContain("rpty-a");
+    expect(getTrackedPty("rpty-a")).toBeUndefined();
     __resetSilenceTrackerForTests();
   });
 

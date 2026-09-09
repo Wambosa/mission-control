@@ -93,12 +93,14 @@ export function recordFsPermissionOutcome(
 /**
  * The persisted record overlaid with whatever this launch's sweep has learned.
  *
- * Until the sweep resolves, some categories have a live answer and the rest
- * have only what a previous launch left behind. Showing the stored value in the
- * gap is right — with its own older timestamp, so it reads as the stale claim
- * it is — and showing "never probed" over the top of it would lose information
- * the operator has.
+ * Live wins wherever it actually learned something. `never-probed` and
+ * `pending` are the two values that mean "no answer", and neither should erase
+ * a real one a previous launch recorded — showing a stale `privacy-blocked`
+ * with its own older timestamp keeps the agent note and the privacy jump
+ * working, where "waiting on an answer" would silently drop both.
  */
+const NO_ANSWER: ReadonlySet<string> = new Set(["never-probed", "pending"]);
+
 export function mergeFsPermissionRecords(
   stored: readonly FsPermissionRecord[],
   live: readonly FsPermissionRecord[],
@@ -106,7 +108,11 @@ export function mergeFsPermissionRecords(
   const liveByCategory = new Map(live.map((record) => [record.category, record]));
   return stored.map((record) => {
     const fresh = liveByCategory.get(record.category);
-    return fresh && fresh.outcome !== "never-probed" ? fresh : record;
+    if (!fresh || NO_ANSWER.has(fresh.outcome)) {
+      // Keep the stored answer, unless there was never one either.
+      return record.outcome === "never-probed" && fresh ? fresh : record;
+    }
+    return fresh;
   });
 }
 

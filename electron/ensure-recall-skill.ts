@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import type { TaskAgent } from "../src/shared/domain";
-import type { ScaffoldingFs } from "../src/shared/scaffolding-fs";
-import { nodeScaffoldingFs } from "./node-scaffolding-fs";
+import { nodeScaffoldingFs, type ScaffoldingFs } from "../src/shared/scaffolding-fs";
+
 
 // Per-harness skill folder segments (mirrors DIAGRAM_SKILL_INSTALL_TARGETS).
 // The Recall skill is just instructions, so it installs into whichever CLI's

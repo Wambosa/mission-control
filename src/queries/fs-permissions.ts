@@ -26,12 +26,12 @@ export function useFsPermissions(): FsPermissionsSnapshot | null {
     const unsubscribe = api.fsPermissions.onChanged((update) => {
       if (!live) return;
       // `supported` is a property of the platform, not of the sweep, so it
-      // survives from the read rather than arriving on every push.
-      setSnapshot((current) => ({
-        supported: current?.supported ?? true,
-        records: update.records,
-        resolved: update.resolved,
-      }));
+      // comes from the read. A push that arrives first is dropped rather than
+      // guessed at — claiming support the platform may not have would render
+      // rows that cannot mean anything.
+      setSnapshot((current) =>
+        current ? { ...current, records: update.records, resolved: update.resolved } : current,
+      );
     });
 
     return () => {

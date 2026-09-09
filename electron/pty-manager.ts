@@ -13,6 +13,7 @@ import {
 } from "./fs-permission-preflight";
 import { runSessionScaffolding, unreadableCwdNotice } from "./session-scaffolding";
 import {
+  REMOTE_TAIL_LIMIT_BYTES,
   recordPtyInput,
   recordPtyOutput,
   trackPty,
@@ -339,6 +340,25 @@ function loadNodePty() {
     nodePty = require("node-pty");
   }
   return nodePty!;
+}
+
+/**
+ * The most recent bytes of a PTY's ring.
+ *
+ * Walks back from the newest chunk rather than joining the whole buffer: the
+ * local ring is a megabyte because it also serves replay, while a tail needs a
+ * few kilobytes, and building the megabyte to throw away all but the end of it
+ * would be real work on the path where an alert is already late.
+ */
+function readBufferTail(p: Pty, limitBytes: number = REMOTE_TAIL_LIMIT_BYTES): string {
+  const parts: string[] = [];
+  let bytes = 0;
+  for (let i = p.buffer.length - 1; i >= 0 && bytes < limitBytes; i -= 1) {
+    const chunk = p.buffer[i];
+    parts.push(chunk.data);
+    bytes += chunk.bytes;
+  }
+  return parts.reverse().join("");
 }
 
 function appendBuffer(p: Pty, data: string): number {
@@ -782,7 +802,7 @@ export function registerPtyHandlers(
         taskId: opts.taskId,
         shell: opts.shell === true,
         sandboxInternal: false,
-        readTail: () => p.buffer.map((chunk) => chunk.data).join(""),
+        readTail: () => readBufferTail(p),
       });
       // The session starts either way (R20 asks for a report, not a retry), but
       // an operator staring at a terminal that never does anything deserves to

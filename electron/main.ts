@@ -2049,12 +2049,18 @@ const silenceSweep = new SilenceSweep({
     }
   },
   onTick: ({ sessionsAtHardStage }) => {
+    // Nothing held at hard: stand the signal down and skip the settings read.
+    // This runs every fifteen seconds for the life of the app, so it should
+    // touch the database only when it has something to decide.
+    if (sessionsAtHardStage.length === 0) {
+      attentionSignal.clear();
+      return;
+    }
     if (!getBooleanAppSetting(missionControlUserDataDir, "silence_alerts_enabled", true)) return;
     // A raise skipped because the operator was at their desk is retried until
     // it lands or output resumes -- the hard stage is sticky for the episode,
     // but the signal itself must not be lost permanently.
-    if (sessionsAtHardStage.length > 0) attentionSignal.raise();
-    else attentionSignal.clear();
+    attentionSignal.raise();
   },
 });
 

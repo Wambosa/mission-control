@@ -106,27 +106,40 @@ export function mountedVolumesOfClass(
     .map((entry) => entry.mountPoint);
 }
 
-/** Probe one declared location, resolving a volume category's mount first. */
-export async function probeDeclaredLocation(
+/**
+ * Which directory a declared location resolves to, or the outcome that settles
+ * it without an enumeration.
+ *
+ * A volume category with nothing mounted is the interesting case: an unasked
+ * category and a refused one are indistinguishable there, so it claims neither.
+ */
+async function resolveProbeTarget(
   location: DeclaredLocation,
   deps: ProbeDeps,
-): Promise<FsPermissionOutcome> {
+): Promise<{ dir: string } | { outcome: FsPermissionOutcome }> {
   if (location.volumeClass) {
     let mounts: readonly MountEntry[];
     try {
       mounts = await deps.listMounts();
     } catch {
-      return "never-probed";
+      return { outcome: "never-probed" };
     }
     const volumes = mountedVolumesOfClass(mounts, location.volumeClass);
-    // Nothing of this class mounted: an unasked category and a refused one are
-    // indistinguishable, so claim neither.
-    if (volumes.length === 0) return "unknowable";
-    return probeDirectory(volumes[0], deps.readdir);
+    if (volumes.length === 0) return { outcome: "unknowable" };
+    return { dir: volumes[0] };
   }
 
-  if (!location.homeRelativePath) return "never-probed";
-  return probeDirectory(path.join(deps.homeDir(), location.homeRelativePath), deps.readdir);
+  if (!location.homeRelativePath) return { outcome: "never-probed" };
+  return { dir: path.join(deps.homeDir(), location.homeRelativePath) };
+}
+
+/** Probe one declared location, resolving a volume category's mount first. */
+export async function probeDeclaredLocation(
+  location: DeclaredLocation,
+  deps: ProbeDeps,
+): Promise<FsPermissionOutcome> {
+  const target = await resolveProbeTarget(location, deps);
+  return "outcome" in target ? target.outcome : probeDirectory(target.dir, deps.readdir);
 }
 
 // ---------------------------------------------------------------------------
@@ -204,24 +217,10 @@ export async function probeDeclaredLocationQueued(
   deps: ProbeDeps,
   options: QueuedProbeOptions = {},
 ): Promise<FsPermissionOutcome> {
-  if (location.volumeClass) {
-    let mounts: readonly MountEntry[];
-    try {
-      mounts = await deps.listMounts();
-    } catch {
-      return "never-probed";
-    }
-    const volumes = mountedVolumesOfClass(mounts, location.volumeClass);
-    if (volumes.length === 0) return "unknowable";
-    return probeDirectoryQueued(volumes[0], deps.readdir, options);
-  }
-
-  if (!location.homeRelativePath) return "never-probed";
-  return probeDirectoryQueued(
-    path.join(deps.homeDir(), location.homeRelativePath),
-    deps.readdir,
-    options,
-  );
+  const target = await resolveProbeTarget(location, deps);
+  return "outcome" in target
+    ? target.outcome
+    : probeDirectoryQueued(target.dir, deps.readdir, options);
 }
 
 const MOUNT_COMMAND_TIMEOUT_MS = 5_000;

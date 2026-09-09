@@ -32,6 +32,7 @@ function sessionLabel(session: SilenceAlertSession): string {
 
 function SilenceToastBody({ payload }: { payload: SilenceAlertPayload }) {
   const first = payload.sessions[0];
+  const privacyCategory = first.privacyCategory;
   const heading = payload.coalesced
     ? `${payload.sessions.length} sessions have gone quiet`
     : `${sessionLabel(first)} has been silent for ${formatSilence(first.silentMs)}`;
@@ -77,7 +78,7 @@ function SilenceToastBody({ payload }: { payload: SilenceAlertPayload }) {
               {first.tail}
             </pre>
           )}
-          {first.privacyCategory && (
+          {privacyCategory && (
             <div>
               <Btn
                 type="button"
@@ -85,7 +86,7 @@ function SilenceToastBody({ payload }: { payload: SilenceAlertPayload }) {
                 size="sm"
                 icon="shield"
                 onClick={() =>
-                  void getElectron()?.fsPermissions?.openPrivacyPane(first.privacyCategory!)
+                  void getElectron()?.fsPermissions?.openPrivacyPane(privacyCategory)
                 }
               >
                 Open privacy settings

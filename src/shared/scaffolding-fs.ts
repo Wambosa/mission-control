@@ -14,6 +14,8 @@
  * `electron/session-scaffolding.ts`.
  */
 
+import * as fsp from "node:fs/promises";
+
 export type ScaffoldingDirent = {
   name: string;
   isDirectory(): boolean;
@@ -35,3 +37,28 @@ export type ScaffoldingFs = {
 
 /** The subset the agent auto-load file writer needs. */
 export type MemoryFileFs = Pick<ScaffoldingFs, "exists" | "readFile" | "writeFile" | "mkdir">;
+
+/** The real filesystem behind the interface. One implementation, both callers. */
+export const nodeScaffoldingFs: ScaffoldingFs = {
+  async exists(target) {
+    try {
+      await fsp.access(target);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  readFile: (file) => fsp.readFile(file, "utf8"),
+  writeFile: (file, data) => fsp.writeFile(file, data, "utf8"),
+  async mkdir(dir) {
+    await fsp.mkdir(dir, { recursive: true });
+  },
+  async readdir(dir) {
+    const entries = await fsp.readdir(dir, { withFileTypes: true });
+    return entries as unknown as ScaffoldingDirent[];
+  },
+  copyFile: (from, to) => fsp.copyFile(from, to),
+  async rm(target) {
+    await fsp.rm(target, { recursive: true, force: true });
+  },
+};

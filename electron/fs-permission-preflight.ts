@@ -177,12 +177,10 @@ export function startFsPermissionPreflight(overrides: Partial<PreflightDeps> = {
       // truth, and better than the `pending` standing in for it.
       local.outcomes.set(location.category, outcome);
       local.checkedAt = deps.now();
-      if (local.resolved) {
-        persist();
-        publish();
-      } else {
-        publish();
-      }
+      // A late answer after the deadline still gets written down; before it,
+      // finish() will persist the lot in one go.
+      if (local.resolved) persist();
+      publish();
     }
     clearTimeout(deadline);
     finish();

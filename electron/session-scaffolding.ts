@@ -5,13 +5,13 @@ import { ensureDiagramSkillForAgent } from "./ensure-diagram-skill";
 import { ensureRecallMcpForAgent, removeRecallMcpForAgent } from "./ensure-recall-mcp";
 import { ensureRecallSkillForAgent, removeRecallSkillForAgent } from "./ensure-recall-skill";
 import { createProbeDeps, probeDirectoryQueued } from "./fs-permission-probe";
-import { nodeScaffoldingFs } from "./node-scaffolding-fs";
+
 import type { PtyHookEnv } from "./pty-hook-env";
 import { fetchRecallEnabled as defaultFetchRecallEnabled } from "./recall-enabled";
 import { ensureStatuslineTap } from "../src/shared/statusline-tap";
 import type { TaskAgent } from "../src/shared/domain";
 import type { FsPermissionOutcome, FsPermissionRecord } from "../src/shared/fs-permission";
-import type { ScaffoldingFs } from "../src/shared/scaffolding-fs";
+import { nodeScaffoldingFs, type ScaffoldingFs } from "../src/shared/scaffolding-fs";
 
 /**
  * Everything the app reads or writes inside a session's working directory
@@ -86,7 +86,8 @@ function defaultProbeCwd(cwd: string): Promise<FsPermissionOutcome> {
 export async function runSessionScaffolding(
   params: SessionScaffoldingParams,
 ): Promise<SessionScaffoldingResult> {
-  const { appPath, cwd, agent, taskId, mcEnv, petEnabled, isAgentSession } = params;
+  const { appPath, cwd, agent, taskId, mcEnv, petEnabled, isAgentSession, fsPermissionRecords } =
+    params;
   const fs = params.deps?.fs ?? nodeScaffoldingFs;
   const probeCwd = params.deps?.probeCwd ?? defaultProbeCwd;
   const fetchRecall = params.deps?.fetchRecallEnabled ?? defaultFetchRecallEnabled;
@@ -132,7 +133,7 @@ export async function runSessionScaffolding(
   // A separate block in the same file. Order matters only in that the note is
   // written after the brief, so a failed brief fetch (which clears the brief's
   // block) cannot be mistaken for having cleared this one.
-  await permissionNote({ agent, cwd, records: params.fsPermissionRecords, fs });
+  await permissionNote({ agent, cwd, records: fsPermissionRecords, fs });
 
   return { ran: true };
 }

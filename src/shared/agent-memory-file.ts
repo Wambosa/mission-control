@@ -1,6 +1,5 @@
-import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import type { MemoryFileFs } from "./scaffolding-fs";
+import { nodeScaffoldingFs, type MemoryFileFs } from "./scaffolding-fs";
 
 // Writes into the file each agent auto-loads at startup, as marker-delimited
 // managed blocks (mirrors agent-hooks.ts's `_mcManaged` approach). Single
@@ -41,23 +40,6 @@ const BLOCK_MARKERS: Record<AgentMemoryBlock, BlockMarkers> = {
       "<!-- mc:permissions:start (managed by Mission Control — do not edit inside these markers) -->",
     end: "<!-- mc:permissions:end -->",
     startPrefix: "<!-- mc:permissions:start",
-  },
-};
-
-/** The real filesystem, asynchronous. */
-export const nodeMemoryFileFs: MemoryFileFs = {
-  async exists(target) {
-    try {
-      await fsp.access(target);
-      return true;
-    } catch {
-      return false;
-    }
-  },
-  readFile: (file) => fsp.readFile(file, "utf8"),
-  writeFile: (file, data) => fsp.writeFile(file, data, "utf8"),
-  async mkdir(dir) {
-    await fsp.mkdir(dir, { recursive: true });
   },
 };
 
@@ -129,7 +111,7 @@ export async function writeAgentMemoryBlock(
   cwd: string,
   block: AgentMemoryBlock,
   content: string,
-  fs: MemoryFileFs = nodeMemoryFileFs,
+  fs: MemoryFileFs = nodeScaffoldingFs,
 ): Promise<boolean> {
   if (!agent) return false;
   const target = AGENT_MEMORY_TARGETS[agent];
@@ -176,7 +158,7 @@ export function writeAgentMemoryFile(
   agent: string | undefined,
   cwd: string,
   brief: string,
-  fs: MemoryFileFs = nodeMemoryFileFs,
+  fs: MemoryFileFs = nodeScaffoldingFs,
 ): Promise<boolean> {
   return writeAgentMemoryBlock(agent, cwd, "recall", brief, fs);
 }
@@ -185,7 +167,7 @@ export function writeAgentMemoryFile(
 export async function removeAgentMemoryFile(
   agent: string | undefined,
   cwd: string,
-  fs: MemoryFileFs = nodeMemoryFileFs,
+  fs: MemoryFileFs = nodeScaffoldingFs,
 ): Promise<void> {
   await writeAgentMemoryBlock(agent, cwd, "recall", "", fs);
 }

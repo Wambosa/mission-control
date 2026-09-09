@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import type { TaskAgent } from "../src/shared/domain";
-import type { ScaffoldingFs } from "../src/shared/scaffolding-fs";
-import { nodeScaffoldingFs } from "./node-scaffolding-fs";
+import { nodeScaffoldingFs, type ScaffoldingFs } from "../src/shared/scaffolding-fs";
+
 
 // The managed key in the project's `.mcp.json`. Using a fixed key is the marker:
 // we overwrite exactly this entry on each spawn (idempotent) and never touch any

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getElectron } from "~/lib/electron";
 import { useTerminals } from "~/lib/terminal-store";
 import type { SessionFactsReport } from "~/shared/electron-contract";
@@ -46,31 +46,34 @@ export function SessionFactsReporter() {
   const windowFocused = useWindowFocused();
   const lastSent = useRef<string>("");
 
-  const report = useMemo<SessionFactsReport>(() => {
-    const out: SessionFactsReport = {};
-    for (const session of sessions) {
-      if (!session.ptyId) continue;
-      const active = activeFor(session.project.id);
-      out[session.ptyId] = {
-        title: session.task.title,
-        project: session.project.name ?? null,
-        status: session.task.status,
-        focused: windowFocused && active?.ptyId === session.ptyId,
-      };
-    }
-    return out;
-  }, [sessions, activeFor, windowFocused]);
-
+  // Built inside the effect rather than in a memo. `sessions` changes on hot
+  // paths and `activeFor` is only as stable as the store's own state, so a memo
+  // would rebuild and re-serialize this on renders that changed nothing about
+  // it. Keyed on the two things that actually alter the report.
   useEffect(() => {
     const api = getElectron();
     if (!api?.sessionFacts) return;
-    // Sent on change rather than on a tick: the sweep reads the last report it
-    // was given, and a report that has not changed tells it nothing new.
+
+    const report: SessionFactsReport = {};
+    for (const session of sessions) {
+      if (!session.ptyId) continue;
+      report[session.ptyId] = {
+        title: session.task.title,
+        project: session.project.name ?? null,
+        status: session.task.status,
+        focused: windowFocused && activeFor(session.project.id)?.ptyId === session.ptyId,
+      };
+    }
+
+    // Sent on change: a report identical to the last one tells the sweep
+    // nothing, and this fires whenever any session's status moves.
     const serialized = JSON.stringify(report);
     if (serialized === lastSent.current) return;
     lastSent.current = serialized;
     void api.sessionFacts.report(report);
-  }, [report]);
+    // `activeFor` reads current store state; it is called here rather than
+    // depended on, so its identity never drives a resend.
+  }, [sessions, windowFocused]);
 
   return null;
 }

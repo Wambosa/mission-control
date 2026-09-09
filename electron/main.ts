@@ -27,8 +27,17 @@ import { registerPtyHandlers, killAllPtys, drainPtyTranscripts } from "./pty-man
 import { formatRendererConsoleLine, rendererLogMethod } from "./renderer-console-log";
 import { createServerOutputForwarder } from "./server-output-forwarder";
 import { registerDiagnosticsHandlers } from "./diagnostics-handlers";
-import { startFsPermissionPreflight } from "./fs-permission-preflight";
-import { recordFsPermissionOutcomes } from "./fs-permission-state";
+import {
+  fsPermissionPreflightRecords,
+  isFsPermissionPreflightResolved,
+  startFsPermissionPreflight,
+} from "./fs-permission-preflight";
+import {
+  mergeFsPermissionRecords,
+  readFsPermissionRecords,
+  recordFsPermissionOutcomes,
+} from "./fs-permission-state";
+import { openPrivacyPane } from "./privacy-pane";
 import { setPtyStreamHidden, setPtyStreamPowerSave } from "./pty-output-batch";
 import { setAppThemeFromBackground } from "./app-theme";
 import { registerFileHandlers, disposeAllFileWatchers } from "./file-handlers";
@@ -1262,7 +1271,11 @@ async function createWindow() {
     startFsPermissionPreflight({
       recordOutcomes: (outcomes, checkedAt) =>
         recordFsPermissionOutcomes(app.getPath("userData"), outcomes, checkedAt),
-      onUpdate: (records) => win?.webContents.send(IPC.fsPermissionsChanged, { records }),
+      onUpdate: (records) =>
+        win?.webContents.send(IPC.fsPermissionsChanged, {
+          records,
+          resolved: isFsPermissionPreflightResolved(),
+        }),
     });
   });
 
@@ -1895,6 +1908,33 @@ registerDiagnosticsHandlers(ipcMain, () => win, {
   userDataDir: missionControlUserDataDir,
   runtimePort: () => runtimePort,
 });
+
+/**
+ * Protected-location probe outcomes and the privacy-pane jump.
+ *
+ * These are per-launch runtime facts, not stored preferences, so they ride
+ * invoke-plus-push rather than the settings HTTP path. The pre-flight sweep's
+ * live view is authoritative while the app is running; the persisted record is
+ * what a launch before this one left behind, which is what makes a grant from
+ * a previous build legible as stale.
+ */
+safeHandle(IPC.fsPermissionsGet, async () => ({
+  records: isFsPermissionPreflightResolved()
+    ? fsPermissionPreflightRecords()
+    : mergeFsPermissionRecords(
+        readFsPermissionRecords(missionControlUserDataDir),
+        fsPermissionPreflightRecords(),
+      ),
+  resolved: isFsPermissionPreflightResolved(),
+  supported: process.platform === "darwin",
+}));
+
+safeHandle(IPC.fsPermissionsOpenPrivacyPane, async (_evt, category: unknown) =>
+  openPrivacyPane(category, {
+    platform: process.platform,
+    openExternal: (url) => shell.openExternal(url),
+  }),
+);
 
 safeHandle(IPC.shellOpenPath, async (_evt, p: string) => {
   const decision = resolveSafeOpenPath(p, loadProjectRoots());

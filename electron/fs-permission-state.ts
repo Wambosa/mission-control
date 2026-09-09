@@ -90,6 +90,26 @@ export function recordFsPermissionOutcome(
   writeStored(userDataDir, stored);
 }
 
+/**
+ * The persisted record overlaid with whatever this launch's sweep has learned.
+ *
+ * Until the sweep resolves, some categories have a live answer and the rest
+ * have only what a previous launch left behind. Showing the stored value in the
+ * gap is right — with its own older timestamp, so it reads as the stale claim
+ * it is — and showing "never probed" over the top of it would lose information
+ * the operator has.
+ */
+export function mergeFsPermissionRecords(
+  stored: readonly FsPermissionRecord[],
+  live: readonly FsPermissionRecord[],
+): FsPermissionRecord[] {
+  const liveByCategory = new Map(live.map((record) => [record.category, record]));
+  return stored.map((record) => {
+    const fresh = liveByCategory.get(record.category);
+    return fresh && fresh.outcome !== "never-probed" ? fresh : record;
+  });
+}
+
 /** Record a whole sweep's outcomes under one timestamp and one write. */
 export function recordFsPermissionOutcomes(
   userDataDir: string,

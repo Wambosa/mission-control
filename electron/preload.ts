@@ -3,6 +3,10 @@ import { IPC } from "./ipc-channels";
 // Type-only, so nothing from the renderer bundle is pulled into the preload.
 // Mirroring this shape by hand would only give it somewhere to drift.
 import type { SshProbeOutcome, SshProvisionResult } from "../src/shared/ssh-provision";
+import type {
+  FsPermissionCategory,
+  FsPermissionRecord,
+} from "../src/shared/fs-permission";
 
 /** Subscribe to a main→renderer IPC channel; returns an unsubscribe fn. */
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -15,6 +19,20 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 // renderer never imports main-process code). "cancelled" is distinct from a
 // failure on purpose: R27 wants a failed write surfaced, and a user dismissing
 // the save dialog is not one.
+/** Mirror of the fsPermissions:get payload in main.ts (structural). */
+export type FsPermissionsSnapshotBridge = {
+  records: FsPermissionRecord[];
+  /** False while the launch sweep is still asking. */
+  resolved: boolean;
+  /** False off macOS, where the whole block is meaningless. */
+  supported: boolean;
+};
+
+export type FsPermissionsUpdateBridge = {
+  records: FsPermissionRecord[];
+  resolved: boolean;
+};
+
 export type DiagnosticsExportResultBridge =
   | { ok: true; path: string; entries: number; transcriptsUnavailable?: string }
   | { ok: false; cancelled: true }
@@ -525,6 +543,21 @@ const electronAPI = {
       ipcRenderer.invoke(IPC.diagnosticsRevealLogs),
     /** The log directory's path, for display. */
     logDirectory: (): Promise<string> => ipcRenderer.invoke(IPC.diagnosticsLogDirectory),
+  },
+  fsPermissions: {
+    /** Probe outcomes for every declared protected location, newest known first. */
+    get: (): Promise<FsPermissionsSnapshotBridge> => ipcRenderer.invoke(IPC.fsPermissionsGet),
+    /**
+     * Open the OS privacy pane for one category. Takes a category, never a URL:
+     * main holds the anchor table, so the renderer cannot name a target.
+     */
+    openPrivacyPane: (
+      category: FsPermissionCategory,
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC.fsPermissionsOpenPrivacyPane, category),
+    /** Fires as the launch sweep settles each location. */
+    onChanged: (cb: (update: FsPermissionsUpdateBridge) => void) =>
+      subscribe<FsPermissionsUpdateBridge>(IPC.fsPermissionsChanged, cb),
   },
   files: {
     list: (projectRoot: string): Promise<{ ok: true; files: string[] } | { ok: false; error: string }> =>

@@ -1,6 +1,21 @@
 import type { AgentCliUpdateRun } from "~/shared/agent-cli-update";
 import type { GitStatus, GitDiff } from "~/shared/git-status";
 import type { SshProbeOutcome, SshProvisionResult } from "~/shared/ssh-provision";
+import type { FsPermissionCategory, FsPermissionRecord } from "~/shared/fs-permission";
+
+/** Probe outcomes for the protected locations, plus whether they can mean anything here. */
+export type FsPermissionsUpdate = {
+  records: FsPermissionRecord[];
+  resolved: boolean;
+};
+
+export type FsPermissionsSnapshot = {
+  records: FsPermissionRecord[];
+  /** False while the launch sweep is still asking. */
+  resolved: boolean;
+  /** False off macOS, where the whole block is meaningless. */
+  supported: boolean;
+};
 
 export const FILE_READ_ERRORS = ["invalid-path", "not-found", "binary", "too-large"] as const;
 export const FILE_WRITE_ERRORS = [
@@ -437,6 +452,19 @@ export type ElectronBridge = {
     revealLogs: () => Promise<{ ok: true } | { ok: false; error: string }>;
     /** The log directory's path, for display. */
     logDirectory: () => Promise<string>;
+  };
+  fsPermissions: {
+    /** Probe outcomes for every declared protected location. */
+    get: () => Promise<FsPermissionsSnapshot>;
+    /**
+     * Open the OS privacy pane for one category. Takes a category, never a URL:
+     * main holds the anchor table, so the renderer cannot name a target.
+     */
+    openPrivacyPane: (
+      category: FsPermissionCategory,
+    ) => Promise<{ ok: true } | { ok: false; error: string }>;
+    /** Fires as the launch sweep settles each location. */
+    onChanged: (cb: (update: FsPermissionsUpdate) => void) => () => void;
   };
   files: {
     list: (projectRoot: string) => Promise<FileListResult>;

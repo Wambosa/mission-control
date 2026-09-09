@@ -30,6 +30,12 @@ export const IPC = {
   diagnosticsExport: "diagnostics:export",
   diagnosticsRevealLogs: "diagnostics:revealLogs",
   diagnosticsLogDirectory: "diagnostics:logDirectory",
+  // Protected-location probe outcomes. Per-launch runtime facts, not stored
+  // preferences, so they ride invoke-plus-push rather than the settings HTTP
+  // path. The jump takes a category from a closed set — never a URL.
+  fsPermissionsGet: "fsPermissions:get",
+  fsPermissionsChanged: "fsPermissions:changed",
+  fsPermissionsOpenPrivacyPane: "fsPermissions:openPrivacyPane",
   appSetBackgroundColor: "app:setBackgroundColor",
   powerGetOnBattery: "power:getOnBattery",
   powerOnBatteryChange: "power:on-battery-change",

@@ -27,6 +27,8 @@ import { registerPtyHandlers, killAllPtys, drainPtyTranscripts } from "./pty-man
 import { formatRendererConsoleLine, rendererLogMethod } from "./renderer-console-log";
 import { createServerOutputForwarder } from "./server-output-forwarder";
 import { registerDiagnosticsHandlers } from "./diagnostics-handlers";
+import { startFsPermissionPreflight } from "./fs-permission-preflight";
+import { recordFsPermissionOutcomes } from "./fs-permission-state";
 import { setPtyStreamHidden, setPtyStreamPowerSave } from "./pty-output-batch";
 import { setAppThemeFromBackground } from "./app-theme";
 import { registerFileHandlers, disposeAllFileWatchers } from "./file-handlers";
@@ -1250,7 +1252,19 @@ async function createWindow() {
     },
   });
 
-  win.once("ready-to-show", () => win?.show());
+  win.once("ready-to-show", () => {
+    win?.show();
+    // Ask macOS for the protected locations now: the window exists, so a
+    // consent prompt has something to attach to and the operator can answer it
+    // before they open their first session. Fire-and-forget by construction —
+    // the sweep never rejects and carries its own deadline, so nothing here
+    // can delay or fail startup (R4).
+    startFsPermissionPreflight({
+      recordOutcomes: (outcomes, checkedAt) =>
+        recordFsPermissionOutcomes(app.getPath("userData"), outcomes, checkedAt),
+      onUpdate: (records) => win?.webContents.send(IPC.fsPermissionsChanged, { records }),
+    });
+  });
 
   // Intercept the configured close-session binding before the default app menu's
   // "Close Window" accelerator closes the BrowserWindow. We forward to the

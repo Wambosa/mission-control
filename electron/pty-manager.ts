@@ -6,6 +6,10 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { getAppTheme } from "./app-theme";
 import { getBooleanAppSetting } from "./app-settings-store";
+import {
+  awaitFsPermissionPreflight,
+  isFsPermissionPreflightResolved,
+} from "./fs-permission-preflight";
 import { runSessionScaffolding, unreadableCwdNotice } from "./session-scaffolding";
 import { IPC } from "./ipc-channels";
 import { safeHandle } from "./ipc-safe-handle";
@@ -499,9 +503,71 @@ async function killPty(p: Pty): Promise<boolean> {
  * PTYs were terminated.
  */
 async function killPtysUnderPath(root: string): Promise<number> {
+  cancelPendingSpawnsUnderPath(root);
   const targets = [...ptys.values()].filter((p) => isCwdWithin(p.cwd, root));
   await Promise.all(targets.map((p) => killPty(p)));
   return targets.length;
+}
+
+/**
+ * Spawns parked on the permission pre-flight gate.
+ *
+ * A spawn that resumes after its pane is gone — or after the quit handler has
+ * torn every PTY down — creates a process nothing will ever kill. The gate is
+ * the only place in spawn that can wait for tens of seconds, so it is the only
+ * place that needs this.
+ */
+type PendingSpawn = { cwd: string; cancelled: boolean };
+const pendingGateWaits = new Map<string, PendingSpawn>();
+
+export function cancelPendingSpawn(taskId: string): boolean {
+  const pending = pendingGateWaits.get(taskId);
+  if (!pending) return false;
+  pending.cancelled = true;
+  return true;
+}
+
+export function cancelPendingSpawnsUnderPath(root: string): void {
+  for (const [taskId, pending] of pendingGateWaits) {
+    if (isCwdWithin(pending.cwd, root)) cancelPendingSpawn(taskId);
+  }
+}
+
+function cancelAllPendingSpawns(): void {
+  for (const pending of pendingGateWaits.values()) pending.cancelled = true;
+}
+
+/** Test-only: drop waits a deliberately-stalled gate is still holding. */
+export function __resetPendingSpawnsForTests(): void {
+  pendingGateWaits.clear();
+}
+
+function appIsQuitting(): boolean {
+  return Boolean((app as unknown as { isQuiting?: boolean } | undefined)?.isQuiting);
+}
+
+/**
+ * Wait for the launch permission sweep before scaffolding a local agent
+ * session, so the consent prompts are answered against a window rather than
+ * mid-session. Returns false when the spawn should be abandoned instead.
+ */
+export async function awaitSpawnGate(
+  taskId: string,
+  cwd: string,
+  isQuitting: () => boolean = appIsQuitting,
+): Promise<boolean> {
+  if (isFsPermissionPreflightResolved()) return true;
+  const pending: PendingSpawn = { cwd, cancelled: false };
+  pendingGateWaits.set(taskId, pending);
+  try {
+    await awaitFsPermissionPreflight();
+  } finally {
+    pendingGateWaits.delete(taskId);
+  }
+  if (pending.cancelled) return false;
+  // The quit handler tears down every PTY it can see; one created after it ran
+  // is invisible to it.
+  return !isQuitting();
 }
 
 export function registerPtyHandlers(
@@ -605,6 +671,16 @@ export function registerPtyHandlers(
       // Read synchronously from the same app_settings DB the server owns; when
       // off, the hook is omitted (and any previously-installed one is stripped
       // by the rebuild inside installAgentHooks). Default true = pet-on default.
+      // Local agent sessions wait for the launch permission sweep so a consent
+      // prompt is raised against the window rather than mid-session (R19). The
+      // gate carries its own deadline, so this is bounded whether or not the
+      // operator answers. Remote spawns are handled in sandbox-manager and
+      // deliberately do not wait — their scaffolding happens on another machine
+      // and touches no local protected path (R27). Do not "fix" that asymmetry.
+      if (plan.mode === "agent" && !(await awaitSpawnGate(opts.taskId, plan.cwd))) {
+        throw new Error("pty:spawn cancelled while waiting on filesystem permissions");
+      }
+
       const petEnabled = getBooleanAppSetting(app.getPath("userData"), "pet_enabled", true);
       const mcEnv = plan.mode === "agent" ? getHookEnv() : null;
       // Every read and write under the session's working directory happens
@@ -891,6 +967,9 @@ export function disposeAllPtys(
 }
 
 export function killAllPtys() {
+  // Anything still parked on the permission gate would otherwise resume after
+  // this sweep and spawn a PTY nothing is left to kill.
+  cancelAllPendingSpawns();
   disposeAllPtys([...ptys.values()].map((p) => p.proc));
   ptys.clear();
 }

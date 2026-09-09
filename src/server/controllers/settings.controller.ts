@@ -174,6 +174,7 @@ const updateSettingsBody = z
     sessionFinishToastEnabled: z.boolean(),
     sessionFinishOsNotificationEnabled: z.boolean(),
     notificationSoundEnabled: z.boolean(),
+    silenceAlertsEnabled: z.boolean(),
     launchOverlayEnabled: z.boolean(),
     worktreesEnabled: z.boolean(),
     questionOverlayEnabled: z.boolean(),
@@ -441,6 +442,8 @@ function settingsPayload() {
       false,
     ),
     notificationSoundEnabled: getBooleanSetting("notification_sound_enabled", true),
+    // Default on -- see the note on AppSettings.silenceAlertsEnabled.
+    silenceAlertsEnabled: getBooleanSetting("silence_alerts_enabled", true),
     launchOverlayEnabled: getBooleanSetting("launch_overlay_enabled", false),
     // Always on — worktrees graduated from experimental; ignore any stored preference.
     worktreesEnabled: true,
@@ -582,6 +585,9 @@ export async function update(request: Request): Promise<Response> {
       "session_finish_os_notification_enabled",
       body.sessionFinishOsNotificationEnabled,
     );
+  }
+  if (body.silenceAlertsEnabled !== undefined) {
+    setBooleanSetting("silence_alerts_enabled", body.silenceAlertsEnabled);
   }
   if (body.notificationSoundEnabled !== undefined) {
     setBooleanSetting("notification_sound_enabled", body.notificationSoundEnabled);

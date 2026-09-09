@@ -1,6 +1,7 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TaskAgent } from "../src/shared/domain";
+import { nodeScaffoldingFs, type ScaffoldingFs } from "../src/shared/scaffolding-fs";
+
 import {
   DIAGRAM_SKILL_INSTALL_TARGETS,
   type DiagramSkillHarness,
@@ -20,24 +21,31 @@ function bundledDiagramSkillSourceDirs(appPath: string): string[] {
   ];
 }
 
-function resolveBundledDiagramSkillSource(appPath: string): string | null {
+async function resolveBundledDiagramSkillSource(
+  appPath: string,
+  fs: ScaffoldingFs,
+): Promise<string | null> {
   for (const candidate of bundledDiagramSkillSourceDirs(appPath)) {
-    if (fs.existsSync(path.join(candidate, "SKILL.md"))) return candidate;
+    if (await fs.exists(path.join(candidate, "SKILL.md"))) return candidate;
   }
   return null;
 }
 
-function copySkillTree(sourceDir: string, targetDir: string): void {
-  fs.mkdirSync(targetDir, { recursive: true });
-  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+async function copySkillTree(
+  sourceDir: string,
+  targetDir: string,
+  fs: ScaffoldingFs,
+): Promise<void> {
+  await fs.mkdir(targetDir);
+  for (const entry of await fs.readdir(sourceDir)) {
     const from = path.join(sourceDir, entry.name);
     const to = path.join(targetDir, entry.name);
     if (entry.isDirectory()) {
-      copySkillTree(from, to);
+      await copySkillTree(from, to, fs);
       continue;
     }
     if (!entry.isFile()) continue;
-    fs.copyFileSync(from, to);
+    await fs.copyFile(from, to);
   }
 }
 
@@ -49,32 +57,29 @@ function diagramSkillTargetPaths(cwd: string, harness: DiagramSkillHarness): str
   return [primary, path.join(cwd, ".agents", "skills", "diagram")];
 }
 
-function isDiagramSkillInstalled(targetDir: string): boolean {
-  return fs.existsSync(path.join(targetDir, "SKILL.md"));
-}
-
 /**
  * Best-effort install of the bundled diagram skill into the project cwd when
  * an agent session starts. Agents only discover skills from on-disk folders;
  * without this, users must run "Install diagram skill" manually per project.
  */
-export function ensureDiagramSkillForAgent(
+export async function ensureDiagramSkillForAgent(
   appPath: string,
   cwd: string,
   agent: TaskAgent | undefined,
-): void {
+  fs: ScaffoldingFs = nodeScaffoldingFs,
+): Promise<void> {
   if (!agent) return;
   const harness = AGENT_HARNESS[agent];
   if (!harness) return;
 
-  const sourceDir = resolveBundledDiagramSkillSource(appPath);
+  const sourceDir = await resolveBundledDiagramSkillSource(appPath, fs);
   if (!sourceDir) return;
 
   for (const targetDir of diagramSkillTargetPaths(cwd, harness)) {
-    if (isDiagramSkillInstalled(targetDir)) continue;
+    if (await fs.exists(path.join(targetDir, "SKILL.md"))) continue;
     try {
-      fs.rmSync(targetDir, { recursive: true, force: true });
-      copySkillTree(sourceDir, targetDir);
+      await fs.rm(targetDir);
+      await copySkillTree(sourceDir, targetDir, fs);
     } catch {
       /* swallow — skill install must never block PTY spawn */
     }

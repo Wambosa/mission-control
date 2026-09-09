@@ -7,7 +7,18 @@ import {
   isSafeSshCloneRemote,
   isSandboxAgentVersionCurrent,
   makeCloneCoordinator,
+  forgetRemotePtyState,
+  releaseRemotePtysForSandbox,
+  __trackRemotePtyForTests,
+  __remotePtyStateExistsForTests,
+  __pushRemoteTailForTests,
+  liveRemotePtyIds,
 } from "../sandbox-manager";
+import {
+  __resetSilenceTrackerForTests,
+  getTrackedPty,
+  readPtyTail,
+} from "../silence-tracker";
 
 /** A promise plus its resolve/reject, so a test can hold a clone "in flight". */
 function deferred<T>() {
@@ -148,5 +159,73 @@ describe("clone single-flight coordinator", () => {
     await expect(b).rejects.toThrow("already exists");
     expect(work).toHaveBeenCalledTimes(1);
     expect(coord.inFlightCount).toBe(0);
+  });
+});
+
+describe("remote PTY state on a dropped transport", () => {
+  it("clears ownership, timing and tail state, and marks the sessions unreachable", () => {
+    // The close handler used to dispose the batcher and forget the client but
+    // leave these maps populated, and no exit event ever arrives for a dropped
+    // connection. Anything built on that state inherits sessions that no
+    // longer have a transport — which read as silent, not unreachable.
+    __resetSilenceTrackerForTests();
+    __trackRemotePtyForTests("rpty-a", "sandbox-1", "task-a");
+    __trackRemotePtyForTests("rpty-b", "sandbox-1", "task-b");
+    __trackRemotePtyForTests("rpty-other", "sandbox-2", "task-c");
+
+    releaseRemotePtysForSandbox("sandbox-1");
+
+    // The routing and timing state -- the part that leaked, because no exit
+    // event is coming -- is gone.
+    expect(__remotePtyStateExistsForTests("rpty-a")).toBe(false);
+    expect(__remotePtyStateExistsForTests("rpty-b")).toBe(false);
+
+    // But the sessions are still visible to the sweep, marked unreachable
+    // rather than silently vanished -- otherwise nothing could say why they
+    // stopped alerting.
+    expect(getTrackedPty("rpty-a")?.transportDown).toBe(true);
+    expect(getTrackedPty("rpty-b")?.transportDown).toBe(true);
+    expect(liveRemotePtyIds()).toEqual(
+      expect.arrayContaining(["rpty-a", "rpty-b", "rpty-other"]),
+    );
+
+    // A sandbox that did not drop keeps everything.
+    expect(__remotePtyStateExistsForTests("rpty-other")).toBe(true);
+    expect(getTrackedPty("rpty-other")?.transportDown).toBe(false);
+    expect(getTrackedPty("rpty-other")?.taskId).toBe("task-c");
+    __resetSilenceTrackerForTests();
+  });
+
+  it("stops tracking a dropped PTY once it is explicitly torn down", () => {
+    __resetSilenceTrackerForTests();
+    __trackRemotePtyForTests("rpty-a", "sandbox-1", "task-a");
+    releaseRemotePtysForSandbox("sandbox-1");
+    expect(liveRemotePtyIds()).toContain("rpty-a");
+
+    forgetRemotePtyState("rpty-a");
+    expect(liveRemotePtyIds()).not.toContain("rpty-a");
+    expect(getTrackedPty("rpty-a")).toBeUndefined();
+    __resetSilenceTrackerForTests();
+  });
+
+  it("forgets one remote PTY's state on its own teardown", () => {
+    __resetSilenceTrackerForTests();
+    __trackRemotePtyForTests("rpty-a", "sandbox-1", "task-a");
+    forgetRemotePtyState("rpty-a");
+
+    expect(__remotePtyStateExistsForTests("rpty-a")).toBe(false);
+    expect(getTrackedPty("rpty-a")).toBeUndefined();
+    __resetSilenceTrackerForTests();
+  });
+
+  it("keeps a remote session's tail locally, so it survives an unreachable agent", () => {
+    // Replay is an RPC that resolves empty on timeout, so it would produce
+    // nothing exactly when the alert matters most.
+    __resetSilenceTrackerForTests();
+    __trackRemotePtyForTests("rpty-a", "sandbox-1", "task-a");
+    __pushRemoteTailForTests("rpty-a", "waiting for /Users/me/Documents/vault");
+
+    expect(readPtyTail("rpty-a")).toContain("Documents/vault");
+    __resetSilenceTrackerForTests();
   });
 });

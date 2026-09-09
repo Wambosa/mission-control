@@ -23,10 +23,36 @@ import * as nodeNet from "node:net";
 import * as readline from "node:readline";
 import * as os from "node:os";
 import { spawn, ChildProcess, spawnSync } from "node:child_process";
-import { registerPtyHandlers, killAllPtys, drainPtyTranscripts } from "./pty-manager";
+import {
+  registerPtyHandlers,
+  killAllPtys,
+  drainPtyTranscripts,
+  liveLocalPtyIds,
+} from "./pty-manager";
 import { formatRendererConsoleLine, rendererLogMethod } from "./renderer-console-log";
 import { createServerOutputForwarder } from "./server-output-forwarder";
 import { registerDiagnosticsHandlers } from "./diagnostics-handlers";
+import {
+  currentFsPermissionRecords,
+  isFsPermissionPreflightResolved,
+  reprobePendingFsPermissions,
+  startFsPermissionPreflight,
+} from "./fs-permission-preflight";
+import { recordFsPermissionOutcomes } from "./fs-permission-state";
+import { openPrivacyPane } from "./privacy-pane";
+import { classifyProbeError } from "./fs-permission-probe";
+import { expandTilde } from "../src/shared/tilde-path";
+import { AttentionSignal } from "./attention-signal";
+import {
+  SilenceSweep,
+  type SilenceAlert,
+  type SilenceAlertSession,
+} from "./silence-sweep";
+import { getTrackedPty, readPtyTail, type TrackedPty } from "./silence-tracker";
+import { extractTerminalTail } from "../src/shared/terminal-text";
+import { matchHangSignature } from "../src/shared/hang-signatures";
+import { fsPermissionCategoryFromText } from "../src/shared/fs-permission";
+import type { SessionFacts } from "./silence-policy";
 import { setPtyStreamHidden, setPtyStreamPowerSave } from "./pty-output-batch";
 import { setAppThemeFromBackground } from "./app-theme";
 import { registerFileHandlers, disposeAllFileWatchers } from "./file-handlers";
@@ -39,6 +65,7 @@ import {
   registerSandboxManager,
   disposeSandboxManager,
   agentCliUpdateTargetFor,
+  liveRemotePtyIds,
 } from "./sandbox-manager";
 import {
   disposeApiTokenStore,
@@ -1250,7 +1277,32 @@ async function createWindow() {
     },
   });
 
-  win.once("ready-to-show", () => win?.show());
+  win.on("focus", () => {
+    attentionSignal.clear();
+    // Coming back to the app is the likeliest moment to have just answered a
+    // consent dialog somewhere else on screen.
+    void reprobePendingFsPermissions();
+  });
+
+  win.once("ready-to-show", () => {
+    win?.show();
+    // Ask macOS for the protected locations now: the window exists, so a
+    // consent prompt has something to attach to and the operator can answer it
+    // before they open their first session. Fire-and-forget by construction —
+    // the sweep never rejects and carries its own deadline, so nothing here
+    // can delay or fail startup (R4).
+    startFsPermissionPreflight({
+      recordOutcomes: (outcomes, checkedAt) =>
+        recordFsPermissionOutcomes(app.getPath("userData"), outcomes, checkedAt),
+      onUpdate: (records) => {
+        if (!win || win.isDestroyed()) return;
+        win.webContents.send(IPC.fsPermissionsChanged, {
+          records,
+          resolved: isFsPermissionPreflightResolved(),
+        });
+      },
+    });
+  });
 
   // Intercept the configured close-session binding before the default app menu's
   // "Close Window" accelerator closes the BrowserWindow. We forward to the
@@ -1755,7 +1807,7 @@ safeHandle(IPC.dialogListFolders, async (_evt, requested: unknown) => {
   const raw = typeof requested === "string" && requested.trim() ? requested : home;
   let dir: string;
   try {
-    dir = await fsp.realpath(path.resolve(raw));
+    dir = await fsp.realpath(path.resolve(expandTilde(raw, home)));
     if (!(await fsp.stat(dir)).isDirectory()) return { ok: false as const, error: "Not a folder" };
   } catch {
     return { ok: false as const, error: "Folder not found" };
@@ -1763,7 +1815,20 @@ safeHandle(IPC.dialogListFolders, async (_evt, requested: unknown) => {
   let dirents: fs.Dirent[];
   try {
     dirents = await fsp.readdir(dir, { withFileTypes: true });
-  } catch {
+  } catch (err) {
+    // "Can't read this folder" is true of a privacy block and useless about
+    // it. This is the surface an operator reaches first when adding a project,
+    // so it is the likeliest place to meet a protected location -- and the one
+    // place a generic message costs them the most, because the fix is a click
+    // away and nothing said so.
+    if (classifyProbeError(err) === "privacy-blocked") {
+      return {
+        ok: false as const,
+        error:
+          "macOS is blocking access to this folder. Grant it in Settings \u2192 Diagnostics \u2192 Folder access, then try again.",
+        privacyCategory: fsPermissionCategoryFromText(`${dir}/`, home) ?? undefined,
+      };
+    }
     return { ok: false as const, error: "Can't read this folder" };
   }
   const visible = dirents
@@ -1829,7 +1894,7 @@ safeHandle(IPC.dialogCreateFolder, async (_evt, parentRaw: unknown, nameRaw: unk
   }
   let parent: string;
   try {
-    parent = await fs.promises.realpath(path.resolve(parentRaw));
+    parent = await fs.promises.realpath(path.resolve(expandTilde(parentRaw, app.getPath("home"))));
     if (!(await fs.promises.stat(parent)).isDirectory()) {
       return { ok: false as const, error: "Location is not a folder" };
     }
@@ -1858,7 +1923,7 @@ safeHandle(IPC.dialogCreateFolder, async (_evt, parentRaw: unknown, nameRaw: unk
 safeHandle(IPC.dialogGrantFolder, async (_evt, requested: unknown) => {
   if (typeof requested !== "string" || !requested.trim()) return { ok: false as const };
   try {
-    const dir = fs.realpathSync(path.resolve(requested));
+    const dir = fs.realpathSync(path.resolve(expandTilde(requested, app.getPath("home"))));
     if (!fs.statSync(dir).isDirectory()) return { ok: false as const };
     recordPickedDirectoryGrant(dir);
     return { ok: true as const };
@@ -1881,6 +1946,168 @@ registerDiagnosticsHandlers(ipcMain, () => win, {
   userDataDir: missionControlUserDataDir,
   runtimePort: () => runtimePort,
 });
+
+/**
+ * Protected-location probe outcomes and the privacy-pane jump.
+ *
+ * These are per-launch runtime facts, not stored preferences, so they ride
+ * invoke-plus-push rather than the settings HTTP path. The pre-flight sweep's
+ * live view is authoritative while the app is running; the persisted record is
+ * what a launch before this one left behind, which is what makes a grant from
+ * a previous build legible as stale.
+ */
+safeHandle(IPC.fsPermissionsGet, async () => {
+  // Opening Diagnostics is the operator asking what the state is, so ask the
+  // filesystem rather than repeat what a launch-time sweep found -- access can
+  // have been taken away since, and nothing announces that. Deliberately not
+  // awaited: the panel opens on what is known now and the rows update from the
+  // push when the answers land, which is what the read/push split is for.
+  void reprobePendingFsPermissions({ all: true });
+  return {
+    records: currentFsPermissionRecords(missionControlUserDataDir),
+    resolved: isFsPermissionPreflightResolved(),
+    supported: process.platform === "darwin",
+  };
+});
+
+/**
+ * Session facts pushed by the renderer, and the sweep that consumes them.
+ *
+ * The renderer owns titles, projects, statuses and which pane is focused; main
+ * owns output timing and the decision. The focused-pane fact in particular has
+ * no other source — neither main nor the server knows which terminal the
+ * operator is looking at.
+ */
+const sessionFacts = new Map<string, SessionFacts>();
+
+safeHandle(IPC.sessionFactsReport, (_evt, report: unknown) => {
+  if (!report || typeof report !== "object") return false;
+  sessionFacts.clear();
+  for (const [ptyId, entry] of Object.entries(report as Record<string, SessionFacts>)) {
+    if (entry && typeof entry === "object") sessionFacts.set(ptyId, entry);
+  }
+  return true;
+});
+
+/**
+ * The dock signal.
+ *
+ * macOS bounces the dock icon at a critical level until the app is activated,
+ * and cancels the request itself at that point. Windows flashes the frame.
+ * Nowhere else has an equivalent, and the module reports that rather than
+ * pretending.
+ */
+const attentionSignal = new AttentionSignal({
+  platform: process.platform,
+  isAppActive: () => Boolean(win?.isFocused()),
+  requestAttention: () => {
+    if (process.platform === "darwin") return app.dock?.bounce("critical") ?? null;
+    win?.flashFrame(true);
+    return null;
+  },
+  cancelAttention: (handle) => {
+    if (process.platform === "darwin") {
+      if (handle !== null) app.dock?.cancelBounce(handle);
+      return;
+    }
+    win?.flashFrame(false);
+  },
+});
+
+/** How many sessions may be named individually before the alert coalesces. */
+const SILENCE_ALERT_COALESCE_AT = 3;
+
+/**
+ * Turn a sweep alert into what the operator sees: the tail of what the session
+ * last printed, and a known signature's remediation where one matches.
+ */
+function describeSilentSession(alert: SilenceAlert): SilenceAlertSession {
+  const described: SilenceAlertSession = {
+    ptyId: alert.ptyId,
+    taskId: alert.taskId,
+    title: alert.title,
+    project: alert.project,
+    silentMs: Math.round(alert.silentMs),
+    awaitingOperator: alert.awaitingOperator,
+  };
+
+  const tail = extractTerminalTail(readPtyTail(alert.ptyId));
+  // Absent rather than empty: a repaint-only tail is reported as having none.
+  if (tail) described.tail = tail;
+  if (!tail) return described;
+
+  const signature = matchHangSignature(tail);
+  if (!signature.match) return described;
+  described.remediation = signature.match.remediation;
+  if (signature.match.id === "macos-file-access") {
+    const category = fsPermissionCategoryFromText(tail, os.homedir());
+    if (category) described.privacyCategory = category;
+  }
+  return described;
+}
+
+const silenceSweep = new SilenceSweep({
+  // Enumerated from the two managers that own PTY lifecycle, never from the
+  // tracker: a missed teardown there must not become a phantom session here.
+  listSessions: () =>
+    [...liveLocalPtyIds(), ...liveRemotePtyIds()]
+      .map((ptyId) => getTrackedPty(ptyId))
+      .filter((entry): entry is TrackedPty => entry !== undefined),
+  facts: () => sessionFacts,
+  onAlerts: (alerts) => {
+    for (const alert of alerts) {
+      log.info("session.silent", {
+        event: "session.silent",
+        ptyId: alert.ptyId,
+        taskId: alert.taskId,
+        stage: alert.stage,
+        silentMs: Math.round(alert.silentMs),
+        awaitingOperator: alert.awaitingOperator,
+      });
+    }
+    if (!getBooleanAppSetting(missionControlUserDataDir, "silence_alerts_enabled", true)) return;
+    if (!win || win.isDestroyed()) return;
+
+    for (const stage of ["hard", "soft"] as const) {
+      const staged = alerts.filter((alert) => alert.stage === stage);
+      if (staged.length === 0) continue;
+      win.webContents.send(IPC.sessionSilenceAlert, {
+        stage,
+        sessions: staged.map(describeSilentSession),
+        // Several at once become one alert naming the count: a wall of toasts
+        // is not more informative than a single one that lists them.
+        coalesced: staged.length >= SILENCE_ALERT_COALESCE_AT,
+      });
+    }
+  },
+  onTick: ({ sessionsAtHardStage }) => {
+    // Nothing held at hard: stand the signal down and skip the settings read.
+    // This runs every fifteen seconds for the life of the app, so it should
+    // touch the database only when it has something to decide.
+    if (sessionsAtHardStage.length === 0) {
+      attentionSignal.clear();
+      return;
+    }
+    // Turning the setting off has to stop a bounce already running. Returning
+    // early without clearing would leave the dock asking until the operator
+    // focused the window -- the one thing they turned it off to avoid.
+    if (!getBooleanAppSetting(missionControlUserDataDir, "silence_alerts_enabled", true)) {
+      attentionSignal.clear();
+      return;
+    }
+    // A raise skipped because the operator was at their desk is retried until
+    // it lands or output resumes -- the hard stage is sticky for the episode,
+    // but the signal itself must not be lost permanently.
+    attentionSignal.raise();
+  },
+});
+
+safeHandle(IPC.fsPermissionsOpenPrivacyPane, async (_evt, category: unknown) =>
+  openPrivacyPane(category, {
+    platform: process.platform,
+    openExternal: (url) => shell.openExternal(url),
+  }),
+);
 
 safeHandle(IPC.shellOpenPath, async (_evt, p: string) => {
   const decision = resolveSafeOpenPath(p, loadProjectRoots());
@@ -2130,6 +2357,10 @@ app.on("window-all-closed", () => {
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  // The platform has already cancelled the dock request by the time this runs
+  // on macOS, so the job here is resetting local bookkeeping — without it the
+  // guard flag stays set and the next raise never happens.
+  attentionSignal.clear();
 });
 
 /**
@@ -2208,6 +2439,11 @@ app.whenReady().then(() => {
     session.defaultSession.setSpellCheckerEnabled(enabled === true);
     return true;
   });
+  // Silence detection. Registered here because powerMonitor is only usable
+  // after 'ready', and the resume event is what classifies a sweep gap as the
+  // machine having been away rather than the app having stalled.
+  powerMonitor.on("resume", () => silenceSweep.noteSystemResume());
+  silenceSweep.start();
   registerProjectImageProtocol();
   registerFocusMode(() => win, missionControlUserDataDir, {
     width: MAIN_WINDOW_MIN_WIDTH,

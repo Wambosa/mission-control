@@ -5,14 +5,20 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { getAppTheme } from "./app-theme";
-import { installAgentHooks } from "./agent-hooks";
 import { getBooleanAppSetting } from "./app-settings-store";
-import { installAgentMemoryBrief } from "./agent-memory-brief";
-import { ensureStatuslineTap } from "../src/shared/statusline-tap";
-import { ensureDiagramSkillForAgent } from "./ensure-diagram-skill";
-import { ensureRecallSkillForAgent, removeRecallSkillForAgent } from "./ensure-recall-skill";
-import { ensureRecallMcpForAgent, removeRecallMcpForAgent } from "./ensure-recall-mcp";
-import { fetchRecallEnabled } from "./recall-enabled";
+import {
+  awaitFsPermissionPreflight,
+  currentFsPermissionRecords,
+  isFsPermissionPreflightResolved,
+} from "./fs-permission-preflight";
+import { runSessionScaffolding, unreadableCwdNotice } from "./session-scaffolding";
+import {
+  REMOTE_TAIL_LIMIT_BYTES,
+  recordPtyInput,
+  recordPtyOutput,
+  trackPty,
+  untrackPty,
+} from "./silence-tracker";
 import { IPC } from "./ipc-channels";
 import { safeHandle } from "./ipc-safe-handle";
 import { PtyOutputBatcher } from "./pty-output-batch";
@@ -336,6 +342,25 @@ function loadNodePty() {
   return nodePty!;
 }
 
+/**
+ * The most recent bytes of a PTY's ring.
+ *
+ * Walks back from the newest chunk rather than joining the whole buffer: the
+ * local ring is a megabyte because it also serves replay, while a tail needs a
+ * few kilobytes, and building the megabyte to throw away all but the end of it
+ * would be real work on the path where an alert is already late.
+ */
+function readBufferTail(p: Pty, limitBytes: number = REMOTE_TAIL_LIMIT_BYTES): string {
+  const parts: string[] = [];
+  let bytes = 0;
+  for (let i = p.buffer.length - 1; i >= 0 && bytes < limitBytes; i -= 1) {
+    const chunk = p.buffer[i];
+    parts.push(chunk.data);
+    bytes += chunk.bytes;
+  }
+  return parts.reverse().join("");
+}
+
 function appendBuffer(p: Pty, data: string): number {
   const bytes = Buffer.byteLength(data, "utf8");
   const seq = p.nextSeq++;
@@ -495,6 +520,7 @@ async function killPty(p: Pty): Promise<boolean> {
     return false;
   } finally {
     ptys.delete(p.id);
+    untrackPty(p.id);
   }
 }
 
@@ -505,9 +531,81 @@ async function killPty(p: Pty): Promise<boolean> {
  * PTYs were terminated.
  */
 async function killPtysUnderPath(root: string): Promise<number> {
+  cancelPendingSpawnsUnderPath(root);
   const targets = [...ptys.values()].filter((p) => isCwdWithin(p.cwd, root));
   await Promise.all(targets.map((p) => killPty(p)));
   return targets.length;
+}
+
+/**
+ * Spawns parked on the permission pre-flight gate.
+ *
+ * A spawn that resumes after its pane is gone — or after the quit handler has
+ * torn every PTY down — creates a process nothing will ever kill. The gate is
+ * the only place in spawn that can wait for tens of seconds, so it is the only
+ * place that needs this.
+ */
+// Keyed per spawn, not per task. Two spawns for the same task can overlap
+// while the gate is open — a retry after a transient failure, or two panes
+// bound to one task — and keying by task id let the second overwrite the
+// first's registration, after which the first's cleanup deleted the second's.
+// The survivor was then uncancellable, which is the exact thing this prevents.
+type PendingSpawn = { taskId: string; cwd: string; cancelled: boolean };
+const pendingGateWaits = new Map<symbol, PendingSpawn>();
+
+/** Cancel every spawn parked for this task. Returns whether any was waiting. */
+export function cancelPendingSpawn(taskId: string): boolean {
+  let cancelled = false;
+  for (const pending of pendingGateWaits.values()) {
+    if (pending.taskId !== taskId) continue;
+    pending.cancelled = true;
+    cancelled = true;
+  }
+  return cancelled;
+}
+
+export function cancelPendingSpawnsUnderPath(root: string): void {
+  for (const pending of pendingGateWaits.values()) {
+    if (isCwdWithin(pending.cwd, root)) pending.cancelled = true;
+  }
+}
+
+function cancelAllPendingSpawns(): void {
+  for (const pending of pendingGateWaits.values()) pending.cancelled = true;
+}
+
+/** Test-only: drop waits a deliberately-stalled gate is still holding. */
+export function __resetPendingSpawnsForTests(): void {
+  pendingGateWaits.clear();
+}
+
+function appIsQuitting(): boolean {
+  return Boolean((app as unknown as { isQuiting?: boolean } | undefined)?.isQuiting);
+}
+
+/**
+ * Wait for the launch permission sweep before scaffolding a local agent
+ * session, so the consent prompts are answered against a window rather than
+ * mid-session. Returns false when the spawn should be abandoned instead.
+ */
+export async function awaitSpawnGate(
+  taskId: string,
+  cwd: string,
+  isQuitting: () => boolean = appIsQuitting,
+): Promise<boolean> {
+  if (isFsPermissionPreflightResolved()) return true;
+  const key = Symbol("pending-spawn");
+  const pending: PendingSpawn = { taskId, cwd, cancelled: false };
+  pendingGateWaits.set(key, pending);
+  try {
+    await awaitFsPermissionPreflight();
+  } finally {
+    pendingGateWaits.delete(key);
+  }
+  if (pending.cancelled) return false;
+  // The quit handler tears down every PTY it can see; one created after it ran
+  // is invisible to it.
+  return !isQuitting();
 }
 
 export function registerPtyHandlers(
@@ -611,32 +709,34 @@ export function registerPtyHandlers(
       // Read synchronously from the same app_settings DB the server owns; when
       // off, the hook is omitted (and any previously-installed one is stripped
       // by the rebuild inside installAgentHooks). Default true = pet-on default.
-      const petEnabled = getBooleanAppSetting(app.getPath("userData"), "pet_enabled", true);
-      installAgentHooks(opts.agent, plan.cwd, undefined, { petEnabled });
-      const mcEnv = plan.mode === "agent" ? getHookEnv() : null;
-      if (plan.mode === "agent") {
-        ensureDiagramSkillForAgent(app.getAppPath(), plan.cwd, plan.agent);
-        // Recall provisioning follows the LIVE master switch so flipping the
-        // toggle applies to the next session without an app restart. Off →
-        // actively remove the managed skill + `.mcp.json` entry; on (or
-        // unknown — the fetch is fail-soft) → install as before. A running
-        // session can't hot-swap its MCP config, but the server also refuses
-        // Recall reads while disabled, so its tools go dead regardless.
-        const recallEnabled = await fetchRecallEnabled(mcEnv);
-        if (recallEnabled === false) {
-          removeRecallSkillForAgent(plan.cwd, plan.agent);
-          removeRecallMcpForAgent(plan.cwd, plan.agent);
-        } else {
-          ensureRecallSkillForAgent(app.getAppPath(), plan.cwd, plan.agent);
-          // Recall code graph — file-based MCP config for local Claude sessions
-          // only (self-gated inside). Never touches the spawn argv.
-          ensureRecallMcpForAgent(app.getAppPath(), plan.cwd, plan.agent);
-        }
-        // Claude sessions feed the shared usage-limits cache via the statusline
-        // tap, so the top-bar indicator doesn't have to poll Anthropic's
-        // aggressively rate-limited OAuth usage endpoint.
-        if (plan.agent === "claude-code") ensureStatuslineTap(plan.cwd);
+      // Local agent sessions wait for the launch permission sweep so a consent
+      // prompt is raised against the window rather than mid-session (R19). The
+      // gate carries its own deadline, so this is bounded whether or not the
+      // operator answers. Remote spawns are handled in sandbox-manager and
+      // deliberately do not wait — their scaffolding happens on another machine
+      // and touches no local protected path (R27). Do not "fix" that asymmetry.
+      if (plan.mode === "agent" && !(await awaitSpawnGate(opts.taskId, plan.cwd))) {
+        throw new Error("pty:spawn cancelled while waiting on filesystem permissions");
       }
+
+      const petEnabled = getBooleanAppSetting(app.getPath("userData"), "pet_enabled", true);
+      const mcEnv = plan.mode === "agent" ? getHookEnv() : null;
+      // Every read and write under the session's working directory happens
+      // here, behind one probe of that directory. A cwd under a protected
+      // location with an unanswered consent prompt would otherwise stall each
+      // of these calls in turn — synchronously freezing the whole app, or
+      // asynchronously consuming the four-thread libuv pool that all of main's
+      // promise-based filesystem work shares. See session-scaffolding.ts.
+      const scaffolding = await runSessionScaffolding({
+        appPath: app.getAppPath(),
+        cwd: plan.cwd,
+        agent: opts.agent,
+        taskId: opts.taskId,
+        mcEnv,
+        petEnabled,
+        isAgentSession: plan.mode === "agent",
+        fsPermissionRecords: currentFsPermissionRecords(app.getPath("userData")),
+      });
 
       // Theme hint for the agent: prefer main's authoritative app theme over
       // the renderer-supplied value — the renderer reads its OWN window's
@@ -661,19 +761,6 @@ export function registerPtyHandlers(
         env.COLORFGBG = appTheme === "light" ? "0;15" : "15;0";
       }
       applyAgentPtyEnv(env, opts.agent);
-
-      // Recall — inject the project's Session Brief into the agent's auto-load
-      // file BEFORE spawning so the agent reads current project memory on
-      // startup. Fetches the rendered brief from the local API server; fully
-      // fail-soft (short timeout, never throws) so it can't block the session.
-      if (plan.mode === "agent") {
-        await installAgentMemoryBrief({
-          agent: opts.agent,
-          cwd: plan.cwd,
-          taskId: opts.taskId,
-          mcEnv,
-        });
-      }
 
       // Agent mode uses the policy-built spawn target. POSIX/native executables
       // still launch directly; Windows npm .cmd/.bat shims go through cmd.exe
@@ -720,6 +807,26 @@ export function registerPtyHandlers(
         lastInputAt: 0,
       };
       ptys.set(id, p);
+      trackPty(id, {
+        transport: "local",
+        taskId: opts.taskId,
+        shell: opts.shell === true,
+        sandboxInternal: false,
+        readTail: () => readBufferTail(p),
+      });
+      // The session starts either way (R20 asks for a report, not a retry), but
+      // an operator staring at a terminal that never does anything deserves to
+      // know the app could not read the directory it was pointed at.
+      if (!scaffolding.ran) {
+        const notice = unreadableCwdNotice(plan.cwd, scaffolding.reason);
+        log.warn("pty.scaffolding.skipped", {
+          event: "pty.scaffolding.skipped",
+          ptyId: id,
+          reason: scaffolding.reason,
+          cwd: safeLogValue(plan.cwd),
+        });
+        outputBatcher.push(id, appendBuffer(p, notice), notice, false);
+      }
       // `live` is the running PTY count — the number that crept toward the ptmx
       // cap during the fd-leak era, and the one worth having in the log when a
       // spawn starts failing.
@@ -772,6 +879,11 @@ export function registerPtyHandlers(
 
       proc.onData((data: string) => {
         const seq = appendBuffer(p, data);
+        // Stamped here rather than at the batcher flush: the batcher coalesces
+        // and delays -- up to a second when the window is hidden, further under
+        // power saving -- so a flush-time stamp would inject phantom silence
+        // that varies with window state.
+        recordPtyOutput(id);
         outputBatcher.push(id, seq, data, Date.now() - p.lastInputAt < PTY_INTERACTIVE_WINDOW_MS);
         if (initialInput) scheduleInitialInput(INITIAL_INPUT_SETTLE_MS);
       });
@@ -796,6 +908,7 @@ export function registerPtyHandlers(
         }
         send(getWin, IPC.ptyExit, { ptyId: id, exitCode, signal });
         ptys.delete(id);
+        untrackPty(id);
         // A PTY dying is the last thing that happens before the lockups we're
         // chasing, and signal/exitCode is the part the renderer never records.
         // Logged after the delete so `live` is just the map size — killPty may
@@ -818,6 +931,7 @@ export function registerPtyHandlers(
     const p = ptys.get(ptyId);
     if (!p) return false;
     p.lastInputAt = Date.now();
+    recordPtyInput(ptyId);
     p.proc.write(data);
     return true;
   }, ipcMain);
@@ -842,6 +956,7 @@ export function registerPtyHandlers(
     if (!p) return false;
     disposePty(p.proc);
     ptys.delete(ptyId);
+    untrackPty(ptyId);
     return true;
   }, ipcMain);
 
@@ -905,7 +1020,22 @@ export function disposeAllPtys(
   log.info("pty.killAll.end", { event: "pty.killAll.end", live });
 }
 
+/**
+ * Live local PTY ids.
+ *
+ * The silence sweep enumerates from here rather than from the tracker, so a
+ * missed teardown in the tracker cannot turn a stale entry into a phantom
+ * session. This map is the lifecycle authority; the tracker is a side table.
+ */
+export function liveLocalPtyIds(): string[] {
+  return [...ptys.keys()];
+}
+
 export function killAllPtys() {
+  // Anything still parked on the permission gate would otherwise resume after
+  // this sweep and spawn a PTY nothing is left to kill.
+  cancelAllPendingSpawns();
   disposeAllPtys([...ptys.values()].map((p) => p.proc));
+  for (const id of ptys.keys()) untrackPty(id);
   ptys.clear();
 }

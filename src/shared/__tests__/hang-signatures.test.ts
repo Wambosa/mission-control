@@ -1,0 +1,142 @@
+import { describe, expect, it } from "vitest";
+import {
+  HANG_SIGNATURES,
+  matchHangSignature,
+  normalizeHaystack,
+  type HangSignatureEntry,
+} from "~/shared/hang-signatures";
+import { TERMINAL_TAIL_SCAN_CAP } from "~/shared/terminal-text";
+
+const entries = HANG_SIGNATURES as readonly HangSignatureEntry[];
+
+/**
+ * The shape tests come first on purpose. They are the guardrails that make
+ * "adding a signature is one array element" safe, and they have to exist before
+ * anything relies on them.
+ */
+describe("catalogue shape", () => {
+  it("gives every entry a unique id and a unique priority", () => {
+    expect(new Set(entries.map((e) => e.id)).size).toBe(entries.length);
+    expect(new Set(entries.map((e) => e.priority)).size).toBe(entries.length);
+  });
+
+  it("authors every literal and prefilter in lowercase", () => {
+    for (const entry of entries) {
+      expect(entry.requires, `${entry.id} prefilter`).toBe(entry.requires.toLowerCase());
+      if ("literals" in entry.match) {
+        for (const literal of entry.match.literals) {
+          expect(literal, `${entry.id} literal`).toBe(literal.toLowerCase());
+        }
+      }
+    }
+  });
+
+  it("keeps every literal consistent with the entry's prefilter", () => {
+    // A literal the prefilter can never admit is a signature that silently
+    // never fires — the failure this catches costs nothing to make impossible.
+    for (const entry of entries) {
+      if (!("literals" in entry.match)) continue;
+      for (const literal of entry.match.literals) {
+        expect(literal, `${entry.id}: "${literal}" cannot pass prefilter "${entry.requires}"`)
+          .toContain(entry.requires);
+      }
+    }
+  });
+
+  it("finds each entry's required literal in its own fixture", () => {
+    for (const entry of entries) {
+      expect(normalizeHaystack(entry.fixture), `${entry.id} fixture`).toContain(entry.requires);
+    }
+  });
+
+  it("matches every entry's fixture to that entry and no other", () => {
+    // What stops a later, more generic entry quietly swallowing a specific one.
+    for (const entry of entries) {
+      expect(matchHangSignature(entry.fixture).match?.id, `${entry.id} fixture`).toBe(entry.id);
+    }
+  });
+
+  it("uses no unbounded wildcard and no stateful or redundant flag in a pattern entry", () => {
+    // The haystack is lowercased once, so a case-insensitive flag is dead
+    // weight; an unbounded leading wildcard is the backtracking shape an input
+    // cap alone does not bound; and `g`/`y` make the shared RegExp stateful,
+    // so it would match only every other call.
+    for (const entry of entries) {
+      if (!("pattern" in entry.match)) continue;
+      const source = entry.match.pattern.source;
+      expect(entry.match.pattern.flags, `${entry.id} flags`).not.toContain("i");
+      expect(entry.match.pattern.flags, `${entry.id} flags`).not.toContain("g");
+      expect(entry.match.pattern.flags, `${entry.id} flags`).not.toContain("y");
+      expect(source, `${entry.id} pattern`).not.toMatch(/^\.\*/);
+      expect(source, `${entry.id} pattern`).not.toMatch(/\(\.\*\)\+|\(\.\+\)\+|\(\.\*\)\*/);
+    }
+  });
+
+  it("never interpolates matched text into remediation", () => {
+    for (const entry of entries) {
+      expect(entry.remediation, `${entry.id} remediation`).not.toContain("${");
+      expect(entry.remediation.trim().length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("matchHangSignature", () => {
+  it("matches a tail naming a path under a protected location to the permission signature", () => {
+    const result = matchHangSignature(
+      "Error: EPERM: operation not permitted, scandir '/Users/me/Documents/vault'",
+    );
+    expect(result.match?.id).toBe("macos-file-access");
+    expect(result.match?.remediation).toContain("Folder access");
+    expect(result.degraded).toBe(false);
+  });
+
+  it("matches whatever the terminal's own casing and spacing were", () => {
+    expect(
+      matchHangSignature("EPERM:   OPERATION   NOT   PERMITTED").match?.id,
+    ).toBe("macos-file-access");
+  });
+
+  it("returns the higher-priority entry when a tail matches two", () => {
+    const both = "Do you trust the files in this folder? operation not permitted";
+    expect(matchHangSignature(both).match?.id).toBe("macos-file-access");
+  });
+
+  it("returns no match for an unremarkable tail", () => {
+    expect(matchHangSignature("Running tests… 42 passed").match).toBeNull();
+  });
+
+  it("returns no match for an empty tail", () => {
+    expect(matchHangSignature("")).toEqual({ match: null, degraded: false });
+  });
+
+  it("reports no match at its deadline instead of hanging", () => {
+    // A clock that has already run out on the first check: the pass must give
+    // up and say so rather than delay the alert behind the catalogue.
+    let calls = 0;
+    const result = matchHangSignature("operation not permitted", {
+      deadlineMs: 0,
+      now: () => (calls++ === 0 ? 0 : 1_000),
+    });
+    expect(result.match).toBeNull();
+    expect(result.degraded).toBe(true);
+  });
+
+  it("completes well inside the deadline on adversarial input at the cap", () => {
+    const classes = [
+      "a",
+      " ",
+      "/",
+      "operation not permitte",
+      "log i",
+      "trus",
+      "unreachabl",
+      "\u0000",
+    ];
+    const started = Date.now();
+    for (const unit of classes) {
+      const adversarial = unit.repeat(Math.ceil(TERMINAL_TAIL_SCAN_CAP / unit.length));
+      expect(matchHangSignature(adversarial).match).toBeNull();
+    }
+    expect(Date.now() - started).toBeLessThan(250);
+  });
+});

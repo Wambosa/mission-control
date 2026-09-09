@@ -30,6 +30,18 @@ export const IPC = {
   diagnosticsExport: "diagnostics:export",
   diagnosticsRevealLogs: "diagnostics:revealLogs",
   diagnosticsLogDirectory: "diagnostics:logDirectory",
+  // Protected-location probe outcomes. Per-launch runtime facts, not stored
+  // preferences, so they ride invoke-plus-push rather than the settings HTTP
+  // path. The jump takes a category from a closed set — never a URL.
+  fsPermissionsGet: "fsPermissions:get",
+  fsPermissionsChanged: "fsPermissions:changed",
+  fsPermissionsOpenPrivacyPane: "fsPermissions:openPrivacyPane",
+  // The renderer owns session titles, projects, statuses and which pane is
+  // focused; the silence sweep in main consumes them. Same direction as the
+  // battery-saver and spellcheck pushes.
+  sessionFactsReport: "sessionFacts:report",
+  /** Main pushes a silence alert; the renderer renders it as a toast. */
+  sessionSilenceAlert: "sessionSilence:alert",
   appSetBackgroundColor: "app:setBackgroundColor",
   powerGetOnBattery: "power:getOnBattery",
   powerOnBatteryChange: "power:on-battery-change",

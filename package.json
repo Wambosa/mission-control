@@ -212,7 +212,12 @@
       ],
       "category": "public.app-category.developer-tools",
       "extendInfo": {
-        "NSScreenCaptureUsageDescription": "Mission Control captures a screen region you select so you can attach it to an AI session as visual context."
+        "NSScreenCaptureUsageDescription": "Mission Control captures a screen region you select so you can attach it to an AI session as visual context.",
+        "NSDocumentsFolderUsageDescription": "An AI coding session can open a project in your Documents folder, so it needs to read the files there.",
+        "NSDesktopFolderUsageDescription": "An AI coding session can open a project on your Desktop, so it needs to read the files there.",
+        "NSDownloadsFolderUsageDescription": "An AI coding session can open a project in your Downloads folder, so it needs to read the files there.",
+        "NSRemovableVolumesUsageDescription": "An AI coding session can open a project on an external drive, so it needs to read the files there.",
+        "NSNetworkVolumesUsageDescription": "An AI coding session can open a project on a network share, so it needs to read the files there."
       },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,

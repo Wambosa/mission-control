@@ -1,10 +1,9 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
+import { nodeScaffoldingFs, type MemoryFileFs } from "./scaffolding-fs";
 
-// Recall injection — writes the Session Brief into the file each agent auto-loads
-// at startup, as a marker-delimited managed block (mirrors agent-hooks.ts's
-// `_mcManaged` approach). Single source of truth; re-exported from
-// electron/agent-memory-file.ts.
+// Writes into the file each agent auto-loads at startup, as marker-delimited
+// managed blocks (mirrors agent-hooks.ts's `_mcManaged` approach). Single
+// source of truth; re-exported from electron/agent-memory-file.ts.
 //
 // Privacy (decision D2 — app-private only): the brief goes into a file that is
 // git-ignored so project memory never lands in a commit. Claude Code's
@@ -12,10 +11,37 @@ import * as path from "node:path";
 // the Phase 1 target. Other agents lack a guaranteed private auto-load file, so
 // they are intentionally omitted here until a private channel is settled for
 // each (adding one is a single entry in AGENT_MEMORY_TARGETS).
+//
+// Two blocks share this file, and their lifecycles must not touch. The Recall
+// brief is removed whenever its fetch fails; the permission note is written
+// from a record at spawn. A single-block writer would have each erase the
+// other, so every operation names the block it owns and rewrites only that one.
+//
+// Every filesystem call here is asynchronous and takes its filesystem as a
+// parameter: this file runs against the session's working directory, which may
+// sit under a macOS-protected location where a synchronous read would park the
+// Electron main thread behind a consent prompt.
 
-const MC_RECALL_START = "<!-- mc:recall:start (managed by Mission Control — do not edit inside these markers) -->";
-const MC_RECALL_END = "<!-- mc:recall:end -->";
-const MC_RECALL_START_PREFIX = "<!-- mc:recall:start";
+export type AgentMemoryBlock = "recall" | "permissions";
+
+type BlockMarkers = { start: string; end: string; startPrefix: string };
+
+const BLOCK_MARKERS: Record<AgentMemoryBlock, BlockMarkers> = {
+  // The Recall markers are unchanged on purpose: an in-flight file written by
+  // an earlier build must keep being recognised, not orphaned beside a new one.
+  recall: {
+    start:
+      "<!-- mc:recall:start (managed by Mission Control — do not edit inside these markers) -->",
+    end: "<!-- mc:recall:end -->",
+    startPrefix: "<!-- mc:recall:start",
+  },
+  permissions: {
+    start:
+      "<!-- mc:permissions:start (managed by Mission Control — do not edit inside these markers) -->",
+    end: "<!-- mc:permissions:end -->",
+    startPrefix: "<!-- mc:permissions:start",
+  },
+};
 
 type MemoryTarget = {
   /** Path segments of the auto-loaded file, relative to the session cwd. */
@@ -34,14 +60,14 @@ export function supportsMemoryInjection(agent: string | undefined): boolean {
   return !!agent && !!AGENT_MEMORY_TARGETS[agent];
 }
 
-/** Remove the managed Recall block from `content`, leaving user content intact. */
-function stripRecallBlock(content: string): string {
-  const start = content.indexOf(MC_RECALL_START_PREFIX);
+/** Remove one managed block from `content`, leaving everything else intact. */
+function stripBlock(content: string, markers: BlockMarkers): string {
+  const start = content.indexOf(markers.startPrefix);
   if (start === -1) return content;
-  const endAt = content.indexOf(MC_RECALL_END, start);
+  const endAt = content.indexOf(markers.end, start);
   if (endAt === -1) return content; // malformed — don't clobber user content
   const before = content.slice(0, start).replace(/\s+$/, "");
-  const after = content.slice(endAt + MC_RECALL_END.length).replace(/^\s+/, "");
+  const after = content.slice(endAt + markers.end.length).replace(/^\s+/, "");
   return [before, after].filter(Boolean).join("\n\n").trim();
 }
 
@@ -49,14 +75,18 @@ function stripRecallBlock(content: string): string {
  * Append `relPath` to the repo's `.gitignore` if the session cwd is a git root
  * and the path isn't already ignored. Best-effort; never throws.
  */
-function ensureGitIgnored(cwd: string, relPath: string): void {
+async function ensureGitIgnored(
+  cwd: string,
+  relPath: string,
+  fs: MemoryFileFs,
+): Promise<void> {
   try {
     // `.git` is a dir at a repo root and a file inside a worktree — both count.
-    if (!fs.existsSync(path.join(cwd, ".git"))) return;
+    if (!(await fs.exists(path.join(cwd, ".git")))) return;
     const gitignore = path.join(cwd, ".gitignore");
     let content = "";
     try {
-      content = fs.readFileSync(gitignore, "utf8");
+      content = await fs.readFile(gitignore);
     } catch {
       /* no .gitignore yet */
     }
@@ -64,58 +94,80 @@ function ensureGitIgnored(cwd: string, relPath: string): void {
     if (existing.has(relPath) || existing.has(`/${relPath}`)) return;
     const prefix = content && !content.endsWith("\n") ? "\n" : "";
     const addition = `${prefix}\n# Mission Control Recall (project memory) — private, do not commit\n${relPath}\n`;
-    fs.writeFileSync(gitignore, content + addition, "utf8");
+    await fs.writeFile(gitignore, content + addition);
   } catch {
     /* best-effort */
   }
 }
 
 /**
- * Write/refresh the managed Recall block in the agent's auto-load file. An empty
- * `brief` removes the block. Returns true when a supported agent's file was
- * touched. Never throws — injection must never block a session from starting.
+ * Write/refresh one managed block in the agent's auto-load file, leaving every
+ * other block and all user content untouched. Empty `content` removes that
+ * block only. Returns true when a supported agent's file was touched. Never
+ * throws — injection must never block a session from starting.
  */
-export function writeAgentMemoryFile(
+export async function writeAgentMemoryBlock(
   agent: string | undefined,
   cwd: string,
-  brief: string,
-): boolean {
+  block: AgentMemoryBlock,
+  content: string,
+  fs: MemoryFileFs = nodeScaffoldingFs,
+): Promise<boolean> {
   if (!agent) return false;
   const target = AGENT_MEMORY_TARGETS[agent];
   if (!target) return false;
 
+  const markers = BLOCK_MARKERS[block];
   const file = path.join(cwd, ...target.file);
   let existing = "";
   try {
-    existing = fs.readFileSync(file, "utf8");
+    existing = await fs.readFile(file);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") return false;
   }
 
-  const base = stripRecallBlock(existing);
-  const trimmed = brief.trim();
+  const base = stripBlock(existing, markers);
+  const trimmed = content.trim();
   let next: string;
   if (!trimmed) {
     next = base ? `${base}\n` : "";
   } else {
-    const block = `${MC_RECALL_START}\n${trimmed}\n${MC_RECALL_END}\n`;
-    next = base ? `${base}\n\n${block}` : block;
+    const rendered = `${markers.start}\n${trimmed}\n${markers.end}\n`;
+    next = base ? `${base}\n\n${rendered}` : rendered;
   }
 
   try {
     // Nothing to write and no file existed → don't create an empty file.
     if (!next && !existing) return false;
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, next, "utf8");
+    await fs.mkdir(path.dirname(file));
+    await fs.writeFile(file, next);
   } catch {
     return false;
   }
 
-  if (trimmed && target.gitIgnore) ensureGitIgnored(cwd, target.file.join("/"));
+  if (trimmed && target.gitIgnore) await ensureGitIgnored(cwd, target.file.join("/"), fs);
   return true;
 }
 
+/**
+ * Write/refresh the managed Recall block. An empty `brief` removes the block —
+ * and only that block, so a failed fetch can no longer take the permission note
+ * with it.
+ */
+export function writeAgentMemoryFile(
+  agent: string | undefined,
+  cwd: string,
+  brief: string,
+  fs: MemoryFileFs = nodeScaffoldingFs,
+): Promise<boolean> {
+  return writeAgentMemoryBlock(agent, cwd, "recall", brief, fs);
+}
+
 /** Strip the Recall block from the agent's file (e.g. when Recall is disabled). */
-export function removeAgentMemoryFile(agent: string | undefined, cwd: string): void {
-  writeAgentMemoryFile(agent, cwd, "");
+export async function removeAgentMemoryFile(
+  agent: string | undefined,
+  cwd: string,
+  fs: MemoryFileFs = nodeScaffoldingFs,
+): Promise<void> {
+  await writeAgentMemoryBlock(agent, cwd, "recall", "", fs);
 }

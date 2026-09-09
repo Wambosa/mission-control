@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { Btn } from "~/components/ui/Btn";
 import { CodeBlock, Field, SettingsSection, useCopy } from "~/components/views/SettingsParts";
 import { getElectron } from "~/lib/electron";
+import { FilesystemPermissionRows } from "~/components/views/FilesystemPermissionRows";
 
 /**
  * Diagnostics (R17-R20, R26, R27).
@@ -149,6 +150,8 @@ export function DiagnosticsSettingsPage() {
           </div>
         </Field>
       </SettingsSection>
+
+      <FilesystemPermissionRows />
 
       <SettingsSection title="Log folder" subtitle="Where the app writes its log.">
         <Field label="Location">

@@ -46,8 +46,14 @@ import {
   AGENT_CLI_CONFIG_BY_COMMAND,
 } from "./agent-cli-version-requirements";
 import { applyAgentPtyEnv } from "../src/shared/agent-pty-env";
+import { USER_DATA_DIR_ENV_VAR } from "../src/shared/user-data-paths";
 
-function sanitizeEnv(): Record<string, string> {
+/**
+ * The environment an agent terminal gets. Exported so the removal list is
+ * asserted rather than assumed — every entry here is something a session must
+ * not be handed.
+ */
+export function sanitizeEnv(): Record<string, string> {
   const out = sanitizedProcessEnv();
   // The PTY is xterm.js, not whichever terminal launched Electron. Leaking
   // TERM_PROGRAM=ghostty (or iTerm.app, etc.) makes Claude Code take terminal-
@@ -58,6 +64,11 @@ function sanitizeEnv(): Record<string, string> {
   delete out.TERM_PROGRAM_VERSION;
   delete out.MC_API_URL;
   delete out.MC_API_TOKEN;
+  // The main process writes the resolved data directory into its own
+  // environment so its children inherit it, and terminal sessions inherit
+  // that. It is a map straight to the file the two variables above live in, so
+  // it goes for the same reason they do — no agent needs it.
+  delete out[USER_DATA_DIR_ENV_VAR];
   return out;
 }
 

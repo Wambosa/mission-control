@@ -80,12 +80,7 @@ import {
 } from "../src/shared/project-image-limits";
 import { shortId } from "../src/shared/short-id";
 import { errMsg } from "../src/shared/err-msg";
-import {
-  USER_DATA_DIR_ENV_VAR,
-  USER_DATA_DIR_NAME,
-  ensureUserDataDir,
-  resolveUserDataDir,
-} from "../src/shared/user-data-paths";
+import { configureUserDataDir, migrationNotice } from "./user-data-dir";
 import { configureProjectRootsDb, disposeProjectRootsDb, loadProjectRoots } from "./project-roots";
 import { resolveSafeOpenPath } from "./open-path-policy";
 import { buildLocalMissionControlApiUrl } from "./pty-hook-env";
@@ -106,19 +101,27 @@ import {
   productionRuntimePortStart,
 } from "./runtime-port";
 
-function configureUserDataDir(): string {
-  // Keep Electron-side IPC stores aligned with src/db/client.ts. In dev the
-  // generated dist-electron/package.json only declares CommonJS, so Electron's
-  // package-name-derived default can become "Electron" or "mission-control",
-  // splitting API tokens and project roots across separate SQLite files.
-  const dir = ensureUserDataDir(resolveUserDataDir());
-  app.setName(USER_DATA_DIR_NAME);
-  app.setPath("userData", dir);
-  process.env[USER_DATA_DIR_ENV_VAR] = dir;
-  return dir;
-}
+// The one line this ordering allows. Everything it does — the previous-instance
+// guard, the migration, setting the app name and the platform path — lives in
+// ./user-data-dir, and it must stay *above* log.initialize() and above the
+// first app.getPath call: resolving a platform path both caches a stale value
+// and creates the directory it resolved, which is the bug the comment inside
+// that module documents at length. It is also the only point in startup where
+// no database connection is open yet.
+const userDataSetup = configureUserDataDir({ app });
+const missionControlUserDataDir = userDataSetup.directory;
 
-const missionControlUserDataDir = configureUserDataDir();
+if (userDataSetup.refused) {
+  // Pre-ready, so this is stderr plus the pre-ready dialog — which is
+  // invisible on Linux, hence the stderr line carrying the same text.
+  console.error(`[main] ${userDataSetup.report.refusal}`);
+  try {
+    dialog.showErrorBox("Cannot start", userDataSetup.report.refusal ?? "");
+  } catch {
+    /* no display available */
+  }
+  app.exit(1);
+}
 
 // Kill Chromium's own two-finger/Magic Mouse swipe-to-go-back. The macOS
 // `AppleEnableSwipeNavigateWithScrolls` default (set per-window in createWindow)
@@ -195,6 +198,21 @@ log.info("app.launch", {
   arch: process.arch,
   packaged: app.isPackaged,
   electron: process.versions.electron,
+});
+
+// The migration ran before the logger existed — by necessity, since resolving
+// a platform path would have cached a stale directory. So its outcome is
+// emitted here instead, as the second line of the run.
+const migrationOutcomeNotice = migrationNotice(userDataSetup.report);
+log[migrationOutcomeNotice.level](migrationOutcomeNotice.event, {
+  event: migrationOutcomeNotice.event,
+  outcome: userDataSetup.report.outcome,
+  directory: userDataSetup.report.directory,
+  previousDir: userDataSetup.report.previousDir,
+  destinationDir: userDataSetup.report.destinationDir,
+  skipped: userDataSetup.report.skipped,
+  divergence: userDataSetup.report.divergence,
+  detail: userDataSetup.report.detail,
 });
 
 // Renderer console → log file. The renderer had no file transport at all, so a
@@ -2402,6 +2420,20 @@ app.on("before-quit", (event) => {
 });
 
 app.whenReady().then(() => {
+  // The migration's own report, once. R25 wants this seen and not only logged:
+  // a successful migration leaves a second live copy of the bearer token and
+  // every pairing token on disk, and a retained credential store the user has
+  // not been told about is not a rollback.
+  if (migrationOutcomeNotice.message) {
+    const level = migrationOutcomeNotice.level;
+    void dialog.showMessageBox({
+      type: level === "error" ? "error" : level === "warn" ? "warning" : "info",
+      title: "Data folder",
+      message: migrationOutcomeNotice.message,
+      buttons: ["OK"],
+      noLink: true,
+    });
+  }
   // pty:spawn validates `cwd` against this DB before letting any binary run,
   // so it must be configured before any window can issue an IPC call.
   configureProjectRootsDb(missionControlUserDataDir);

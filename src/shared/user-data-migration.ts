@@ -8,6 +8,9 @@
  * needs the native binding a pure module cannot reach.
  */
 
+import * as os from "node:os";
+import * as path from "node:path";
+
 import {
   USER_DATA_DB_FILENAME,
   USER_DATA_DIR_ENV_VAR,
@@ -23,6 +26,39 @@ import {
  * constant moves — which is the very change this exists to support.
  */
 export const PREVIOUS_USER_DATA_DIR_NAME = "MissionControl";
+
+/**
+ * The development seam. A packaged build never sets this; the development
+ * launcher does, pointing at a synthetic previous directory, because a
+ * development run forces the data-directory override and would otherwise skip
+ * the migration path entirely — leaving it first exercised on a real user's
+ * machine.
+ */
+export const PREVIOUS_USER_DATA_DIR_ENV_VAR = "MC_PREVIOUS_USER_DATA_DIR";
+
+/**
+ * Where the previous identity kept its data on this platform.
+ *
+ * Mirrors the current resolver's platform branching, but against the
+ * hard-coded previous name — the two must not share a constant, or renaming
+ * the current one would silently retarget this at the new location and the
+ * migration would find nothing to do.
+ */
+export function previousUserDataDir(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: string = process.platform,
+  home: string = os.homedir(),
+): string {
+  const seeded = env[PREVIOUS_USER_DATA_DIR_ENV_VAR]?.trim();
+  if (seeded) return seeded;
+  if (platform === "darwin") {
+    return path.join(home, "Library/Application Support", PREVIOUS_USER_DATA_DIR_NAME);
+  }
+  if (platform === "win32") {
+    return path.join(home, "AppData/Roaming", PREVIOUS_USER_DATA_DIR_NAME);
+  }
+  return path.join(home, ".config", PREVIOUS_USER_DATA_DIR_NAME);
+}
 
 /** Written last. Its presence plus validity is the commit point. */
 export const MIGRATION_MARKER_FILENAME = ".user-data-migration.json";

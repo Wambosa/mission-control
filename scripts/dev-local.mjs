@@ -26,6 +26,23 @@ env.MC_DEV_PORT = String(parsePort(env.MC_DEV_PORT, DEFAULT_DEV_PORT));
 env.MC_USER_DATA_DIR ||= resolve(root, ".dev-userdata");
 console.log(`[dev] user data dir: ${env.MC_USER_DATA_DIR}`);
 
+// Forcing MC_USER_DATA_DIR above short-circuits the first-launch migration
+// entirely — by design, since the override is what lets a working copy run
+// beside an installed build. The cost is that the migration, the
+// previous-instance guard and the standalone entry-point guard would first
+// execute on a packaged build against a real user's data.
+//
+// So development gets its own way in: point MC_DEV_SEED_PREVIOUS_USER_DATA at a
+// directory to seed a synthetic previous install, and the launcher clears the
+// data-directory override so the real decision path runs against it.
+if (env.MC_DEV_SEED_PREVIOUS_USER_DATA?.trim()) {
+  const seeded = resolve(env.MC_DEV_SEED_PREVIOUS_USER_DATA.trim());
+  env.MC_PREVIOUS_USER_DATA_DIR = seeded;
+  delete env.MC_USER_DATA_DIR;
+  console.log(`[dev] seeding a synthetic previous data dir: ${seeded}`);
+  console.log(`[dev] the data-directory override is cleared so the migration runs`);
+}
+
 if (mode !== "electron") {
   console.error(`[dev] unknown mode "${mode}". Expected "electron".`);
   process.exit(1);

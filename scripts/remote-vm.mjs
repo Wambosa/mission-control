@@ -133,24 +133,102 @@ function randomSecret() {
 // would resolve in development and fail in a build. A cross-file agreement test
 // pins these to the module instead.
 const USER_DATA_DIR_NAME = "MissionControl";
+const PREVIOUS_USER_DATA_DIR_NAME = "MissionControl";
 const USER_DATA_DB_FILENAME = "missioncontrol.db";
 const USER_DATA_DIR_ENV_VAR = "MC_USER_DATA_DIR";
+const PREVIOUS_USER_DATA_DIR_ENV_VAR = "MC_PREVIOUS_USER_DATA_DIR";
+const MIGRATION_MARKER_FILENAME = ".user-data-migration.json";
+const MIGRATION_MARKER_VERSION = 1;
 
-export function resolveUserDataDir(env = process.env, platform = process.platform, home = os.homedir()) {
-  const override = env[USER_DATA_DIR_ENV_VAR]?.trim();
-  if (override) return override;
+function platformUserDataDir(dirName, platform, home) {
   if (!home?.trim()) {
     throw new Error(
       `Cannot determine the home directory, so the ${USER_DATA_DIR_NAME} data directory cannot be resolved. Set ${USER_DATA_DIR_ENV_VAR} to an absolute path.`,
     );
   }
   if (platform === "darwin") {
-    return path.join(home, "Library/Application Support", USER_DATA_DIR_NAME);
+    return path.join(home, "Library/Application Support", dirName);
   }
   if (platform === "win32") {
-    return path.join(home, "AppData/Roaming", USER_DATA_DIR_NAME);
+    return path.join(home, "AppData/Roaming", dirName);
   }
-  return path.join(home, ".config", USER_DATA_DIR_NAME);
+  return path.join(home, ".config", dirName);
+}
+
+export function resolveUserDataDir(env = process.env, platform = process.platform, home = os.homedir()) {
+  const override = env[USER_DATA_DIR_ENV_VAR]?.trim();
+  if (override) return override;
+  return platformUserDataDir(USER_DATA_DIR_NAME, platform, home);
+}
+
+export function resolvePreviousUserDataDir(
+  env = process.env,
+  platform = process.platform,
+  home = os.homedir(),
+) {
+  const seeded = env[PREVIOUS_USER_DATA_DIR_ENV_VAR]?.trim();
+  if (seeded) return seeded;
+  return platformUserDataDir(PREVIOUS_USER_DATA_DIR_NAME, platform, home);
+}
+
+/**
+ * A minimal mirror of the shared module's marker read.
+ *
+ * This command runs as a plain Node process from inside the packaged archive,
+ * which ships without the source tree, so it cannot import the shared module —
+ * a cross-file agreement test pins the filename and schema version instead.
+ *
+ * Run standalone, this command would otherwise create the data directory and
+ * bootstrap a database at the new location before the app has ever launched,
+ * which the app's own migration then has to report as a destination conflict.
+ */
+/** Resolve once per process and announce the fallback a single time. */
+let announcedStandaloneNotice = false;
+function standaloneUserDataDir() {
+  const { directory, notice } = resolveStandaloneUserDataDir();
+  if (notice && !announcedStandaloneNotice) {
+    announcedStandaloneNotice = true;
+    console.warn(`[remote-vm] ${notice}`);
+  }
+  return directory;
+}
+
+export function resolveStandaloneUserDataDir(
+  env = process.env,
+  platform = process.platform,
+  home = os.homedir(),
+  readMarker = (file) => {
+    try {
+      return fs.readFileSync(file, "utf8");
+    } catch {
+      return null;
+    }
+  },
+) {
+  const override = env[USER_DATA_DIR_ENV_VAR]?.trim();
+  if (override) return { directory: override, notice: null };
+
+  const destination = platformUserDataDir(USER_DATA_DIR_NAME, platform, home);
+  const raw = readMarker(path.join(destination, MIGRATION_MARKER_FILENAME));
+  if (raw !== null) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (
+        typeof parsed?.markerVersion === "number" &&
+        parsed.markerVersion <= MIGRATION_MARKER_VERSION
+      ) {
+        return { directory: destination, notice: null };
+      }
+    } catch {
+      /* an unreadable marker is treated as no marker at all */
+    }
+  }
+
+  const previous = resolvePreviousUserDataDir(env, platform, home);
+  return {
+    directory: previous,
+    notice: `${USER_DATA_DIR_NAME} has not completed its first-launch data migration yet, so this command is using the previous data folder ${previous} rather than creating one at ${destination}. Launch the app once, then run this again.`,
+  };
 }
 
 function expandHome(file) {
@@ -1028,7 +1106,7 @@ function electronBetterSqliteNativeBinding() {
   );
 }
 
-function openMissionControlDb(userDataDir = resolveUserDataDir()) {
+function openMissionControlDb(userDataDir = standaloneUserDataDir()) {
   fs.mkdirSync(userDataDir, { recursive: true });
   const dbPath = path.join(userDataDir, USER_DATA_DB_FILENAME);
   const nativeBinding = electronBetterSqliteNativeBinding();

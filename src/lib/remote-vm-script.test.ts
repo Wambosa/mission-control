@@ -31,6 +31,8 @@ const {
   archForInstanceSize,
   resolveGoldenAmi,
   fetchGoldenAmiManifest,
+  resolveStandaloneUserDataDir,
+  resolvePreviousUserDataDir,
 } = remoteVm;
 
 describe("remote-vm CLI helpers", () => {
@@ -581,5 +583,60 @@ describe("golden AMI provisioning", () => {
       expect(manifest.owner).toBe("493255580566");
       expect(manifest.images["us-east-1"]).toBe("ami-0d7282b5efaa3b1dc");
     });
+  });
+});
+
+describe("remote-vm CLI — standalone data-directory resolution (U10, KTD12)", () => {
+  function tempHome(): string {
+    return fs.mkdtempSync(path.join(os.tmpdir(), "remote-vm-home-"));
+  }
+
+  it("resolves the previous directory and creates nothing at the new one", () => {
+    const home = tempHome();
+    try {
+      const before = fs.readdirSync(home);
+
+      const result = resolveStandaloneUserDataDir({}, "darwin", home);
+
+      expect(result.directory).toBe(resolvePreviousUserDataDir({}, "darwin", home));
+      expect(result.notice).toBeTruthy();
+      // Resolution is a read. Running it must not stand up either location.
+      expect(fs.readdirSync(home)).toEqual(before);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves the new directory once the app has recorded a completed migration", () => {
+    const home = tempHome();
+    try {
+      const destination = path.join(home, "Library/Application Support/MissionControl");
+      fs.mkdirSync(destination, { recursive: true });
+      fs.writeFileSync(
+        path.join(destination, ".user-data-migration.json"),
+        JSON.stringify({ markerVersion: 1, outcome: "no-previous-directory" }),
+      );
+
+      const result = resolveStandaloneUserDataDir({}, "darwin", home);
+
+      expect(result.directory).toBe(destination);
+      expect(result.notice).toBeNull();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("honors the data-directory override unchanged", () => {
+    const home = tempHome();
+    try {
+      const result = resolveStandaloneUserDataDir(
+        { MC_USER_DATA_DIR: "/tmp/explicit" },
+        "darwin",
+        home,
+      );
+      expect(result).toEqual({ directory: "/tmp/explicit", notice: null });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });

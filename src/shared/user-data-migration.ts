@@ -8,6 +8,7 @@
  * needs the native binding a pure module cannot reach.
  */
 
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -15,6 +16,8 @@ import {
   USER_DATA_DB_FILENAME,
   USER_DATA_DIR_ENV_VAR,
   USER_DATA_DIR_NAME,
+  defaultUserDataDir,
+  userDataDirOverride,
 } from "./user-data-paths";
 
 /**
@@ -382,4 +385,71 @@ export function detectPreviousStoreDivergence(
   const diverged =
     observed.newestMtimeMs > baseline.newestMtimeMs || observed.totalBytes !== baseline.totalBytes;
   return { diverged, nextBaseline: diverged ? observed : baseline };
+}
+
+// ---------------------------------------------------------------------------
+// Entry points that run outside the app
+// ---------------------------------------------------------------------------
+
+export type StandaloneResolution = {
+  directory: string;
+  /** What to tell the operator, when the answer is not simply the new folder. */
+  notice: string | null;
+};
+
+/**
+ * Where a command run outside the app should look.
+ *
+ * The schema-migration tooling and the remote-VM CLI both create the directory
+ * and bootstrap a database when run standalone. After the rename either would
+ * manufacture an empty database at the new location before the app has ever
+ * launched — which the migration then has to report as a destination conflict,
+ * and which would otherwise be silently overwritten.
+ *
+ * So they resolve the previous directory until a completion marker exists, and
+ * say so when they do. The check is deliberately minimal — the marker is
+ * present and this build understands its version — because standalone tooling
+ * has no business opening the database to check an identity, and the marker's
+ * presence is the only question that matters here.
+ */
+export function resolveStandaloneUserDataDir(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: string = process.platform,
+  home: string = os.homedir(),
+  readMarker: (markerPath: string) => string | null = readFileOrNull,
+): StandaloneResolution {
+  const override = userDataDirOverride(env);
+  if (override) return { directory: override, notice: null };
+
+  const destination = defaultUserDataDir(platform, home);
+  const raw = readMarker(path.join(destination, MIGRATION_MARKER_FILENAME));
+  if (raw !== null && markerVersionIsUnderstood(raw)) {
+    return { directory: destination, notice: null };
+  }
+
+  const previous = previousUserDataDir(env, platform, home);
+  return {
+    directory: previous,
+    notice: `${USER_DATA_DIR_NAME} has not completed its first-launch data migration yet, so this command is using the previous data folder ${previous} rather than creating one at ${destination}. Launch the app once, then run this again.`,
+  };
+}
+
+/** A marker this build cannot read is treated as no marker at all. */
+function markerVersionIsUnderstood(raw: string): boolean {
+  try {
+    const parsed = JSON.parse(raw) as { markerVersion?: unknown };
+    return (
+      typeof parsed.markerVersion === "number" && parsed.markerVersion <= MIGRATION_MARKER_VERSION
+    );
+  } catch {
+    return false;
+  }
+}
+
+function readFileOrNull(file: string): string | null {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
 }

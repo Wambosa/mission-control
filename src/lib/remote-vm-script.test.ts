@@ -610,7 +610,9 @@ describe("remote-vm CLI — standalone data-directory resolution (U10, KTD12)", 
   it("resolves the new directory once the app has recorded a completed migration", () => {
     const home = tempHome();
     try {
-      const destination = path.join(home, "Library/Application Support/MissionControl");
+      // Derived from the CLI's own resolver, so the rename cannot make this
+      // test seed a marker somewhere the CLI never looks.
+      const destination = remoteVm.resolveUserDataDir({}, "darwin", home) as string;
       fs.mkdirSync(destination, { recursive: true });
       fs.writeFileSync(
         path.join(destination, ".user-data-migration.json"),

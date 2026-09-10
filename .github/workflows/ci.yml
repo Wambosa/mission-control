@@ -128,9 +128,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Populate bundled Whisper resources
-        run: pnpm setup:whisper
-
       - name: Build web + electron tsc
         run: |
           pnpm build
@@ -147,7 +144,9 @@ jobs:
       - name: Upload Linux AppImage artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: MissionControl-linux-x64
-          path: dist-electron-out/*.AppImage
+          name: ChaosWrangler-linux-x64
+          # Quoted because the product name carries a space, which the AppImage
+          # filename inherits.
+          path: "dist-electron-out/*.AppImage"
           if-no-files-found: error
           retention-days: 14

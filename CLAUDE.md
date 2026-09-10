@@ -126,7 +126,7 @@ actually need the whole file.
 ## Don't read these
 
 - `dist/`, `dist-electron/` — build output
-- `../mission-control-build/` — electron-builder output, deliberately a **sibling
+- `../chaos-wrangler-build/` — electron-builder output, deliberately a **sibling
   of the repo** so `find` / `ls -R` / `du` inside the working tree never walk it.
   CI overrides it back to `dist-electron-out/` for artifact upload.
 - `public/` (23 MB), `designs/` — assets and the original HTML prototype

@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { FS_PERMISSION_USAGE_DESCRIPTION_KEYS } from "../../src/shared/fs-permission";
+import { PRODUCT_DISPLAY_NAME, USER_DATA_DIR_NAME } from "../../src/shared/user-data-paths";
+import { REMOTE_AGENT_COMMAND, REMOTE_AGENT_PACKAGE } from "../../src/shared/ssh-provision";
 
 type PackageJson = {
   build?: {
@@ -134,4 +136,119 @@ describe("protected-location usage descriptions", () => {
       expect(missingUsageDescriptions(xml, FS_PERMISSION_USAGE_DESCRIPTION_KEYS)).toEqual([]);
     },
   );
+});
+
+describe("the app's identity (U5)", () => {
+  it("asserts the package name, product name and bundle identifier together", () => {
+    // Together on purpose: a mismatch between these three is the documented
+    // cause of one install resolving two different data directories.
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+    ) as { name?: string; build?: { appId?: string; productName?: string } };
+
+    expect({
+      name: pkg.name,
+      productName: pkg.build?.productName,
+      appId: pkg.build?.appId,
+    }).toEqual({
+      name: "chaos-wrangler",
+      productName: PRODUCT_DISPLAY_NAME,
+      appId: "com.shondiaz.chaoswrangler",
+    });
+  });
+
+  it("moves off the upstream vendor's reverse-DNS namespace", () => {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+    ) as { build?: { appId?: string } };
+    expect(pkg.build?.appId).not.toContain("agentsystem");
+  });
+
+  it("keeps the display name spaced and the directory token unspaced (KD13)", () => {
+    expect(PRODUCT_DISPLAY_NAME).toContain(" ");
+    expect(USER_DATA_DIR_NAME).not.toContain(" ");
+    expect(USER_DATA_DIR_NAME).toBe(PRODUCT_DISPLAY_NAME.replace(/ /g, ""));
+  });
+
+  it("keeps the upstream agent dependency under its published name (AE5)", () => {
+    // The rename stops at this boundary: the package and the binary it
+    // publishes are the upstream vendor's, and renaming either reference just
+    // stops resolving.
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+    ) as { dependencies?: Record<string, string> };
+
+    expect(pkg.dependencies?.["@agentsystemlabs/mission-control-agent"]).toBeTruthy();
+    expect(REMOTE_AGENT_COMMAND).toBe("mission-control-agent");
+    expect(REMOTE_AGENT_PACKAGE).toBe("@agentsystemlabs/mission-control-agent");
+  });
+});
+
+describe("artifact naming tolerates the space in the product name (U5)", () => {
+  it("keeps the Windows installer filename free of the space", () => {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+    ) as { build?: { win?: { artifactName?: string } } };
+    const template = pkg.build?.win?.artifactName ?? "";
+
+    // Derived from the unspaced package name rather than the spaced product
+    // name, so the filename never carries a space to begin with.
+    expect(template).toContain("${name}");
+    expect(template).not.toContain("${productName}");
+  });
+
+  it("quotes every upload glob that a spaced filename would reach", () => {
+    for (const workflow of ["ci.yml", "release.yml"]) {
+      const yaml = fs.readFileSync(path.join(repoRoot, ".github/workflows", workflow), "utf8");
+      for (const line of yaml.split("\n")) {
+        const match = /^\s*path:\s*(.+)$/.exec(line);
+        if (!match) continue;
+        const value = match[1].trim();
+        if (!value.includes("*")) continue;
+        expect(value.startsWith('"') && value.endsWith('"'), `${workflow}: ${value}`).toBe(true);
+      }
+    }
+  });
+
+  it("invokes no packaging step that the manifest does not define", () => {
+    // A step calling an absent script fails the job before it ever packages,
+    // which masks a packaging regression in exactly the job meant to catch one.
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+    ) as { scripts?: Record<string, string> };
+    const defined = new Set(Object.keys(pkg.scripts ?? {}));
+    // pnpm's own subcommands are not package scripts.
+    const builtIns = new Set([
+      "add",
+      "audit",
+      "config",
+      "dedupe",
+      "dlx",
+      "exec",
+      "fetch",
+      "install",
+      "licenses",
+      "list",
+      "outdated",
+      "pack",
+      "patch",
+      "prune",
+      "publish",
+      "rebuild",
+      "remove",
+      "run",
+      "store",
+      "update",
+      "why",
+    ]);
+
+    for (const workflow of ["ci.yml", "release.yml"]) {
+      const yaml = fs.readFileSync(path.join(repoRoot, ".github/workflows", workflow), "utf8");
+      for (const match of yaml.matchAll(/\bpnpm ([a-z0-9:_-]+)/g)) {
+        const invoked = match[1];
+        if (builtIns.has(invoked)) continue;
+        expect(defined.has(invoked), `${workflow} runs "pnpm ${invoked}"`).toBe(true);
+      }
+    }
+  });
 });

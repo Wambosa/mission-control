@@ -19,11 +19,18 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 /**
- * The on-disk directory token. Deliberately unspaced — this app shells out
- * constantly, and a space in a path every remote and terminal code path
- * interpolates buys nothing a user ever sees.
+ * The product as a person reads it. Carries the space.
  */
-export const USER_DATA_DIR_NAME = "MissionControl";
+export const PRODUCT_DISPLAY_NAME = "Chaos Wrangler";
+
+/**
+ * The on-disk directory token, and the name handed to the platform's name
+ * setter. Deliberately unspaced — this app shells out constantly, and a space
+ * in a path that every remote and terminal code path interpolates buys nothing
+ * a user ever sees. Mirrors the split that already existed between the spaced
+ * product name and the unspaced directory.
+ */
+export const USER_DATA_DIR_NAME = "ChaosWrangler";
 
 /** The database file inside the user-data directory. */
 export const USER_DATA_DB_FILENAME = "missioncontrol.db";

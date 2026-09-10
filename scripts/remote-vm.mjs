@@ -132,7 +132,10 @@ function randomSecret() {
 // process from inside the packaged archive, so an import of the shared module
 // would resolve in development and fail in a build. A cross-file agreement test
 // pins these to the module instead.
-const USER_DATA_DIR_NAME = "MissionControl";
+const USER_DATA_DIR_NAME = "ChaosWrangler";
+// Hard-coded, and deliberately not derived from the constant above: the
+// previous name is the only handle on the data being migrated, so deriving it
+// would make this silently target nothing.
 const PREVIOUS_USER_DATA_DIR_NAME = "MissionControl";
 const USER_DATA_DB_FILENAME = "missioncontrol.db";
 const USER_DATA_DIR_ENV_VAR = "MC_USER_DATA_DIR";

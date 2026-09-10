@@ -18,7 +18,7 @@ export type BaseSpawnRequest = {
   cols?: number;
   rows?: number;
   mcEnv?: { apiUrl?: string; token?: string };
-  /** Mission Control UI theme so agent skills can match diagram styling. */
+  /** Chaos Wrangler UI theme so agent skills can match diagram styling. */
   missionControlTheme?: "dark" | "light";
 };
 

@@ -206,7 +206,7 @@ const electronAPI = {
     getSettings: (): Promise<SandboxSettingsBridge> => ipcRenderer.invoke(IPC.sandboxGetSettings),
     /**
      * Directory on the active scope that its projects live under. `/workspace`
-     * inside a Mission Control VM; the user's own home (or a configured root)
+     * inside a Chaos Wrangler VM; the user's own home (or a configured root)
      * on an SSH host, where no such container path exists.
      */
     getRemoteRoot: (sandboxId: string | null): Promise<string | null> =>

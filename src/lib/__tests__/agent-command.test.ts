@@ -41,7 +41,7 @@ describe("isOpencodeSessionId", () => {
     expect(isOpencodeSessionId(OPENCODE_SESSION_ID)).toBe(true);
   });
 
-  it("rejects Mission Control UUIDs and other foreign ids", () => {
+  it("rejects Chaos Wrangler UUIDs and other foreign ids", () => {
     expect(isOpencodeSessionId("00000000-0000-4000-8000-000000000000")).toBe(false);
     expect(isOpencodeSessionId("019d7a0f-432a-7fa1-a821-b7841f983967")).toBe(false);
   });

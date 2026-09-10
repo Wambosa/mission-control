@@ -55,7 +55,7 @@ function seedPrevious(options: { uncleanWal?: boolean; extras?: string[] } = {})
     CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);
   `);
   db.prepare("INSERT INTO app_settings VALUES (?, ?)").run("api_token", "bearer-secret-value");
-  db.prepare("INSERT INTO projects VALUES (?, ?)").run("p1", "Mission Control");
+  db.prepare("INSERT INTO projects VALUES (?, ?)").run("p1", "Chaos Wrangler");
   db.prepare("INSERT INTO projects VALUES (?, ?)").run("p2", "Another");
   db.prepare("INSERT INTO sandboxes VALUES (?, ?)").run("sb1", "pairing-secret-1");
   db.prepare("INSERT INTO sandboxes VALUES (?, ?)").run("sb2", "pairing-secret-2");

@@ -1,14 +1,17 @@
-# MissionControl
+# Chaos Wrangler
+
+> **A fork.** Chaos Wrangler began as a fork of [Mission Control](https://github.com/AgentSystemLabs/mission-control) by AgentSystem Labs, and has since diverged: a replaced version line, no update channel, an overhauled interface, and its own identity and data directory. The upstream project keeps its name wherever this codebase credits it.
+
 
 Desktop control surface for managing agentic coding work (Claude Code / Codex / Cursor CLI) across many projects. Built as an Electron app that wraps a TanStack Start server, with SQLite + Drizzle for local persistence and real PTYs (via `node-pty` + `xterm.js`) so you can run real interactive CLI agents inside the app.
 
 ## Why this exists
 
-Cursor and Codex bury your projects in a collapsable left rail. MissionControl flips it: every project gets a card on a single home view, with at-a-glance counts of how many agents are running, awaiting input, or done. Click into a project, see its tasks split by status, toggle three of them on at once and three real terminals split horizontally on the right. External CLI tools can POST status back to the app over a localhost API.
+Cursor and Codex bury your projects in a collapsable left rail. Chaos Wrangler flips it: every project gets a card on a single home view, with at-a-glance counts of how many agents are running, awaiting input, or done. Click into a project, see its tasks split by status, toggle three of them on at once and three real terminals split horizontally on the right. External CLI tools can POST status back to the app over a localhost API.
 
 ## Features
 
-- Mission Control grid with pinned / grouped / ungrouped sections, density toggle, and search
+- Chaos Wrangler grid with pinned / grouped / ungrouped sections, density toggle, and search
 - Project add/edit/remove (remove only unlinks — never touches files)
 - Project grouping with colored dots
 - Project detail view: tasks split into Needs-input / Running / Done columns
@@ -43,7 +46,7 @@ mission-control/
 │   ├── styles.css          Design tokens + keyframes
 │   ├── routes/
 │   │   ├── __root.tsx
-│   │   ├── index.tsx       Mission Control
+│   │   ├── index.tsx       Chaos Wrangler
 │   │   ├── projects.$id.tsx
 │   │   ├── archive.tsx
 │   │   ├── settings.tsx
@@ -71,7 +74,7 @@ mission-control/
 ## Download
 
 - **GitHub Releases:** [AgentSystemLabs/mission-control/releases](https://github.com/AgentSystemLabs/mission-control/releases) — signed macOS / Windows / Linux installers attached automatically when a `v*` tag ships (manual install / dogfooding)
-- **PR CI Artifacts:** pull requests build an unsigned Linux AppImage (`MissionControl-linux-x64`) — open the workflow run → **Artifacts**
+- **PR CI Artifacts:** pull requests build an unsigned Linux AppImage (`Chaos Wrangler-linux-x64`) — open the workflow run → **Artifacts**
 
 After download: macOS open the `.dmg` and drag the app to Applications; Windows run the Setup `.exe`; Linux make the `.AppImage` executable (`chmod +x`) and run it (FUSE 2 may be required on some distros).
 
@@ -82,11 +85,11 @@ pnpm install            # installs deps; postinstall rebuilds Electron PTY bindi
 pnpm dev:electron       # runs Vite dev server + Electron
 ```
 
-The first run creates `~/Library/Application Support/MissionControl/missioncontrol.db` (macOS) or the equivalent on Linux/Windows.
+The first run creates `~/Library/Application Support/Chaos Wrangler/missioncontrol.db` (macOS) or the equivalent on Linux/Windows.
 
 ### Remote VM Sandboxes
 
-Mission Control can provision AWS EC2 instances with
+Chaos Wrangler can provision AWS EC2 instances with
 `mission-control-agent` installed directly on the VM host. Create one from a
 project page (**Create sandbox**), or use the CLI:
 
@@ -123,7 +126,7 @@ pnpm rebuild
 
 ## External API
 
-When MissionControl is running, it binds an HTTP server on `127.0.0.1:<port>`. The port is written to `$USER_DATA_DIR/.port` and shown in the Settings page along with the bearer token.
+When Chaos Wrangler is running, it binds an HTTP server on `127.0.0.1:<port>`. The port is written to `$USER_DATA_DIR/.port` and shown in the Settings page along with the bearer token.
 
 ### Endpoints (writable — bearer token required)
 
@@ -147,7 +150,7 @@ The UI updates within ~1 second over its SSE connection.
 All `/api/*` routes require an `Authorization: Bearer <token>` header (token in
 Settings → API). The renderer attaches it automatically; external CLIs (Claude,
 Codex, Cursor) receive it via the `$MC_API_TOKEN` env var when launched from
-within Mission Control. `/api/events` (SSE) uses a short-lived ticket from
+within Chaos Wrangler. `/api/events` (SSE) uses a short-lived ticket from
 `POST /api/events/ticket` because `EventSource` cannot send custom headers.
 
 
@@ -176,9 +179,9 @@ within Mission Control. `/api/events` (SSE) uses a short-lived ticket from
 
 Everything the app records goes to one file. In a packaged build it persists to:
 
-- **macOS:** `~/Library/Logs/MissionControl/main.log`
-- **Windows:** `%USERPROFILE%\AppData\Roaming\MissionControl\logs\main.log`
-- **Linux:** `~/.config/MissionControl/logs/main.log`
+- **macOS:** `~/Library/Logs/Chaos Wrangler/main.log`
+- **Windows:** `%USERPROFILE%\AppData\Roaming\Chaos Wrangler\logs\main.log`
+- **Linux:** `~/.config/Chaos Wrangler/logs/main.log`
 
 **Settings → Diagnostics** exports the logs and retained session transcripts as
 one bundle, and reveals the log directory in the OS file manager. Crash dumps
@@ -217,7 +220,7 @@ marker, so machine events can be separated from the free-text server
 diagnostics sharing the file:
 
 ```
-rg 'mc-event' ~/Library/Logs/MissionControl/main.log
+rg 'mc-event' ~/Library/Logs/Chaos Wrangler/main.log
 ```
 
 Two values are held back on purpose. Setting values are redacted by key
@@ -231,7 +234,7 @@ In dev (`pnpm dev`) the same lines also go to stdout/stderr.
 
 ## Skill file for external CLIs
 
-A drop-in skill for Claude Code / Codex / Cursor CLI lives in `docs/skills/missioncontrol-notify.md`. Paste it into the CLI's instructions or memory so the agent knows to POST its lifecycle events back to MissionControl.
+A drop-in skill for Claude Code / Codex / Cursor CLI lives in `docs/skills/missioncontrol-notify.md`. Paste it into the CLI's instructions or memory so the agent knows to POST its lifecycle events back to Chaos Wrangler.
 
 ## License
 

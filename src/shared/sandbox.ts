@@ -6,9 +6,9 @@
 import { SSH_TARGET_PLATFORMS, type SshHostPlatform } from "./ssh-provision";
 
 /**
- * Execution backend for a sandbox. A `remote-vm` is a machine Mission Control
+ * Execution backend for a sandbox. A `remote-vm` is a machine Chaos Wrangler
  * created and can destroy; an `ssh-host` is a machine the user already owns,
- * reached through their own SSH config, that Mission Control only borrows.
+ * reached through their own SSH config, that Chaos Wrangler only borrows.
  */
 export const SANDBOX_KINDS = ["remote-vm", "ssh-host"] as const;
 
@@ -42,14 +42,14 @@ export type RemoteVmLifecycleStatus =
    *  resumable — the only recovery is to remove the local record or switch to Local. */
   | "missing";
 
-/** What happens to an SSH host's runtime when Mission Control disconnects. */
+/** What happens to an SSH host's runtime when Chaos Wrangler disconnects. */
 export type SshHostPersistence = "persist" | "teardown";
 
 /** Minutes with no sessions before an SSH host's runtime stops. */
 export const DEFAULT_SSH_IDLE_WINDOW_MINUTES = 30;
 
 /**
- * Per-host state Mission Control keeps for an SSH host: where it provisioned,
+ * Per-host state Chaos Wrangler keeps for an SSH host: where it provisioned,
  * whether the runtime outlives a disconnect, and how long it may sit idle.
  * Keyed to the SSH host alias and stored in the sandbox row's remote config —
  * never written back into the user's SSH config.
@@ -57,12 +57,12 @@ export const DEFAULT_SSH_IDLE_WINDOW_MINUTES = 30;
 export type SandboxSshHostConfig = {
   /** Alias exactly as it appears in the user's SSH config. */
   alias: string;
-  /** Directory Mission Control owns on the host. Null until first provision. */
+  /** Directory Chaos Wrangler owns on the host. Null until first provision. */
   prefix: string | null;
   /**
    * Which service manager this host speaks, as the probe found it. Stopping or
    * removing a host has to know that long after the probe is gone. Null until
-   * first probe, or for a platform Mission Control cannot act on.
+   * first probe, or for a platform Chaos Wrangler cannot act on.
    */
   platform: SshHostPlatform | null;
   /** Persist by default; `teardown` stops the runtime when the client disconnects. */
@@ -71,7 +71,7 @@ export type SandboxSshHostConfig = {
   idleWindowMinutes: number;
   /**
    * Loopback port this host's runtime listens on. Kept with the host because a
-   * runtime adopted from another Mission Control chose its own port, which
+   * runtime adopted from another Chaos Wrangler chose its own port, which
    * this client's global setting knows nothing about. Null for hosts recorded
    * before the port was tracked per-host.
    */
@@ -102,7 +102,7 @@ export type SandboxRemoteConfig = {
   /** SHA-256 fingerprint of `agentCa` (informational / future pin-by-hash). */
   agentCertSha256?: string | null;
   /**
-   * Managed provider metadata. Present only for Mission Control-provisioned
+   * Managed provider metadata. Present only for Chaos Wrangler-provisioned
    * remotes. Only "aws" is provisioned today; the `string` fallback keeps reads
    * type-safe for legacy rows persisted under removed providers.
    */
@@ -131,7 +131,7 @@ function toPersistence(value: unknown): SshHostPersistence {
 }
 
 /**
- * A platform outside the ones Mission Control provisions reads as unknown.
+ * A platform outside the ones Chaos Wrangler provisions reads as unknown.
  * Guessing would mean addressing the wrong service manager on removal.
  */
 function toHostPlatform(value: unknown): SshHostPlatform | null {
@@ -150,7 +150,7 @@ function toIdleWindowMinutes(value: unknown): number {
 /**
  * Read the SSH host record out of a remote config, filling defaults for fields
  * a row predating them never wrote. Returns null when the row carries no alias:
- * an SSH host Mission Control cannot name is not one it can reach.
+ * an SSH host Chaos Wrangler cannot name is not one it can reach.
  */
 export function parseSshHostConfig(
   remote: SandboxRemoteConfig | null | undefined,

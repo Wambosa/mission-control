@@ -163,7 +163,7 @@ export function ProjectSandboxDialog({
               No git “origin” remote found
             </span>
             <span style={{ color: "var(--text-dim)" }}>
-              Mission Control clones this project from its <code>origin</code> remote using your
+              Chaos Wrangler clones this project from its <code>origin</code> remote using your
               SSH keys, so it needs one before it can build a sandbox. Add a remote, then reopen
               this dialog:
             </span>

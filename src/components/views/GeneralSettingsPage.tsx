@@ -165,7 +165,7 @@ export function GeneralSettingsPage() {
   const osNotificationStatusMessage =
     permissionHint ??
     (osNotificationBlocked && permission === "denied" && !isElectron()
-      ? "Notification permission is blocked. On macOS, open System Settings → Notifications → Mission Control, allow notifications, then reload Mission Control."
+      ? "Notification permission is blocked. On macOS, open System Settings → Notifications → Chaos Wrangler, allow notifications, then reload Chaos Wrangler."
       : osNotificationBlocked && permission === "default" && !isElectron()
         ? "Notification permission is not granted yet. Turn this toggle off and on again to approve the prompt."
         : null);
@@ -209,7 +209,7 @@ export function GeneralSettingsPage() {
         <Field label="Startup loading screen">
           <ToggleRow
             title="Show launch intro"
-            description="Sliding doors, voice, and sound effects play the next time Mission Control loads."
+            description="Sliding doors, voice, and sound effects play the next time Chaos Wrangler loads."
             checked={launchOverlayEnabled}
             onChange={setLaunchOverlayEnabled}
             label="Enable"
@@ -296,7 +296,7 @@ function AboutSection() {
   // (setAboutPanelOptions is called nowhere), so this stays the app's single
   // place to read the running version.
   return (
-    <SettingsSection title="About" subtitle="Version information for Mission Control.">
+    <SettingsSection title="About" subtitle="Version information for Chaos Wrangler.">
       <Field label="Version">
         <div
           style={{
@@ -330,7 +330,7 @@ function ReloadSection() {
   };
 
   return (
-    <SettingsSection title="Reload" subtitle="Refresh the current Mission Control window.">
+    <SettingsSection title="Reload" subtitle="Refresh the current Chaos Wrangler window.">
       <Field label="Window">
         <div
           style={{

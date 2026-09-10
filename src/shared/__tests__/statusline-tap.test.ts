@@ -267,14 +267,14 @@ describe("statusline tap installer", () => {
     expect(ensureStatuslineTapScript(target)).toBe(target);
     expect(fs.readFileSync(target, "utf8")).toBe(STATUSLINE_TAP_SCRIPT);
 
-    fs.writeFileSync(target, `# Mission Control statusline tap v${STATUSLINE_TAP_VERSION} drift`);
+    fs.writeFileSync(target, `# Chaos Wrangler statusline tap v${STATUSLINE_TAP_VERSION} drift`);
     ensureStatuslineTapScript(target);
     expect(fs.readFileSync(target, "utf8")).toBe(STATUSLINE_TAP_SCRIPT);
   });
 
   it("never downgrades a newer on-disk script (older app build still running)", () => {
     const target = path.join(tmpDir, "tap-install", "statusline-tap.sh");
-    const newer = `#!/bin/sh\n# Mission Control statusline tap v${STATUSLINE_TAP_VERSION + 1} (managed)\n`;
+    const newer = `#!/bin/sh\n# Chaos Wrangler statusline tap v${STATUSLINE_TAP_VERSION + 1} (managed)\n`;
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, newer);
 

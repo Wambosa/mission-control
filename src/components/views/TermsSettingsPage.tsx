@@ -29,14 +29,14 @@ export function TermsSettingsPage() {
     >
       <div>
         <p style={PARAGRAPH}>
-          By installing, accessing, or using Mission Control (the
+          By installing, accessing, or using Chaos Wrangler (the
           &ldquo;Software&rdquo;), you agree to be bound by these Terms of
           Service. If you do not agree, do not use the Software.
         </p>
 
         <h3 style={HEADING}>1. Nature of the Software</h3>
         <p style={PARAGRAPH}>
-          Mission Control is a local orchestration tool that lets you launch,
+          Chaos Wrangler is a local orchestration tool that lets you launch,
           coordinate, and interact with autonomous and semi-autonomous
           third-party AI agents, command-line tools, scripts, and processes
           (&ldquo;Agents&rdquo;) on your own machine, in your own working
@@ -49,14 +49,14 @@ export function TermsSettingsPage() {
 
         <h3 style={HEADING}>2. Your Responsibility for Agent Actions</h3>
         <p style={PARAGRAPH}>
-          Agents you run through Mission Control may read, write, modify, or
+          Agents you run through Chaos Wrangler may read, write, modify, or
           delete files; execute shell commands; commit and push code; call
           external APIs; spend money on paid services; and otherwise take
           actions with real-world consequences. You acknowledge and agree
           that:
         </p>
         <p style={PARAGRAPH}>
-          (a) every action taken by an Agent launched from Mission Control is
+          (a) every action taken by an Agent launched from Chaos Wrangler is
           your action and your responsibility; (b) you are responsible for
           reviewing, approving, and verifying anything an Agent produces or
           changes before relying on it; (c) you are responsible for
@@ -103,7 +103,7 @@ export function TermsSettingsPage() {
         <h3 style={HEADING}>5. Indemnification</h3>
         <p style={PARAGRAPH}>
           You agree to defend, indemnify, and hold harmless the author,
-          copyright holders, and contributors of Mission Control from and
+          copyright holders, and contributors of Chaos Wrangler from and
           against any and all claims, damages, losses, liabilities, costs,
           and expenses (including reasonable attorneys&apos; fees) arising out
           of or related to (a) your use of the Software; (b) any action taken
@@ -115,7 +115,7 @@ export function TermsSettingsPage() {
 
         <h3 style={HEADING}>6. Third-Party Tools and Services</h3>
         <p style={PARAGRAPH}>
-          Mission Control integrates with third-party Agents, models, APIs,
+          Chaos Wrangler integrates with third-party Agents, models, APIs,
           and tools that are governed by their own terms and pricing. Mission
           Control is not responsible for those services, their availability,
           their output, or any charges they incur on your behalf. You are

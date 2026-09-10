@@ -263,7 +263,7 @@ export function ProjectCard({
                   setMenu(null);
                   onRemove();
                 }}
-                title="Remove this project from Mission Control. The folder on disk is not touched."
+                title="Remove this project from Chaos Wrangler. The folder on disk is not touched."
               >
                 Remove project
               </DropdownMenuItem>

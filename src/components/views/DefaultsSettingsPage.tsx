@@ -79,7 +79,7 @@ export function DefaultsSettingsPage() {
       }
       if (isStaleSettingsSchemaError(e, patch)) {
         toast.error(
-          "Settings API is still running the old schema. Restart the Mission Control dev server, then choose the harness again.",
+          "Settings API is still running the old schema. Restart the Chaos Wrangler dev server, then choose the harness again.",
         );
         return;
       }
@@ -94,7 +94,7 @@ export function DefaultsSettingsPage() {
     <>
       <SettingsSection
         title="Defaults"
-        subtitle="Tools Mission Control reaches for behind the scenes."
+        subtitle="Tools Chaos Wrangler reaches for behind the scenes."
         headingLevel="h1"
       >
         <div
@@ -149,7 +149,7 @@ export function DefaultsSettingsPage() {
                 description={
                   <>
                     When you comment on a Markdown preview and press{" "}
-                    <strong>Refine</strong>, Mission Control runs this harness
+                    <strong>Refine</strong>, Chaos Wrangler runs this harness
                     in print mode to rewrite the file.
                   </>
                 }

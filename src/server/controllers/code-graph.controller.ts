@@ -32,7 +32,7 @@ function requireProject(projectId: string): Response | null {
 
 // Refuse graph endpoints when Recall is off so agent-facing MCP tools — even in
 // sessions provisioned before the toggle flipped, or via a stale `.mcp.json`
-// outside Mission Control — go dead immediately instead of reading real data.
+// outside Chaos Wrangler — go dead immediately instead of reading real data.
 // Status/summary/index gate on the master switch only (the Recall panel drives
 // a manual index regardless of the sub-flag); the navigation reads also honor
 // the code-graph sub-flag. `enabled: false` forces `codeGraphEnabled` false.

@@ -1,4 +1,4 @@
-// Parsing the user's SSH config into the aliases it defines. Mission Control
+// Parsing the user's SSH config into the aliases it defines. Chaos Wrangler
 // keeps no host list of its own, so this file is the only place a machine
 // becomes visible — and the only thing read out of it is the alias. Hostnames,
 // ports, and identity files stay ssh's business at connect time.

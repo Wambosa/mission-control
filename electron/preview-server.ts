@@ -266,7 +266,7 @@ export async function startPreviewServer(projectRoot: string): Promise<StartPrev
     return { ok: false, error: "invalid-root" };
   }
   // The projectRoot trust boundary must match `files:read`: only registered
-  // Mission Control projects (or paths inside one, e.g. `.worktree/*`) may be
+  // Chaos Wrangler projects (or paths inside one, e.g. `.worktree/*`) may be
   // served. Without this a compromised renderer could root the loopback server
   // at `/` or the home dir and read any file under it (traversal is blocked,
   // but the *root* would otherwise be attacker-chosen). Realpath'd on both

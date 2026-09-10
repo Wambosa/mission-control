@@ -54,7 +54,7 @@ env.MC_DEV_PORT = String(port);
 env.MC_DEV_URL ||= origin;
 env.MC_SERVER_ORIGIN ||= origin;
 
-console.log(`[dev] using Mission Control dev server on ${origin}`);
+console.log(`[dev] using Chaos Wrangler dev server on ${origin}`);
 
 await runElectronDev(origin);
 
@@ -171,7 +171,7 @@ function cleanupStaleDevServer(port) {
   if (stalePids.length === 0) return;
 
   console.log(
-    `[dev] stopping stale Mission Control dev server on ${env.MC_DEV_HOST}:${port} ` +
+    `[dev] stopping stale Chaos Wrangler dev server on ${env.MC_DEV_HOST}:${port} ` +
       `(pid${stalePids.length === 1 ? "" : "s"} ${stalePids.join(", ")})`,
   );
 

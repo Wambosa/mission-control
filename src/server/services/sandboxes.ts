@@ -183,10 +183,10 @@ export type RegisterSshHostInput = {
   /** Alias exactly as it appears in the user's SSH config. */
   alias: string;
   name: string;
-  /** Directory Mission Control provisioned into on the host. */
+  /** Directory Chaos Wrangler provisioned into on the host. */
   prefix: string;
   platform: SshHostPlatform;
-  /** Bearer secret Mission Control generated for this host's runtime. */
+  /** Bearer secret Chaos Wrangler generated for this host's runtime. */
   apiKey: string;
   /**
    * Port the host's runtime listens on. Optional so a host recorded before
@@ -297,7 +297,7 @@ export function updateSandbox(id: string, patch: UpdateSandboxPatch): SandboxPub
  * Removes a sandbox. What that means to its projects depends on what the
  * sandbox is:
  *
- * - A managed remote VM *contains* the project — Mission Control created it in
+ * - A managed remote VM *contains* the project — Chaos Wrangler created it in
  *   there — so tearing the VM down takes the project with it (the FK cascades).
  * - An SSH host merely *runs* a project the user already had on disk. Removing
  *   the host must not take their project with it, so the binding is cleared

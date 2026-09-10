@@ -25,10 +25,10 @@ export type SshServiceDescription = {
   platform: SshHostPlatform;
   /** The SSH user's home directory, as the host reports it. */
   homeDir: string;
-  /** Directory Mission Control owns on the host. */
+  /** Directory Chaos Wrangler owns on the host. */
   prefix: string;
   agentPort: number;
-  /** Bearer secret Mission Control generated for this host. Never the user's. */
+  /** Bearer secret Chaos Wrangler generated for this host. Never the user's. */
   apiKey: string;
   /** Agent version being registered, recorded in the runtime manifest. */
   agentVersion: string;
@@ -61,7 +61,7 @@ function trimTrailingSlash(path: string): string {
 
 /**
  * What the service runs with. The prefix binary directory comes first, which
- * is what makes a harness Mission Control installed selectable for sessions on
+ * is what makes a harness Chaos Wrangler installed selectable for sessions on
  * this host without touching the user's own shell configuration.
  */
 export function sshServicePath(description: SshServiceDescription): string {
@@ -98,7 +98,7 @@ function serviceEnvironment(description: SshServiceDescription): Array<[string, 
 /**
  * What the runtime on a host is, in a form a later client can read without
  * knowing which service manager wrote it. Provisioning has always described
- * the runtime to the *host*; this describes it to the *next Mission Control*,
+ * the runtime to the *host*; this describes it to the *next Chaos Wrangler*,
  * which is what makes adopting an existing runtime possible instead of
  * overwriting it. Deliberately holds no secret — the key stays in agent.env,
  * which is the only 600 file here.
@@ -200,7 +200,7 @@ function renderLaunchAgent(description: SshServiceDescription): string {
     environment,
     `  </dict>`,
     // Together these are "run it now and keep it running" — the host reboots
-    // and the runtime comes back without Mission Control being there.
+    // and the runtime comes back without Chaos Wrangler being there.
     `  <key>RunAtLoad</key>`,
     `  <true/>`,
     `  <key>KeepAlive</key>`,
@@ -224,7 +224,7 @@ function renderSystemdUnit(description: SshServiceDescription): string {
     .join("\n");
   return [
     `[Unit]`,
-    `Description=Mission Control Agent`,
+    `Description=Chaos Wrangler Agent`,
     `After=network-online.target`,
     `Wants=network-online.target`,
     ``,
@@ -268,7 +268,7 @@ export type SshExistingRuntime = {
 
 /**
  * Ask a host what runtime it already has. This is the read that provisioning
- * never did — without it, a second Mission Control writes a fresh key over the
+ * never did — without it, a second Chaos Wrangler writes a fresh key over the
  * one the first is still holding, and the first starts getting 401s it has no
  * way to explain.
  *

@@ -2,7 +2,7 @@ import { AGENT_CLI_CONFIG, pathLookupCandidates } from "./agent-cli-config";
 import { compareCliVersions, extractCliVersion } from "./agent-cli-version-compare";
 import { TASK_AGENTS, type TaskAgent } from "./domain";
 
-// What a host already has, and what it therefore needs. Mission Control assumes
+// What a host already has, and what it therefore needs. Chaos Wrangler assumes
 // nothing but a shell on the far side, so it looks before it installs — and an
 // installation the host already has is left exactly where the user put it.
 //
@@ -55,7 +55,7 @@ export type SshProvisionPlan = {
   ok: true;
   platform: SshHostPlatform;
   arch: SshHostArch;
-  /** Where everything Mission Control installs will land. */
+  /** Where everything Chaos Wrangler installs will land. */
   prefix: string;
   /** Empty when the host already has everything. */
   steps: SshProvisionStep[];
@@ -83,14 +83,14 @@ export type SshProvisionResult =
   | {
       ok: true;
       alias: string;
-      /** The one directory Mission Control owns on the host. */
+      /** The one directory Chaos Wrangler owns on the host. */
       prefix: string;
       platform: SshHostPlatform;
       apiKey: string;
       /** The port the runtime actually listens on — adopted, or newly chosen. */
       agentPort: number;
       /**
-       * True when this host already had a runtime and Mission Control attached
+       * True when this host already had a runtime and Chaos Wrangler attached
        * to it instead of registering its own. The key and port then came from
        * the host, not from this client.
        */
@@ -109,7 +109,7 @@ export type SshProvisionResult =
   | { ok: false; error: string };
 
 export type SshProvisionRequirements = {
-  /** The agent version this build of Mission Control speaks. */
+  /** The agent version this build of Chaos Wrangler speaks. */
   expectedAgentVersion: string;
   /** Overridable for tests; defaults to what the agent package declares. */
   minimumNodeVersion?: string;
@@ -118,7 +118,7 @@ export type SshProvisionRequirements = {
 };
 
 /**
- * The one directory Mission Control owns on a host. Everything it installs
+ * The one directory Chaos Wrangler owns on a host. Everything it installs
  * lands beneath it, and removing the host deletes it — so it is derived from
  * the SSH user's own home rather than any absolute location.
  */
@@ -127,7 +127,7 @@ export function sshPrefixPath(homeDir: string): string {
 }
 
 /**
- * POSIX single-quoting. Every host path Mission Control interpolates into a
+ * POSIX single-quoting. Every host path Chaos Wrangler interpolates into a
  * script goes through here, because a home directory is the user's to name.
  */
 export function shellQuote(value: string): string {
@@ -230,7 +230,7 @@ function versionAtLeast(reported: string | null, minimum: string): boolean {
 }
 
 /**
- * Turn what the host has into what Mission Control must install. A harness
+ * Turn what the host has into what Chaos Wrangler must install. A harness
  * already on PATH is satisfied and is never reinstalled or shadowed; a runtime
  * too old to run the agent counts as missing, because it cannot do the job.
  */
@@ -242,14 +242,14 @@ export function deriveSshProvisionPlan(
     return {
       ok: false,
       reason: "unsupported-platform",
-      message: `Mission Control runs on Linux and macOS hosts. This host reported "${probe.platform || "an unknown platform"}".`,
+      message: `Chaos Wrangler runs on Linux and macOS hosts. This host reported "${probe.platform || "an unknown platform"}".`,
     };
   }
   if (!isTargetArch(probe.arch)) {
     return {
       ok: false,
       reason: "unsupported-arch",
-      message: `Mission Control has no runtime build for this host's architecture ("${probe.arch || "unknown"}").`,
+      message: `Chaos Wrangler has no runtime build for this host's architecture ("${probe.arch || "unknown"}").`,
     };
   }
   if (!probe.homeDir) {
@@ -281,7 +281,7 @@ export function deriveSshProvisionPlan(
   }
 
   for (const agent of harnesses) {
-    // A harness the host already has is the user's, not Mission Control's to
+    // A harness the host already has is the user's, not Chaos Wrangler's to
     // replace or shadow. Updating an out-of-date one is a separate, explicit
     // action against that host's own installation.
     if (probe.harnessVersions[agent]) continue;

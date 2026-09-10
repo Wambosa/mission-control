@@ -285,7 +285,7 @@ describe("OpenCode plugin runtime integration", () => {
     });
   });
 
-  it("no-ops when Mission Control env vars are missing", async () => {
+  it("no-ops when Chaos Wrangler env vars are missing", async () => {
     delete process.env.MC_TASK_ID;
     delete process.env.MC_API_URL;
     delete process.env.MC_API_TOKEN;

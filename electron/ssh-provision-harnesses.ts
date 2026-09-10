@@ -124,7 +124,7 @@ export function harnessInstallScript(agent: TaskAgent, prefix: string): SshHarne
     return {
       agent,
       kind: "unavailable",
-      reason: `${config.label} has no npm package and no installer Mission Control can redirect into the prefix. Install it on the host yourself and Mission Control will use it as-is.`,
+      reason: `${config.label} has no npm package and no installer Chaos Wrangler can redirect into the prefix. Install it on the host yourself and Chaos Wrangler will use it as-is.`,
     };
   }
 
@@ -147,7 +147,7 @@ export type SshHarnessUpdate =
 
 /**
  * Update a harness on a host, in that host's own prefix. Installing `@latest`
- * over the prefix copy *is* the update — the prefix is Mission Control's, so
+ * over the prefix copy *is* the update — the prefix is Chaos Wrangler's, so
  * there is nothing of the user's to disturb.
  *
  * A harness with no npm package was never installed into the prefix (see
@@ -164,7 +164,7 @@ export async function updateSshHarness(
   if (install.kind !== "install") return { ok: false, reason: "no-update-command" };
 
   const config = AGENT_CLI_CONFIG[agent];
-  // Only ever update a copy Mission Control put there. Running a shell
+  // Only ever update a copy Chaos Wrangler put there. Running a shell
   // installer against a host where the harness is the user's own would plant a
   // second copy in the prefix and shadow theirs on the service PATH — the one
   // thing this module promises not to do. npm harnesses carry no such risk:

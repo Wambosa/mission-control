@@ -163,7 +163,7 @@ except Exception:
 export const STATUSLINE_TAP_VERSION = 4;
 
 export const STATUSLINE_TAP_SCRIPT = `#!/bin/sh
-# Mission Control statusline tap v${STATUSLINE_TAP_VERSION} (managed - safe to delete; Mission Control reinstalls it).
+# Chaos Wrangler statusline tap v${STATUSLINE_TAP_VERSION} (managed - safe to delete; Chaos Wrangler reinstalls it).
 # Tees Claude Code's rate_limits from the statusline payload into a shared cache
 # (~/.cache/claude-limits/limits.json), then chains your own statusline command
 # from ~/.claude/settings.json so the visible statusline is unchanged.

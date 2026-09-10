@@ -601,7 +601,7 @@ chmod 0600 /etc/mission-control-agent.env
 
 cat >/etc/systemd/system/mission-control-agent.service <<'MC_AGENT_SERVICE'
 [Unit]
-Description=Mission Control Agent
+Description=Chaos Wrangler Agent
 After=network-online.target
 Wants=network-online.target
 
@@ -803,7 +803,7 @@ chmod 0755 /usr/local/lib/mc-idle-check.sh
 
 cat >/etc/systemd/system/mission-control-idle.service <<'MC_IDLE_SERVICE'
 [Unit]
-Description=Mission Control idle auto-stop check
+Description=Chaos Wrangler idle auto-stop check
 
 [Service]
 Type=oneshot
@@ -814,7 +814,7 @@ MC_IDLE_SERVICE
 
 cat >/etc/systemd/system/mission-control-idle.timer <<'MC_IDLE_TIMER'
 [Unit]
-Description=Run the Mission Control idle auto-stop check every minute
+Description=Run the Chaos Wrangler idle auto-stop check every minute
 
 [Timer]
 OnBootSec=2min
@@ -883,7 +883,7 @@ MC_TLS_PROXY
 
 cat >/etc/systemd/system/mission-control-tls.service <<'MC_TLS_SERVICE'
 [Unit]
-Description=Mission Control TLS sidecar
+Description=Chaos Wrangler TLS sidecar
 After=network-online.target mission-control-agent.service
 Wants=network-online.target
 
@@ -1105,7 +1105,7 @@ function electronBetterSqliteNativeBinding() {
   );
   if (fs.existsSync(binding)) return binding;
   throw new CliError(
-    "Electron better-sqlite3 native binding is missing. Restart Mission Control after running pnpm native:electron.",
+    "Electron better-sqlite3 native binding is missing. Restart Chaos Wrangler after running pnpm native:electron.",
   );
 }
 
@@ -1273,7 +1273,7 @@ function ensureAwsSecurityGroup(opts, accessCidr, agentPort = AGENT_PORT) {
         "--group-name",
         DEFAULT_AWS_SECURITY_GROUP,
         "--description",
-        "Mission Control remote VM agent access",
+        "Chaos Wrangler remote VM agent access",
         "--vpc-id",
         vpcId,
       ]);
@@ -1281,9 +1281,9 @@ function ensureAwsSecurityGroup(opts, accessCidr, agentPort = AGENT_PORT) {
     }
   }
 
-  authorizeAwsIngress(opts, securityGroupId, agentPort, accessCidr, "Mission Control agent access");
+  authorizeAwsIngress(opts, securityGroupId, agentPort, accessCidr, "Chaos Wrangler agent access");
   if (opts.keyName) {
-    authorizeAwsIngress(opts, securityGroupId, 22, accessCidr, "Mission Control optional SSH access");
+    authorizeAwsIngress(opts, securityGroupId, 22, accessCidr, "Chaos Wrangler optional SSH access");
   }
 
   return { securityGroupId, managed: !opts.securityGroupId, vpcId };
@@ -2009,7 +2009,7 @@ async function destroy(id, flags) {
       );
     }
     // --keep-row terminates the instance but leaves the sandbox row for the caller
-    // to delete (so Mission Control's server-side cleanup runs project teardown).
+    // to delete (so Chaos Wrangler's server-side cleanup runs project teardown).
     if (boolFlag(flags, "keep-row")) {
       console.log(`[remote-vm] instance terminated; sandbox row ${id} left for caller to remove`);
     } else {
@@ -2025,7 +2025,7 @@ async function destroy(id, flags) {
 }
 
 function printHelp() {
-  console.log(`Mission Control remote VM CLI
+  console.log(`Chaos Wrangler remote VM CLI
 
 Usage:
   pnpm remote-vm deploy aws --name <name> --region <region> [--size t3.medium]

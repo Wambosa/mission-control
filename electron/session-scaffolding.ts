@@ -155,5 +155,5 @@ export function unreadableCwdNotice(cwd: string, reason: FsPermissionOutcome): s
       : reason === "filesystem-blocked"
         ? "The filesystem denied access to it. Check the directory's permissions."
         : "No answer came back in time — a consent prompt may still be waiting.";
-  return `Mission Control could not read this session's working directory.\r\n  ${cwd}\r\n  ${detail}\r\n  Session scaffolding was skipped; the agent may not behave as expected.\r\n\r\n`;
+  return `Chaos Wrangler could not read this session's working directory.\r\n  ${cwd}\r\n  ${detail}\r\n  Session scaffolding was skipped; the agent may not behave as expected.\r\n\r\n`;
 }

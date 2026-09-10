@@ -252,3 +252,73 @@ describe("artifact naming tolerates the space in the product name (U5)", () => {
     }
   });
 });
+
+describe("user-visible naming (U6)", () => {
+  it("names the new product in the screen-capture usage description", () => {
+    // macOS shows this string in its own permission prompt, so it has to name
+    // the app as the operating system knows it — the bundle name.
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+    ) as { build?: { mac?: { extendInfo?: Record<string, string> } } };
+    const description = pkg.build?.mac?.extendInfo?.NSScreenCaptureUsageDescription ?? "";
+
+    expect(description).toContain(PRODUCT_DISPLAY_NAME);
+    expect(description).not.toContain("Mission Control");
+  });
+
+  it("matches the in-app instruction that points at the same setting", () => {
+    // The prompt and the in-app recovery instruction have to name the same
+    // thing, or the user is told to look for an app that is not in the list.
+    // They were already inconsistent before the rename: the prose said the
+    // spaced name while the bundle carried the unspaced one.
+    const source = fs.readFileSync(path.join(repoRoot, "src/lib/screenshot.ts"), "utf8");
+    expect(source).toContain(PRODUCT_DISPLAY_NAME);
+    expect(source).not.toContain("Mission Control");
+  });
+
+  it("names the new product in every macOS usage description", () => {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+    ) as { build?: { mac?: { extendInfo?: Record<string, string> } } };
+    const extendInfo = pkg.build?.mac?.extendInfo ?? {};
+
+    for (const [key, value] of Object.entries(extendInfo)) {
+      if (!key.endsWith("UsageDescription")) continue;
+      expect(value, key).not.toContain("Mission Control");
+    }
+  });
+
+  it("resolves the window title to the new product name", () => {
+    const source = fs.readFileSync(path.join(repoRoot, "src/routes/__root.tsx"), "utf8");
+    // Resolved from the shared constant rather than restated, so the title
+    // cannot drift from the bundle name.
+    expect(source).toContain("{ title: PRODUCT_DISPLAY_NAME }");
+    expect(source).not.toContain('title: "MissionControl"');
+  });
+
+  it("renders the wordmark as the two words of the new name", () => {
+    const source = fs.readFileSync(path.join(repoRoot, "src/components/ui/TopBar.tsx"), "utf8");
+    expect(source).toContain("<span>Chaos</span>");
+    expect(source).toContain(">Wrangler</span>");
+    expect(source).not.toContain("<span>Mission</span>");
+  });
+});
+
+describe("provenance (R17)", () => {
+  const readme = () => fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
+
+  it("states that this project is a fork and links the original repository", () => {
+    const text = readme();
+    expect(text).toMatch(/fork of/i);
+    expect(text).toContain("https://github.com/AgentSystemLabs/mission-control");
+  });
+
+  it("titles itself with the new product name", () => {
+    expect(readme().split("\n")[0]).toBe(`# ${PRODUCT_DISPLAY_NAME}`);
+  });
+
+  it("leaves the upstream project's name in the license copyright", () => {
+    const license = fs.readFileSync(path.join(repoRoot, "LICENSE"), "utf8");
+    expect(license).toContain("AgentSystem Labs");
+  });
+});

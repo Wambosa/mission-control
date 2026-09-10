@@ -103,7 +103,7 @@ export function SandboxProvisioningState({
           }}
         >
           {deployLogText ||
-            "Waiting for deploy output…\n\nMission Control will stream AWS provisioning steps here as they run."}
+            "Waiting for deploy output…\n\nChaos Wrangler will stream AWS provisioning steps here as they run."}
         </pre>
       </div>
     </div>

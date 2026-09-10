@@ -24,7 +24,7 @@ import {
 const CLIENT_ID_KEY = "client.instanceId";
 
 /**
- * A stable name for *this* Mission Control, generated once and kept. It is
+ * A stable name for *this* Chaos Wrangler, generated once and kept. It is
  * what lets a host tell two clients apart — the desktop and the laptop, an
  * installed build and a dev build — so neither mistakes the other's runtime
  * for an orphan. Sixteen hex characters, which the shared validator accepts.

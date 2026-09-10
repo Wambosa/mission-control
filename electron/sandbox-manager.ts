@@ -90,7 +90,7 @@ let initialized = false;
 // the host. Injected by main.ts (never trusted from the renderer).
 let getSandboxHookEnv: (() => { port: number; token: string } | null) | null = null;
 
-/** Relay a sandbox agent hook frame to the host Mission Control API. */
+/** Relay a sandbox agent hook frame to the host Chaos Wrangler API. */
 function forwardSandboxHook(
   slug: string,
   taskId: string,
@@ -272,10 +272,10 @@ export function gitAuthCloneFailureHint(
 ): string | null {
   if (!describe(err).includes("Permission denied (publickey)")) return null;
   // On an SSH host the credentials are the host's own, so the fix is on that
-  // machine — not in a Mission Control panel that would offer to put a second
+  // machine — not in a Chaos Wrangler panel that would offer to put a second
   // key there.
   if (kind === "ssh-host") {
-    return "This host could not authenticate to Git with its own SSH credentials. Check the key or agent the host itself uses — Mission Control does not install Git credentials onto a machine you already own.";
+    return "This host could not authenticate to Git with its own SSH credentials. Check the key or agent the host itself uses — Chaos Wrangler does not install Git credentials onto a machine you already own.";
   }
   if (mode === "none") {
     return "This sandbox is set to no Git authentication. Choose Copy file keys from ~/.ssh or Generate a sandbox key in the sandbox configure panel, then try the clone again.";
@@ -583,7 +583,7 @@ async function openSshTunnelFor(
 /**
  * Where a scope keeps the projects it works on.
  *
- * `/workspace` is a Mission Control VM's container layout, and it was baked
+ * `/workspace` is a Chaos Wrangler VM's container layout, and it was baked
  * into the shared path mapping as a constant — so every remote file, git, and
  * PTY call against an SSH host asked for a directory that machine has never
  * had, and that sits outside the root the agent confines itself to. A host
@@ -662,7 +662,7 @@ async function stopSshRuntime(config: SandboxConfig): Promise<void> {
 }
 
 /**
- * Take Mission Control back off a host being removed: unregister the service,
+ * Take Chaos Wrangler back off a host being removed: unregister the service,
  * delete the prefix, leave the SSH config alone. Returns what survived, if
  * anything — never an error, because a host that cannot be reached must not
  * stop the user from forgetting it.
@@ -904,7 +904,7 @@ async function provisionGitAuthFor(
   // An SSH host authenticates to Git as itself. It is the user's own machine,
   // already holding their keys and their known_hosts — the same premise the
   // whole SSH feature rests on. Copying keys onto it or generating a second
-  // one would be Mission Control installing credentials into a machine that
+  // one would be Chaos Wrangler installing credentials into a machine that
   // already has them, and demanding the user pick one of those first is asking
   // them to solve a problem they do not have.
   if (config?.kind === "ssh-host") return {};
@@ -1137,7 +1137,7 @@ function publicSettings(
 }
 
 function buildDiagnostics(): string {
-  const lines: string[] = ["Mission Control sandbox diagnostics"];
+  const lines: string[] = ["Chaos Wrangler sandbox diagnostics"];
   for (const { sandboxId, state } of getRegistry().allStates()) {
     const detail =
       state.status === "connected" || state.status === "update-required"
@@ -1626,10 +1626,10 @@ export function registerSandboxManager(
         },
       });
 
-      sendProgress("Registering the Mission Control service", total - 1, total);
+      sendProgress("Registering the Chaos Wrangler service", total - 1, total);
 
       // Look before writing. A host can already be running a runtime another
-      // Mission Control provisioned — a second machine, or a dev build beside
+      // Chaos Wrangler provisioned — a second machine, or a dev build beside
       // an installed one — and that runtime's key and port are the ones the
       // other client still holds. Generating fresh ones here would revoke its
       // access silently, so an existing runtime is adopted rather than

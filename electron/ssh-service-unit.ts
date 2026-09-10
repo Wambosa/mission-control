@@ -36,7 +36,7 @@ export type SshServiceInstallResult =
 const LINGER_MARKER = "mc:linger=";
 
 /**
- * The bearer secret for one host's runtime. Mission Control generates it and
+ * The bearer secret for one host's runtime. Chaos Wrangler generates it and
  * keeps it — R5's promise is that the user never pastes an API key, not that
  * there isn't one.
  */
@@ -175,7 +175,7 @@ export async function startSshService(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const result = await exec(sshShellArgs(alias), sshServiceStartScript(target));
   if (result.code !== 0) {
-    return { ok: false, error: sshStepFailure("Starting the Mission Control runtime", result) };
+    return { ok: false, error: sshStepFailure("Starting the Chaos Wrangler runtime", result) };
   }
   return { ok: true };
 }
@@ -193,7 +193,7 @@ export async function installSshService(
   const definition = sshServiceDefinition(description);
   const result = await exec(sshShellArgs(alias), sshServiceInstallScript(description));
   if (result.code !== 0) {
-    return { ok: false, error: sshStepFailure("Registering the Mission Control service", result) };
+    return { ok: false, error: sshStepFailure("Registering the Chaos Wrangler service", result) };
   }
   return {
     ok: true,

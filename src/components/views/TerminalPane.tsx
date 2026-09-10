@@ -1358,7 +1358,7 @@ export function TerminalPane({
           // container yet gets a clone offer (remote detected from the host repo)
           // instead of an empty terminal. No remote → fall through (empty dir).
           //
-          // Only for a managed VM, whose workspace layout Mission Control owns
+          // Only for a managed VM, whose workspace layout Chaos Wrangler owns
           // and whose clone destination it can therefore derive. A project on
           // an SSH host states its own directory, and the clone RPC takes a
           // slug rather than a path — it would put the repo somewhere other

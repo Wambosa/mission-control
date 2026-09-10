@@ -102,7 +102,7 @@ describe("runAgentCliUpdate against an SSH host", () => {
     expect(scripts[0]).toMatch(/if \[ ! -e .*bin\/cursor-agent/);
   });
 
-  it("updates a shell-installed harness that is Mission Control's own", async () => {
+  it("updates a shell-installed harness that is Chaos Wrangler's own", async () => {
     const { run } = exec({ stdout: "2026.08.25\n" });
 
     const result = await runAgentCliUpdate("cursor-cli", HOST, { exec: run });

@@ -1543,7 +1543,7 @@ export function ProjectDialog({
         width={460}
       >
         <p style={{ margin: 0, fontSize: 13, color: "var(--text)", lineHeight: 1.5 }}>
-          Mission Control stops using this machine. Nothing on it is deleted, and
+          Chaos Wrangler stops using this machine. Nothing on it is deleted, and
           every project that ran there falls back to Local — you can point them
           at another host afterwards.
         </p>

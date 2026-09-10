@@ -139,7 +139,7 @@ export function ThemeSettingsPage() {
   return (
     <SettingsSection
       title="Theme"
-      subtitle="Pick the chrome Mission Control wears: painted pixel art or the warm, flat Ember look — the latter in dark or light."
+      subtitle="Pick the chrome Chaos Wrangler wears: painted pixel art or the warm, flat Ember look — the latter in dark or light."
       headingLevel="h1"
     >
       <Field label="Theme style">
@@ -292,7 +292,7 @@ const THEME_STYLE_OPTIONS: Array<{
   {
     value: "painted",
     label: "Painted",
-    description: "Pixel-art borders and shell imagery. The full Mission Control look. Dark only.",
+    description: "Pixel-art borders and shell imagery. The full Chaos Wrangler look. Dark only.",
   },
   {
     value: "flat",

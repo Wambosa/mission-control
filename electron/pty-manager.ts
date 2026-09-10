@@ -761,7 +761,7 @@ export function registerPtyHandlers(
         env.MC_API_TOKEN = mcEnv.token;
         env.MC_THEME = appTheme;
       }
-      // Mirror Mission Control's light/dark to the agent's own UI. COLORFGBG is
+      // Mirror Chaos Wrangler's light/dark to the agent's own UI. COLORFGBG is
       // the terminal-background hint Claude Code (and other COLORFGBG-aware TUIs)
       // read to auto-pick a theme: the trailing number is the background color
       // index — 15 (white) reads as light, 0 (black) as dark. This only takes

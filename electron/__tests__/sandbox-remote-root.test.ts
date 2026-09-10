@@ -42,7 +42,7 @@ function sshHost(overrides: Record<string, unknown> = {}): SandboxConfig {
 }
 
 describe("sandboxRemoteRoot", () => {
-  it("keeps the container layout for a Mission Control VM", () => {
+  it("keeps the container layout for a Chaos Wrangler VM", () => {
     expect(sandboxRemoteRoot(config())).toBe("/workspace");
   });
 

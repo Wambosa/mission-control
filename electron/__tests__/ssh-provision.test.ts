@@ -105,7 +105,7 @@ describe("sshProvisionCommands", () => {
   it("never installs globally or writes to a shell configuration file", () => {
     const scripts = scriptsFor();
 
-    // npm's "global" is only ever global to the prefix Mission Control owns.
+    // npm's "global" is only ever global to the prefix Chaos Wrangler owns.
     const installs = scripts.match(/npm install[^\n]*/g) ?? [];
     expect(installs).not.toHaveLength(0);
     for (const install of installs) {

@@ -223,7 +223,7 @@ describe("parseSshProbeOutput", () => {
 });
 
 describe("sshPrefixPath", () => {
-  it("puts the one directory Mission Control owns under the SSH user's home", () => {
+  it("puts the one directory Chaos Wrangler owns under the SSH user's home", () => {
     expect(sshPrefixPath("/home/sam")).toBe("/home/sam/.mission-control");
   });
 });

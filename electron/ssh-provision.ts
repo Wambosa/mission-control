@@ -21,7 +21,7 @@ import {
 import { describeRetainedHost } from "../src/shared/ssh-claims";
 import { unclaimSshHost } from "./ssh-claims";
 
-// The install half of first connect. Everything Mission Control lays down goes
+// The install half of first connect. Everything Chaos Wrangler lays down goes
 // under one directory the SSH user already owns, so provisioning needs no root,
 // installs nothing globally, and touches no shell configuration — removing the
 // host is `rm -rf` on that one directory and nothing else.
@@ -62,7 +62,7 @@ export type SshProvisionRunResult =
   | { ok: false; failedStep: SshProvisionCommand["id"]; error: string };
 
 export type SshProvisionOptions = {
-  /** The agent version this build of Mission Control speaks. */
+  /** The agent version this build of Chaos Wrangler speaks. */
   agentVersion?: string;
   onProgress?: (progress: SshProvisionProgress) => void;
   exec?: SshExec;
@@ -150,7 +150,7 @@ function installRuntimeScript(prefix: string, platform: SshHostPlatform, arch: S
 
 /**
  * npm's `--global` means "global to the prefix", and the prefix here is the one
- * directory Mission Control owns. Nothing lands outside it, and no other npm
+ * directory Chaos Wrangler owns. Nothing lands outside it, and no other npm
  * install on the host is touched.
  */
 function installAgentScript(prefix: string, agentVersion: string): string {
@@ -189,7 +189,7 @@ export function sshProvisionCommands(
   const commands: SshProvisionCommand[] = [
     {
       id: "prefix",
-      label: "Creating the Mission Control directory",
+      label: "Creating the Chaos Wrangler directory",
       script: createPrefixScript(plan.prefix),
     },
   ];
@@ -204,7 +204,7 @@ export function sshProvisionCommands(
   if (plan.steps.some((step) => step.kind === "agent")) {
     commands.push({
       id: "agent",
-      label: "Installing the Mission Control agent",
+      label: "Installing the Chaos Wrangler agent",
       script: installAgentScript(plan.prefix, agentVersion),
     });
   }
@@ -224,7 +224,7 @@ export type SshHostTarget = {
 export type SshRemovalResult = {
   /**
    * Always true: the local record must go even when the host does not answer,
-   * or a machine that died takes its Mission Control entry hostage.
+   * or a machine that died takes its Chaos Wrangler entry hostage.
    */
   ok: true;
   /** What is still on the host, when anything is. */
@@ -290,7 +290,7 @@ export async function removeSshHost(
 
   // Give up this client's claim before deciding anything. The runtime belongs
   // to the host, not to whoever is walking away from it — so a host another
-  // Mission Control still uses keeps everything, and only the local record
+  // Chaos Wrangler still uses keeps everything, and only the local record
   // goes. Without this the first client to remove a shared host deletes the
   // prefix out from under every other one.
   if (options.clientId) {
@@ -305,7 +305,7 @@ export async function removeSshHost(
     ok: true,
     leftBehind: {
       prefix: target.prefix,
-      reason: sshStepFailure("Removing Mission Control from this host", result),
+      reason: sshStepFailure("Removing Chaos Wrangler from this host", result),
     },
   };
 }

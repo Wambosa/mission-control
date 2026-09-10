@@ -1,4 +1,4 @@
-// Shared types + constants for the Recall Code Graph — Mission Control's
+// Shared types + constants for the Recall Code Graph — Chaos Wrangler's
 // structural map of a project's source (symbols and the edges between them:
 // imports, calls, defines). It answers questions grep can't ("what connects
 // auth to the DB", "what breaks if I change this file", "what are the

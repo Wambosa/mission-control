@@ -5,10 +5,10 @@ export type PtyHookEnv = {
   token: string;
 };
 
-/** Hostname a sandbox container uses to reach the Mission Control API on the host. */
+/** Hostname a sandbox container uses to reach the Chaos Wrangler API on the host. */
 export const SANDBOX_HOOK_API_HOST = "host.docker.internal";
 
-/** Hostname the Electron host uses to reach its own loopback Mission Control API. */
+/** Hostname the Electron host uses to reach its own loopback Chaos Wrangler API. */
 export const LOCAL_HOOK_API_HOST = "127.0.0.1";
 
 /** Hostname sandbox agent hooks POST to — the agent's own loopback HTTP server. */
@@ -16,7 +16,7 @@ export const AGENT_LOCAL_HOOK_API_HOST = LOCAL_HOOK_API_HOST;
 
 // The PTY/agent hook commands POST to whatever host is baked into MC_API_URL.
 // On the Electron host that is loopback; inside a sandbox the agent's local HTTP
-// API receives hooks and relays them to Mission Control over WebSocket.
+// API receives hooks and relays them to Chaos Wrangler over WebSocket.
 // host.docker.internal remains for legacy direct-to-host wiring.
 const ALLOWED_HOOK_HOSTS = new Set<string>([
   LOCAL_HOOK_API_HOST,
@@ -25,7 +25,7 @@ const ALLOWED_HOOK_HOSTS = new Set<string>([
 ]);
 
 /**
- * Build the Mission Control API base URL an agent's hooks should POST to,
+ * Build the Chaos Wrangler API base URL an agent's hooks should POST to,
  * parameterized by host so the same construction serves both the Electron host
  * (`127.0.0.1`) and a Docker sandbox container (`host.docker.internal`).
  */
@@ -75,7 +75,7 @@ export function hookEndpointSlug(agent: string | undefined): string {
 }
 
 /**
- * A Mission Control API URL for one task, validated the same way hook URLs are.
+ * A Chaos Wrangler API URL for one task, validated the same way hook URLs are.
  *
  * `buildSyntheticHookUrl` is agent-hook-specific — it derives the path from the
  * agent id — so transcript ingest needs its own builder rather than a reuse.

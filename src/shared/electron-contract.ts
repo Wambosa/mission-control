@@ -582,12 +582,12 @@ export type ElectronBridge = {
   };
   sshHosts: {
     /**
-     * Host aliases from the user's SSH config, in file order. Mission Control
+     * Host aliases from the user's SSH config, in file order. Chaos Wrangler
      * keeps no host list of its own — adding a machine means editing that file.
      */
     list: () => Promise<string[]>;
     /**
-     * Ask a host what it already has and what Mission Control would install.
+     * Ask a host what it already has and what Chaos Wrangler would install.
      * Read-only: nothing is written to the host. The alias must be one `list`
      * returned.
      */

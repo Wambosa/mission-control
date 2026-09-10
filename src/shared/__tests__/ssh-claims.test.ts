@@ -142,8 +142,8 @@ describe("deciding whether a host may be torn down", () => {
   });
 
   it("explains what it left behind, and why", () => {
-    expect(describeRetainedHost(1)).toContain("another Mission Control");
-    expect(describeRetainedHost(2)).toContain("2 other Mission Controls");
+    expect(describeRetainedHost(1)).toContain("another Chaos Wrangler");
+    expect(describeRetainedHost(2)).toContain("2 other Chaos Wranglers");
   });
 
   it("treats an unanswerable host as still claimed rather than as empty", () => {

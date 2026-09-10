@@ -1,6 +1,6 @@
 import { shellQuote } from "./ssh-provision";
 
-// A host's runtime is shared. Two Mission Controls — a second machine, a dev
+// A host's runtime is shared. Two Chaos Wranglers — a second machine, a dev
 // build beside an installed one — reach the same SSH user, and before this
 // module the second one to arrive silently took the first one's host away
 // from it: a fresh API key overwrote the one the first still held, and
@@ -37,7 +37,7 @@ export function isValidSshClientId(value: string): boolean {
 /** What one client records about its use of a host. */
 export type SshClaim = {
   clientId: string;
-  /** Mission Control's version, so a stale claim can be read by a human. */
+  /** Chaos Wrangler's version, so a stale claim can be read by a human. */
   clientVersion: string;
   /** The agent version this client expects to speak to. */
   agentVersion: string;
@@ -178,9 +178,9 @@ export function otherSshClaims(claims: readonly SshClaim[], clientId: string): S
  */
 export function describeRetainedHost(remaining: number | null): string | null {
   if (remaining === null) {
-    return "Mission Control could not tell whether another Mission Control still uses this host, so it left the host untouched.";
+    return "Chaos Wrangler could not tell whether another Chaos Wrangler still uses this host, so it left the host untouched.";
   }
   if (remaining <= 0) return null;
-  const who = remaining === 1 ? "another Mission Control" : `${remaining} other Mission Controls`;
-  return `Mission Control stayed installed on this host: ${who} still uses it. Its runtime was left running.`;
+  const who = remaining === 1 ? "another Chaos Wrangler" : `${remaining} other Chaos Wranglers`;
+  return `Chaos Wrangler stayed installed on this host: ${who} still uses it. Its runtime was left running.`;
 }

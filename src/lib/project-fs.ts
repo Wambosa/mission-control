@@ -15,7 +15,7 @@ import type {
 } from "~/shared/electron-contract";
 
 /**
- * Where a Mission Control VM keeps a project: its workspace root plus a slug of
+ * Where a Chaos Wrangler VM keeps a project: its workspace root plus a slug of
  * the local folder's name. The VM creates the project itself (see
  * project-sandbox-create), so the layout is ours to derive.
  *

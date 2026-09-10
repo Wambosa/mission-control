@@ -9,7 +9,7 @@ import { stripTerminalControlText } from "~/shared/terminal-text";
 /**
  * Leading sentence of the title meta-prompt. Exported (via
  * {@link isTitleGenerationPrompt}) so the hook pipeline can recognize — and
- * ignore — a title-generation helper that fired Mission Control's own hooks,
+ * ignore — a title-generation helper that fired Chaos Wrangler's own hooks,
  * a defense-in-depth backstop against the recording/recursion feedback loop.
  */
 const TITLE_PROMPT_SIGNATURE = "You are naming a developer's coding session.";

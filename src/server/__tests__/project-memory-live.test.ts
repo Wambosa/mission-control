@@ -153,7 +153,7 @@ describe("Recall live injection pipeline (real HTTP socket)", () => {
     console.log("\n================================================================\n");
 
     expect(onDisk).toContain("<!-- mc:recall:start");
-    expect(onDisk).toContain("# Project memory (Mission Control Recall)");
+    expect(onDisk).toContain("# Project memory (Chaos Wrangler Recall)");
     expect(onDisk).toContain("A desktop app that orchestrates CLI coding agents");
     expect(onDisk).toContain("Warm-pool PTYs spawn before the project is known");
     expect(gitignore).toContain("CLAUDE.local.md");

@@ -160,7 +160,7 @@ except Exception:
  * build vs a newer dev build, or a not-yet-restarted process) can never stomp
  * a newer script back to an old version on every session spawn.
  */
-export const STATUSLINE_TAP_VERSION = 4;
+export const STATUSLINE_TAP_VERSION = 5;
 
 export const STATUSLINE_TAP_SCRIPT = `#!/bin/sh
 # Chaos Wrangler statusline tap v${STATUSLINE_TAP_VERSION} (managed - safe to delete; Chaos Wrangler reinstalls it).
@@ -200,7 +200,13 @@ function readTapVersion(content: string): number {
   return m ? Number.parseInt(m[1], 10) : 0;
 }
 
-/** Write (or refresh) the tap script under ~/.claude/mission-control. */
+/**
+ * Write (or refresh) the tap script under ~/.claude/mission-control.
+ *
+ * The directory keeps its previous name deliberately: it is a path already
+ * present in users' home directories, and the app recognizes its own tap by
+ * finding it there.
+ */
 export function ensureStatuslineTapScript(tapPath: string = STATUSLINE_TAP_PATH): string | null {
   try {
     let current: string | null = null;

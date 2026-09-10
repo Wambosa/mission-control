@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   OPENCODE_MISSION_CONTROL_PLUGIN_MARKER,
+  OPENCODE_MISSION_CONTROL_PLUGIN_SEGMENTS,
   opencodeMissionControlPluginPath,
   opencodeMissionControlPluginSource,
   writeOpencodeMissionControlPlugin,
@@ -39,5 +40,43 @@ describe("opencode mission control plugin", () => {
     const contents = fs.readFileSync(file, "utf8");
     expect(contents).toContain(OPENCODE_MISSION_CONTROL_PLUGIN_MARKER);
     expect(contents).toContain("MissionControlStatus");
+  });
+});
+
+describe("machine-readable identifiers survive the rename (R20, KD7)", () => {
+  it("keeps the plugin filename the app writes and looks for", () => {
+    // The app recognizes its own installed plugin by this path. Renaming it
+    // makes the app stop seeing what it wrote and leave a duplicate behind in
+    // the user's project.
+    expect([...OPENCODE_MISSION_CONTROL_PLUGIN_SEGMENTS]).toEqual([
+      ".opencode",
+      "plugins",
+      "mission-control.js",
+    ]);
+  });
+
+  it("keeps the managed marker the app matches on", () => {
+    expect(OPENCODE_MISSION_CONTROL_PLUGIN_MARKER).toBe("@mission-control-managed");
+    expect(opencodeMissionControlPluginSource()).toContain(
+      OPENCODE_MISSION_CONTROL_PLUGIN_MARKER,
+    );
+  });
+
+  it("keeps the exported symbol that marks the plugin as managed", () => {
+    expect(opencodeMissionControlPluginSource()).toContain("export const MissionControlStatus");
+  });
+
+  it("keeps the hook event names the plugin posts", () => {
+    const source = opencodeMissionControlPluginSource();
+    for (const event of ["UserPromptSubmit", "Stop"]) {
+      expect(source).toContain(event);
+    }
+  });
+
+  it("renames only the prose a person reads", () => {
+    const source = opencodeMissionControlPluginSource();
+    expect(source).toContain("Chaos Wrangler");
+    // The identifiers above still carry the previous token; the prose does not.
+    expect(source).not.toContain("Mission Control");
   });
 });

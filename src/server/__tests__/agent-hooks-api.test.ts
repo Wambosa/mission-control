@@ -689,7 +689,7 @@ describe("SessionStart brief fallback over the hook API", () => {
 
   it("injects the Session Brief when the spawn-time fetch never happened", async () => {
     const context = await sessionStartContext("startup");
-    expect(context).toContain("Project memory (Mission Control Recall)");
+    expect(context).toContain("Project memory (Chaos Wrangler Recall)");
     expect(context).toContain("session grid for coding agents");
   });
 

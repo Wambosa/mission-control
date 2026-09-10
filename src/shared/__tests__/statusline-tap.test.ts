@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   ensureStatuslineTapScript,
   installManagedStatusLine,
+  STATUSLINE_TAP_PATH,
   STATUSLINE_TAP_SCRIPT,
   STATUSLINE_TAP_VERSION,
 } from "../statusline-tap";
@@ -289,5 +290,27 @@ describe("statusline tap installer", () => {
     expect(STATUSLINE_TAP_SCRIPT).toContain("rate_limits");
     expect(STATUSLINE_TAP_SCRIPT).toContain("claude-limits");
     expect(STATUSLINE_TAP_SCRIPT).not.toContain("undefined");
+  });
+});
+
+describe("the tap version guards against a coexisting older build (R20)", () => {
+  it("is greater than the version the previous release shipped", () => {
+    // The installer only refuses a strictly-newer script on disk, then rewrites
+    // on any text difference. Two builds sharing a version but disagreeing on
+    // the product name in the script's own header would therefore overwrite
+    // each other on every session spawn.
+    const PREVIOUS_RELEASE_TAP_VERSION = 4;
+    expect(STATUSLINE_TAP_VERSION).toBeGreaterThan(PREVIOUS_RELEASE_TAP_VERSION);
+  });
+
+  it("stamps that version into the script the installer compares", () => {
+    expect(STATUSLINE_TAP_SCRIPT).toContain(`statusline tap v${STATUSLINE_TAP_VERSION}`);
+  });
+
+  it("keeps the tap path the previous release already wrote to", () => {
+    // A path already present in users' home directories, and how the app finds
+    // the tap it installed. Renaming it would strand the old one there.
+    expect(STATUSLINE_TAP_PATH).toContain(`${path.sep}.claude${path.sep}mission-control${path.sep}`);
+    expect(STATUSLINE_TAP_PATH.endsWith("statusline-tap.sh")).toBe(true);
   });
 });

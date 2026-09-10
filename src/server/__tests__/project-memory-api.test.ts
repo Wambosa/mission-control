@@ -208,7 +208,7 @@ describe("project memory API", () => {
     const res = await handleApiRequest(authed(`/api/tasks/${task.id}/brief`));
     expect(res?.status).toBe(200);
     const { brief, memoryIds } = (await res?.json()) as { brief: string; memoryIds: string[] };
-    expect(brief).toContain("# Project memory (Mission Control Recall)");
+    expect(brief).toContain("# Project memory (Chaos Wrangler Recall)");
     expect(brief).toContain("A CLI-agent mission control app");
     expect(brief).toContain("warm pool can miss the brief");
     expect(memoryIds).toHaveLength(2);

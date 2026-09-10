@@ -31,6 +31,15 @@ import {
 export const PREVIOUS_USER_DATA_DIR_NAME = "MissionControl";
 
 /**
+ * How the previous release named itself in prose.
+ *
+ * Kept for the same reason as the directory name above: it is the handle on
+ * what earlier builds already wrote into the user's home directory and
+ * repositories, so the predicates that recognize those files keep matching it.
+ */
+export const PREVIOUS_PRODUCT_DISPLAY_NAME = "Mission Control";
+
+/**
  * The development seam. A packaged build never sets this; the development
  * launcher does, pointing at a synthetic previous directory, because a
  * development run forces the data-directory override and would otherwise skip

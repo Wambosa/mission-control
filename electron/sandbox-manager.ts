@@ -18,7 +18,15 @@ import { SandboxRegistry, type RegistryDeps } from "./sandbox-registry";
 import { readSshHostAliases } from "./ssh-hosts";
 import { isSafeSshAlias } from "../src/shared/ssh-config";
 import { probeSshHost } from "./ssh-provision-probe";
-import { removeSshHost, runSshProvision, sshProvisionCommands } from "./ssh-provision";
+import {
+  agentlessSshHostMessage,
+  checkSshHostBrand,
+  removeSshHost,
+  retirePreviousSshLayout,
+  runSshProvision,
+  sshProvisionCommands,
+  staleSshHostMessage,
+} from "./ssh-provision";
 import { installSshHarnesses } from "./ssh-provision-harnesses";
 import {
   generateSshApiKey,
@@ -570,6 +578,22 @@ async function openSshTunnelFor(
   // is safe to do on every connect.
   const target = sshServiceTargetFor(config);
   if (target) {
+    // Before any service start. After the rename a start addresses the new
+    // unit, so a host still laid out under the previous one fails inside the
+    // service manager on Linux and succeeds while starting nothing on macOS —
+    // which reads as a host that is simply broken.
+    const brand = await checkSshHostBrand(target.alias, {
+      homeDir: target.homeDir,
+      recordedPrefix: config.sshHost?.prefix ?? null,
+    });
+    if (!brand.ok) return { ok: false, error: brand.error };
+    if (brand.verdict.kind === "stale") {
+      return {
+        ok: false,
+        error: staleSshHostMessage(target.alias, brand.verdict.previousPrefix),
+      };
+    }
+
     const started = await startSshService(target.alias, target);
     if (!started.ok) return { ok: false, error: started.error };
   }
@@ -1601,6 +1625,45 @@ export function registerSandboxManager(
       const plan = probed.plan;
       const homeDir = probed.probe.homeDir ?? "";
 
+      // The other gate. Provisioning is a separate handler from the start path
+      // and was never guarded, so a stale host would have had the new layout
+      // installed beside the old one, leaving two registered services.
+      let retiredThisRun = false;
+      const brand = await checkSshHostBrand(alias, {
+        homeDir,
+        recordedPrefix: existingHostConfig(alias)?.prefix ?? null,
+      });
+      if (!brand.ok) return { ok: false, error: brand.error };
+      if (brand.verdict.kind === "stale") {
+        // Re-provisioning is a full reinstall: the prefix held the fetched
+        // runtime and every installed harness, so the host has no agent for
+        // as long as that download takes.
+        const retired = await retirePreviousSshLayout(
+          alias,
+          {
+            platform: plan.platform,
+            homeDir,
+            previousPrefix: brand.verdict.previousPrefix,
+          },
+          { clientId: sshClientId(kv()) },
+        );
+        if (!retired.ok) {
+          return {
+            ok: false,
+            error: retired.agentUnrevoked
+              ? `${retired.error} The host is still running an agent under the previous brand that this app cannot revoke, so nothing was removed.`
+              : retired.error,
+          };
+        }
+        if ("retained" in retired) {
+          return {
+            ok: false,
+            error: `${retired.retained.reason} Its previous layout was kept, and it is still running an agent under the previous brand that this app cannot revoke.`,
+          };
+        }
+        retiredThisRun = retired.removed;
+      }
+
       const sendProgress = (step: string, index: number, total: number) => {
         if (!event.sender.isDestroyed()) {
           event.sender.send(IPC.sshHostsProvisionProgress, { alias, step, index, total });
@@ -1618,7 +1681,14 @@ export function registerSandboxManager(
           if (status === "running") sendProgress(command.label, index, total);
         },
       });
-      if (!provisioned.ok) return { ok: false, error: provisioned.error };
+      if (!provisioned.ok) {
+        return {
+          ok: false,
+          error: retiredThisRun
+            ? agentlessSshHostMessage(alias, provisioned.error)
+            : provisioned.error,
+        };
+      }
 
       const harnessResults = await installSshHarnesses(alias, plan, {
         onProgress: ({ agent, index, status }) => {
@@ -1655,7 +1725,16 @@ export function registerSandboxManager(
         // runtime back to $HOME.
         workspaceRoot: existingHostConfig(alias)?.workspaceRoot ?? null,
       });
-      if (!service.ok) return { ok: false, error: service.error };
+      if (!service.ok) {
+        // Nothing has advanced this machine's recorded prefix, so the host
+        // stays detectable as stale and a retry finds it again.
+        return {
+          ok: false,
+          error: retiredThisRun
+            ? agentlessSshHostMessage(alias, service.error)
+            : service.error,
+        };
+      }
 
       // Say who is using it, so removal by one client cannot take the host
       // away from another. A claim that fails to write is a warning, not a

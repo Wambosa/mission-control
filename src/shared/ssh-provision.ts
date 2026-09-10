@@ -117,13 +117,91 @@ export type SshProvisionRequirements = {
   harnesses?: readonly TaskAgent[];
 };
 
+/** The directory name the prefix uses under the SSH user's home. */
+export const SSH_PREFIX_DIR_NAME = ".chaos-wrangler";
+
+/**
+ * The previous release's prefix name, hard-coded.
+ *
+ * Deliberately a literal and not derived from the constant above: it is the
+ * only handle on the layout being retired, and deriving it would make the
+ * teardown silently target nothing. Note how close it sits to
+ * {@link REMOTE_AGENT_COMMAND} — the upstream binary differs from the old
+ * prefix by one suffix, which is exactly why a mechanical rewrite of this file
+ * is dangerous.
+ */
+export const PREVIOUS_SSH_PREFIX_DIR_NAME = ".mission-control";
+
 /**
  * The one directory Chaos Wrangler owns on a host. Everything it installs
  * lands beneath it, and removing the host deletes it — so it is derived from
  * the SSH user's own home rather than any absolute location.
  */
 export function sshPrefixPath(homeDir: string): string {
-  return `${homeDir.replace(/\/+$/, "")}/.mission-control`;
+  return `${homeDir.replace(/\/+$/, "")}/${SSH_PREFIX_DIR_NAME}`;
+}
+
+/** Where the previous release put its prefix on the same host. */
+export function previousSshPrefixPath(homeDir: string): string {
+  return `${homeDir.replace(/\/+$/, "")}/${PREVIOUS_SSH_PREFIX_DIR_NAME}`;
+}
+
+/**
+ * Is this host still laid out under the previous brand?
+ *
+ * Three answers, and the middle one is the one that is easy to get wrong. With
+ * more than one install pointed at a single host, the second and third machines
+ * arrive at a host another has already re-provisioned. Their own record still
+ * says "previous", so trusting the record alone would tear down a host that is
+ * already correct — and a local migration that fell back restores a database
+ * snapshot predating any re-provisioning, so the record can rewind. The
+ * recorded value is therefore a candidate, and the host's own filesystem is the
+ * verdict.
+ */
+export type SshHostBrandVerdict =
+  /** Recorded under the current prefix; nothing to do. */
+  | { kind: "current" }
+  /** Recorded previous, and the previous prefix is really there. */
+  | { kind: "stale"; previousPrefix: string }
+  /** Recorded previous, but the host has moved on. Advance the record only. */
+  | { kind: "already-migrated" };
+
+export function classifySshHostBrand(input: {
+  /** The prefix this machine has recorded for the host. Null when unknown. */
+  recordedPrefix: string | null;
+  /** Whether the previous prefix directory exists on the host right now. */
+  previousPrefixPresent: boolean;
+  homeDir: string;
+}): SshHostBrandVerdict {
+  const recorded = input.recordedPrefix?.trim() ?? "";
+  const looksPrevious =
+    recorded.endsWith(`/${PREVIOUS_SSH_PREFIX_DIR_NAME}`) ||
+    recorded === PREVIOUS_SSH_PREFIX_DIR_NAME;
+  if (recorded && !looksPrevious) return { kind: "current" };
+  // An unrecorded host is treated as current: there is no evidence of a
+  // previous layout, and a probe that says the previous prefix is absent is
+  // the same situation.
+  if (!recorded) return input.previousPrefixPresent ? { kind: "stale", previousPrefix: previousSshPrefixPath(input.homeDir) } : { kind: "current" };
+  if (!input.previousPrefixPresent) return { kind: "already-migrated" };
+  return { kind: "stale", previousPrefix: previousSshPrefixPath(input.homeDir) };
+}
+
+/**
+ * Guard a recursive delete before it is ever rendered into a script.
+ *
+ * The teardown removes a directory tree on a machine the installer does not
+ * own. A relative path, an empty string, or anything not actually named after
+ * the previous prefix is refused rather than expanded by a shell.
+ */
+export function isRemovablePreviousPrefix(target: string | null | undefined): boolean {
+  const value = target?.trim() ?? "";
+  if (!value) return false;
+  if (!value.startsWith("/")) return false;
+  if (value.includes("\0")) return false;
+  const segments = value.split("/").filter(Boolean);
+  if (segments.length < 2) return false;
+  if (segments.includes("..")) return false;
+  return segments[segments.length - 1] === PREVIOUS_SSH_PREFIX_DIR_NAME;
 }
 
 /**

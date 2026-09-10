@@ -10,10 +10,19 @@ import { REMOTE_AGENT_COMMAND, shellQuote, type SshHostPlatform } from "./ssh-pr
 // the files and registering them is the SSH half, in electron/.
 
 /** Reverse-DNS label the LaunchAgent registers under. */
-export const SSH_SERVICE_LABEL = "com.mission-control.agent";
+export const SSH_SERVICE_LABEL = "com.shondiaz.chaoswrangler.agent";
 
 /** Unit name the systemd user manager registers under. */
-export const SSH_SERVICE_UNIT_NAME = "mission-control-agent.service";
+export const SSH_SERVICE_UNIT_NAME = "chaos-wrangler-agent.service";
+
+/**
+ * What the previous release registered on a host.
+ *
+ * Hard-coded literals, like the previous prefix: detection and teardown are the
+ * only readers, and they are the only handles on the service being retired.
+ */
+export const PREVIOUS_SSH_SERVICE_LABEL = "com.mission-control.agent";
+export const PREVIOUS_SSH_SERVICE_UNIT_NAME = "mission-control-agent.service";
 
 /** Loopback port the runtime listens on, on the host. */
 export const DEFAULT_SSH_AGENT_PORT = 9333;
@@ -346,4 +355,83 @@ export function sshServiceDefinition(description: SshServiceDescription): SshSer
     ],
     unitPath,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Retiring the previous release's layout
+// ---------------------------------------------------------------------------
+
+/**
+ * Stop the previous release's service, then prove it is gone.
+ *
+ * The rest of the teardown is deliberately best-effort, one non-strict step at
+ * a time. This step is the exception, and the exit code is the reason: the
+ * running agent holds its bearer key in memory, so deleting its directory
+ * revokes exactly nothing. Confirmation has to come before removal, or the
+ * teardown reports success while an unrevoked agent keeps serving.
+ *
+ * Absence counts as stopped. The check is a positive test for "not running",
+ * so a host that never had the previous service — the common case on a second
+ * machine — passes without a special case, while a service that refuses to
+ * stop fails loudly.
+ */
+export function previousSshServiceStopScript(platform: SshHostPlatform): string {
+  if (platform === "darwin") {
+    return [
+      "set -u",
+      `launchctl bootout gui/$(id -u)/${PREVIOUS_SSH_SERVICE_LABEL} >/dev/null 2>&1 || true`,
+      "# Still loaded means still running: fail rather than delete its directory.",
+      `if launchctl print gui/$(id -u)/${PREVIOUS_SSH_SERVICE_LABEL} >/dev/null 2>&1; then`,
+      "  echo 'previous service is still loaded' >&2",
+      "  exit 1",
+      "fi",
+      "",
+    ].join("\n");
+  }
+  return [
+    "set -u",
+    `systemctl --user stop ${PREVIOUS_SSH_SERVICE_UNIT_NAME} >/dev/null 2>&1 || true`,
+    "# is-active exits non-zero for inactive *and* for never-installed, which is",
+    "# the answer this step wants in both cases.",
+    `if systemctl --user is-active --quiet ${PREVIOUS_SSH_SERVICE_UNIT_NAME}; then`,
+    "  echo 'previous service is still active' >&2",
+    "  exit 1",
+    "fi",
+    "",
+  ].join("\n");
+}
+
+/** Where the previous release registered its unit, so teardown can delete it. */
+export function previousSshServiceUnitPath(
+  target: Pick<SshServiceDescription, "platform" | "homeDir">,
+): string {
+  const home = trimTrailingSlash(target.homeDir);
+  return target.platform === "darwin"
+    ? `${home}/Library/LaunchAgents/${PREVIOUS_SSH_SERVICE_LABEL}.plist`
+    : `${home}/.config/systemd/user/${PREVIOUS_SSH_SERVICE_UNIT_NAME}`;
+}
+
+/**
+ * Remove the previous layout, once the stop above has been confirmed.
+ *
+ * Non-strict per step, matching the existing removal path: a host that has
+ * already lost one of these files is not a failure worth stopping on. The
+ * caller is responsible for having validated the target — this renders a
+ * recursive delete, and it will not render one for a path it was handed
+ * without that check.
+ */
+export function previousSshLayoutRemovalScript(input: {
+  platform: SshHostPlatform;
+  homeDir: string;
+  previousPrefix: string;
+}): string {
+  return [
+    "set -u",
+    `rm -rf ${shellQuote(input.previousPrefix)} || true`,
+    `rm -f ${shellQuote(previousSshServiceUnitPath(input))} || true`,
+    ...(input.platform === "darwin"
+      ? []
+      : ["systemctl --user daemon-reload >/dev/null 2>&1 || true"]),
+    "",
+  ].join("\n");
 }

@@ -50,17 +50,17 @@ describe("client ids", () => {
   });
 
   it("refuses to build a path from an invalid id", () => {
-    expect(() => sshClaimPath("/home/sam/.mission-control", "../escape")).toThrow();
+    expect(() => sshClaimPath("/home/sam/.chaos-wrangler", "../escape")).toThrow();
   });
 });
 
 describe("claim paths", () => {
   it("puts claims under the prefix the host already owns", () => {
-    expect(sshClaimsDir("/home/sam/.mission-control")).toBe(
-      "/home/sam/.mission-control/service/clients",
+    expect(sshClaimsDir("/home/sam/.chaos-wrangler")).toBe(
+      "/home/sam/.chaos-wrangler/service/clients",
     );
-    expect(sshClaimPath("/home/sam/.mission-control/", CLIENT)).toBe(
-      `/home/sam/.mission-control/service/clients/${CLIENT}.json`,
+    expect(sshClaimPath("/home/sam/.chaos-wrangler/", CLIENT)).toBe(
+      `/home/sam/.chaos-wrangler/service/clients/${CLIENT}.json`,
     );
   });
 });
@@ -79,16 +79,16 @@ describe("claim round trip", () => {
 
 describe("claiming", () => {
   it("writes whole then moves, so a reader never sees half a claim", () => {
-    const script = sshClaimScript("/home/sam/.mission-control", claim());
-    const file = `/home/sam/.mission-control/service/clients/${CLIENT}.json`;
-    expect(script).toContain(`mkdir -p '/home/sam/.mission-control/service/clients'`);
+    const script = sshClaimScript("/home/sam/.chaos-wrangler", claim());
+    const file = `/home/sam/.chaos-wrangler/service/clients/${CLIENT}.json`;
+    expect(script).toContain(`mkdir -p '/home/sam/.chaos-wrangler/service/clients'`);
     expect(script).toContain(`cat > '${file}'.tmp`);
     expect(script).toContain(`mv '${file}'.tmp '${file}'`);
     expect(script.indexOf("cat >")).toBeLessThan(script.indexOf("mv "));
   });
 
   it("carries the versions a human would need to read a stale claim", () => {
-    const script = sshClaimScript("/home/sam/.mission-control", claim());
+    const script = sshClaimScript("/home/sam/.chaos-wrangler", claim());
     expect(script).toContain(`"clientVersion": "0.49.0"`);
     expect(script).toContain(`"agentVersion": "1.2.3"`);
   });
@@ -96,12 +96,12 @@ describe("claiming", () => {
 
 describe("unclaiming", () => {
   it("deletes this client's file before counting what is left", () => {
-    const script = sshUnclaimScript("/home/sam/.mission-control", CLIENT);
+    const script = sshUnclaimScript("/home/sam/.chaos-wrangler", CLIENT);
     expect(script.indexOf("rm -f")).toBeLessThan(script.indexOf("remaining="));
   });
 
   it("reports zero for a prefix that was never claimed", () => {
-    expect(sshUnclaimScript("/home/sam/.mission-control", CLIENT)).toContain("remaining=0");
+    expect(sshUnclaimScript("/home/sam/.chaos-wrangler", CLIENT)).toContain("remaining=0");
   });
 
   it("reads the count back", () => {
@@ -117,7 +117,7 @@ describe("unclaiming", () => {
 
 describe("listing claims", () => {
   it("survives a prefix with no claims directory", () => {
-    expect(sshListClaimsScript("/home/sam/.mission-control")).toContain("if [ -d");
+    expect(sshListClaimsScript("/home/sam/.chaos-wrangler")).toContain("if [ -d");
   });
 
   it("parses one claim per line and skips what it cannot read", () => {

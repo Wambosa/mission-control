@@ -10,7 +10,7 @@ function description(overrides: Partial<SshServiceDescription> = {}): SshService
   return {
     platform: "linux",
     homeDir: "/home/sam",
-    prefix: "/home/sam/.mission-control",
+    prefix: "/home/sam/.chaos-wrangler",
     agentPort: 9333,
     apiKey: "b8f1c2d3e4",
     agentVersion: "1.2.3",
@@ -19,7 +19,7 @@ function description(overrides: Partial<SshServiceDescription> = {}): SshService
 }
 
 const mac = () =>
-  description({ platform: "darwin", homeDir: "/Users/ada", prefix: "/Users/ada/.mission-control" });
+  description({ platform: "darwin", homeDir: "/Users/ada", prefix: "/Users/ada/.chaos-wrangler" });
 
 /** The rendered unit, whichever platform it is for. */
 function unit(desc: SshServiceDescription): string {
@@ -67,9 +67,9 @@ describe("sshServiceDefinition", () => {
     // This PATH entry is the whole reason a prefix-installed harness is
     // selectable for sessions on the host.
     expect(serviceEnv(description(), "PATH")?.split(":")[0]).toBe(
-      "/home/sam/.mission-control/bin",
+      "/home/sam/.chaos-wrangler/bin",
     );
-    expect(serviceEnv(mac(), "PATH")?.split(":")[0]).toBe("/Users/ada/.mission-control/bin");
+    expect(serviceEnv(mac(), "PATH")?.split(":")[0]).toBe("/Users/ada/.chaos-wrangler/bin");
     expect(serviceEnv(description(), "PATH")).toBe(sshServicePath(description()));
   });
 
@@ -96,7 +96,7 @@ describe("sshServiceDefinition", () => {
       `/Users/ada/Library/LaunchAgents/${SSH_SERVICE_LABEL}.plist`,
     );
     expect(sshServiceDefinition(description()).unitPath).toBe(
-      "/home/sam/.config/systemd/user/mission-control-agent.service",
+      "/home/sam/.config/systemd/user/chaos-wrangler-agent.service",
     );
   });
 
@@ -149,7 +149,7 @@ describe("workspace root", () => {
     const desc = description({
       platform: "darwin",
       homeDir: "/Users/ada",
-      prefix: "/Users/ada/.mission-control",
+      prefix: "/Users/ada/.chaos-wrangler",
       workspaceRoot: "/Volumes/work",
     });
 

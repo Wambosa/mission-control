@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { TASK_AGENTS, type TaskAgent } from "../domain";
 import {
-  buildSshProbeScript,
-  deriveSshProvisionPlan,
   MINIMUM_REMOTE_NODE_VERSION,
+  PREVIOUS_SSH_PREFIX_DIR_NAME,
+  buildSshProbeScript,
+  classifySshHostBrand,
+  deriveSshProvisionPlan,
+  isRemovablePreviousPrefix,
   parseSshProbeOutput,
+  previousSshPrefixPath,
   sshPrefixPath,
   type SshProbeResult,
 } from "../ssh-provision";
@@ -97,8 +101,8 @@ describe("deriveSshProvisionPlan", () => {
   });
 
   it("derives the prefix from the SSH user's home rather than any fixed path", () => {
-    expect(plan(probe({ homeDir: "/Users/sam" })).prefix).toBe("/Users/sam/.mission-control");
-    expect(plan(probe({ homeDir: "/home/sam/" })).prefix).toBe("/home/sam/.mission-control");
+    expect(plan(probe({ homeDir: "/Users/sam" })).prefix).toBe("/Users/sam/.chaos-wrangler");
+    expect(plan(probe({ homeDir: "/home/sam/" })).prefix).toBe("/home/sam/.chaos-wrangler");
   });
 
   it("accepts both target platforms and both architectures", () => {
@@ -224,6 +228,122 @@ describe("parseSshProbeOutput", () => {
 
 describe("sshPrefixPath", () => {
   it("puts the one directory Chaos Wrangler owns under the SSH user's home", () => {
-    expect(sshPrefixPath("/home/sam")).toBe("/home/sam/.mission-control");
+    expect(sshPrefixPath("/home/sam")).toBe("/home/sam/.chaos-wrangler");
+  });
+});
+
+describe("classifySshHostBrand (R13, AE13, AE23, KTD8)", () => {
+  const HOME = "/home/sam";
+
+  it("reports a host recorded under the previous prefix, still present, as stale (AE13)", () => {
+    const verdict = classifySshHostBrand({
+      recordedPrefix: `${HOME}/${PREVIOUS_SSH_PREFIX_DIR_NAME}`,
+      previousPrefixPresent: true,
+      homeDir: HOME,
+    });
+    expect(verdict).toEqual({
+      kind: "stale",
+      previousPrefix: `${HOME}/${PREVIOUS_SSH_PREFIX_DIR_NAME}`,
+    });
+  });
+
+  it("does not call a host stale when another machine already migrated it (AE23)", () => {
+    // The record is a candidate, not a verdict: with several installs pointed
+    // at one host, the second and third arrive after the first has migrated it.
+    // Tearing down here would destroy a host that is already correct.
+    const verdict = classifySshHostBrand({
+      recordedPrefix: `${HOME}/${PREVIOUS_SSH_PREFIX_DIR_NAME}`,
+      previousPrefixPresent: false,
+      homeDir: HOME,
+    });
+    expect(verdict).toEqual({ kind: "already-migrated" });
+  });
+
+  it("leaves a host recorded under the current prefix alone", () => {
+    const verdict = classifySshHostBrand({
+      recordedPrefix: sshPrefixPath(HOME),
+      previousPrefixPresent: false,
+      homeDir: HOME,
+    });
+    expect(verdict).toEqual({ kind: "current" });
+  });
+
+  it("still leaves a current host alone even if a previous directory lingers", () => {
+    // Someone else's leftovers, or a directory the user kept. The record says
+    // this machine provisioned the current layout, and that is what it uses.
+    const verdict = classifySshHostBrand({
+      recordedPrefix: sshPrefixPath(HOME),
+      previousPrefixPresent: true,
+      homeDir: HOME,
+    });
+    expect(verdict).toEqual({ kind: "current" });
+  });
+
+  it("treats an unrecorded host with a previous prefix present as stale", () => {
+    const verdict = classifySshHostBrand({
+      recordedPrefix: null,
+      previousPrefixPresent: true,
+      homeDir: HOME,
+    });
+    expect(verdict.kind).toBe("stale");
+  });
+
+  it("treats an unrecorded host with nothing there as current", () => {
+    for (const recordedPrefix of [null, "", "   "]) {
+      expect(
+        classifySshHostBrand({ recordedPrefix, previousPrefixPresent: false, homeDir: HOME }).kind,
+      ).toBe("current");
+    }
+  });
+
+  it("recognizes the previous prefix under a home directory with a space", () => {
+    const home = "/home/o'brien/my dir";
+    const verdict = classifySshHostBrand({
+      recordedPrefix: `${home}/${PREVIOUS_SSH_PREFIX_DIR_NAME}`,
+      previousPrefixPresent: true,
+      homeDir: home,
+    });
+    expect(verdict).toEqual({
+      kind: "stale",
+      previousPrefix: `${home}/${PREVIOUS_SSH_PREFIX_DIR_NAME}`,
+    });
+  });
+});
+
+describe("isRemovablePreviousPrefix (R21, R26)", () => {
+  it("accepts an absolute path named after the previous prefix", () => {
+    expect(isRemovablePreviousPrefix(`/home/sam/${PREVIOUS_SSH_PREFIX_DIR_NAME}`)).toBe(true);
+    expect(isRemovablePreviousPrefix(previousSshPrefixPath("/Users/ada"))).toBe(true);
+  });
+
+  it("refuses an empty or blank target", () => {
+    for (const target of ["", "   ", null, undefined]) {
+      expect(isRemovablePreviousPrefix(target)).toBe(false);
+    }
+  });
+
+  it("refuses a relative target", () => {
+    expect(isRemovablePreviousPrefix(PREVIOUS_SSH_PREFIX_DIR_NAME)).toBe(false);
+    expect(isRemovablePreviousPrefix(`sam/${PREVIOUS_SSH_PREFIX_DIR_NAME}`)).toBe(false);
+  });
+
+  it("refuses anything not actually named after the previous prefix", () => {
+    for (const target of [
+      "/home/sam",
+      "/",
+      "/home/sam/.chaos-wrangler",
+      `/home/sam/${PREVIOUS_SSH_PREFIX_DIR_NAME}/service`,
+      "/home/sam/.mission-control-backup",
+    ]) {
+      expect(isRemovablePreviousPrefix(target), target).toBe(false);
+    }
+  });
+
+  it("refuses a target that walks upward", () => {
+    expect(isRemovablePreviousPrefix(`/home/sam/../${PREVIOUS_SSH_PREFIX_DIR_NAME}`)).toBe(false);
+  });
+
+  it("refuses a bare root-level target", () => {
+    expect(isRemovablePreviousPrefix(`/${PREVIOUS_SSH_PREFIX_DIR_NAME}`)).toBe(false);
   });
 });

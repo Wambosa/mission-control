@@ -127,11 +127,30 @@ function randomSecret() {
   return randomBytes(32).toString("hex");
 }
 
-function resolveUserDataDir(env = process.env, platform = process.platform, home = os.homedir()) {
-  if (env.MC_USER_DATA_DIR?.trim()) return env.MC_USER_DATA_DIR.trim();
-  if (platform === "darwin") return path.join(home, "Library/Application Support/MissionControl");
-  if (platform === "win32") return path.join(home, "AppData/Roaming/MissionControl");
-  return path.join(home, ".config/MissionControl");
+// This script's own copy of the values src/shared/user-data-paths.ts owns. The
+// package ships this file without the source tree, and it runs as a plain Node
+// process from inside the packaged archive, so an import of the shared module
+// would resolve in development and fail in a build. A cross-file agreement test
+// pins these to the module instead.
+const USER_DATA_DIR_NAME = "MissionControl";
+const USER_DATA_DB_FILENAME = "missioncontrol.db";
+const USER_DATA_DIR_ENV_VAR = "MC_USER_DATA_DIR";
+
+export function resolveUserDataDir(env = process.env, platform = process.platform, home = os.homedir()) {
+  const override = env[USER_DATA_DIR_ENV_VAR]?.trim();
+  if (override) return override;
+  if (!home?.trim()) {
+    throw new Error(
+      `Cannot determine the home directory, so the ${USER_DATA_DIR_NAME} data directory cannot be resolved. Set ${USER_DATA_DIR_ENV_VAR} to an absolute path.`,
+    );
+  }
+  if (platform === "darwin") {
+    return path.join(home, "Library/Application Support", USER_DATA_DIR_NAME);
+  }
+  if (platform === "win32") {
+    return path.join(home, "AppData/Roaming", USER_DATA_DIR_NAME);
+  }
+  return path.join(home, ".config", USER_DATA_DIR_NAME);
 }
 
 function expandHome(file) {
@@ -1011,7 +1030,7 @@ function electronBetterSqliteNativeBinding() {
 
 function openMissionControlDb(userDataDir = resolveUserDataDir()) {
   fs.mkdirSync(userDataDir, { recursive: true });
-  const dbPath = path.join(userDataDir, "missioncontrol.db");
+  const dbPath = path.join(userDataDir, USER_DATA_DB_FILENAME);
   const nativeBinding = electronBetterSqliteNativeBinding();
   const db = nativeBinding ? new Database(dbPath, { nativeBinding }) : new Database(dbPath);
   ensureRemoteVmSchema(db);

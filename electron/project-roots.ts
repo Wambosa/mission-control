@@ -1,8 +1,8 @@
 import Database from "better-sqlite3";
 import log from "electron-log/main";
-import * as path from "node:path";
 import * as fs from "node:fs";
 import { resolveElectronBetterSqlite3NativeBinding } from "./better-sqlite3-native-binding";
+import { userDataDbPath } from "../src/shared/user-data-paths";
 
 let db: Database.Database | null = null;
 let dbPath: string | null = null;
@@ -13,7 +13,7 @@ let lastReadErrorAt = 0;
 const READ_ERROR_THROTTLE_MS = 60_000;
 
 export function configureProjectRootsDb(userDataDir: string): void {
-  dbPath = path.join(userDataDir, "missioncontrol.db");
+  dbPath = userDataDbPath(userDataDir);
 }
 
 function ensureConnection(): Database.Database | null {

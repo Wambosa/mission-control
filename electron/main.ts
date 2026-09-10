@@ -80,6 +80,12 @@ import {
 } from "../src/shared/project-image-limits";
 import { shortId } from "../src/shared/short-id";
 import { errMsg } from "../src/shared/err-msg";
+import {
+  USER_DATA_DIR_ENV_VAR,
+  USER_DATA_DIR_NAME,
+  ensureUserDataDir,
+  resolveUserDataDir,
+} from "../src/shared/user-data-paths";
 import { configureProjectRootsDb, disposeProjectRootsDb, loadProjectRoots } from "./project-roots";
 import { resolveSafeOpenPath } from "./open-path-policy";
 import { buildLocalMissionControlApiUrl } from "./pty-hook-env";
@@ -100,29 +106,15 @@ import {
   productionRuntimePortStart,
 } from "./runtime-port";
 
-const APP_NAME = "MissionControl";
-
-function defaultUserDataDir(): string {
-  const home = os.homedir();
-  if (process.platform === "darwin") {
-    return path.join(home, "Library/Application Support", APP_NAME);
-  }
-  if (process.platform === "win32") {
-    return path.join(home, "AppData/Roaming", APP_NAME);
-  }
-  return path.join(home, ".config", APP_NAME);
-}
-
 function configureUserDataDir(): string {
   // Keep Electron-side IPC stores aligned with src/db/client.ts. In dev the
   // generated dist-electron/package.json only declares CommonJS, so Electron's
   // package-name-derived default can become "Electron" or "mission-control",
   // splitting API tokens and project roots across separate SQLite files.
-  const dir = (process.env.MC_USER_DATA_DIR || defaultUserDataDir()).trim();
-  fs.mkdirSync(dir, { recursive: true });
-  app.setName(APP_NAME);
+  const dir = ensureUserDataDir(resolveUserDataDir());
+  app.setName(USER_DATA_DIR_NAME);
   app.setPath("userData", dir);
-  process.env.MC_USER_DATA_DIR = dir;
+  process.env[USER_DATA_DIR_ENV_VAR] = dir;
   return dir;
 }
 

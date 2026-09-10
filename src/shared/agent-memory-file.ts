@@ -93,7 +93,7 @@ async function ensureGitIgnored(
     const existing = new Set(content.split(/\r?\n/).map((l) => l.trim()));
     if (existing.has(relPath) || existing.has(`/${relPath}`)) return;
     const prefix = content && !content.endsWith("\n") ? "\n" : "";
-    const addition = `${prefix}\n# Mission Control Recall (project memory) — private, do not commit\n${relPath}\n`;
+    const addition = `${prefix}\n# Chaos Wrangler Recall (project memory) — private, do not commit\n${relPath}\n`;
     await fs.writeFile(gitignore, content + addition);
   } catch {
     /* best-effort */

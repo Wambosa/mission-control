@@ -22,6 +22,15 @@ export type PreviousInstanceLock = {
   /** Detail for the log. Empty when there was nothing to say. */
   readonly detail: string;
   /**
+   * The connection holding the lock, or null when nothing is held.
+   *
+   * Exposed because the caller has no other way to read the source: while this
+   * lock is held in exclusive locking mode, a second connection to the same
+   * database — even a read-only one — is refused. Verification of the copy
+   * therefore reads the source through this handle.
+   */
+  readonly source: Database.Database | null;
+  /**
    * Drop the lock. Safe to call more than once and safe to call on a verdict of
    * `running`, where there is nothing to drop — a failed copy must not leave
    * the next launch locked out by its own previous attempt.
@@ -72,12 +81,18 @@ export function acquirePreviousInstanceLock(previousDir: string): PreviousInstan
   return settled({ kind: "locked" }, db);
 }
 
-function settled(probe: PreviousInstanceProbe, held: Database.Database | null): PreviousInstanceLock {
+function settled(
+  probe: PreviousInstanceProbe,
+  held: Database.Database | null,
+): PreviousInstanceLock {
   let open = held;
   return {
     verdict: verdictForProbe(probe),
     reason: probe.kind,
     detail: "detail" in probe ? probe.detail : "",
+    get source() {
+      return open;
+    },
     release() {
       const db = open;
       open = null;

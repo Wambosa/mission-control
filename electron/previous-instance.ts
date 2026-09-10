@@ -54,6 +54,13 @@ export type PreviousInstanceLock = {
  *
  * `fileMustExist` keeps the probe from manufacturing the database it is asking
  * about.
+ *
+ * Windows was the open question here, because the platform's own
+ * single-instance primitive is a named kernel object rather than a file. It
+ * does not arise: this check never asks the platform whether an instance is
+ * running, it asks the database driver for a lock. Windows file locking is
+ * mandatory rather than advisory, so a holder is if anything harder to miss
+ * there than on the platforms with advisory locks.
  */
 export function acquirePreviousInstanceLock(previousDir: string): PreviousInstanceLock {
   const dbPath = userDataDbPath(previousDir);

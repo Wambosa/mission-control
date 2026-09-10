@@ -1,5 +1,8 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  agentlessSshHostMessage,
   removeSshHost,
   retirePreviousSshLayout,
   runSshProvision,
@@ -466,5 +469,38 @@ describe("retirePreviousSshLayout (R14, R21, R22, R26, AE14, AE16)", () => {
     for (const script of scripts) {
       expect(script).not.toContain("rm -rf '/home/sam/.mission-control/bin/mission-control-agent'");
     }
+  });
+});
+
+describe("reporting a host left without an agent (R22, R27)", () => {
+  it("says the host has no running agent, not just that provisioning failed", () => {
+    // This state is only reachable because the teardown stops the previous
+    // service before the new one is installed, and it is indistinguishable
+    // from a never-provisioned host unless it is reported. A user told only
+    // "provisioning failed" would assume their host still works.
+    const message = agentlessSshHostMessage("build-box", "Installing the runtime failed.");
+
+    expect(message).toContain("Installing the runtime failed.");
+    expect(message).toContain("build-box");
+    expect(message).toContain("no running agent");
+    expect(message).toContain("Re-provision");
+  });
+
+  it("advances the recorded prefix only after the service is installed", () => {
+    // R27: the handler returns the new prefix — the value the caller persists —
+    // strictly after installSshService has succeeded, so a re-provisioning that
+    // fails anywhere earlier leaves the host detectable as stale.
+    const source = fs.readFileSync(
+      path.join(__dirname, "..", "sandbox-manager.ts"),
+      "utf8",
+    );
+    const installedAt = source.indexOf("const service = await installSshService(");
+    const returnedAt = source.indexOf("prefix: plan.prefix,\n        platform: plan.platform,");
+    expect(installedAt).toBeGreaterThan(-1);
+    expect(returnedAt).toBeGreaterThan(installedAt);
+
+    // And every failure path between the teardown and that return bails out.
+    const between = source.slice(installedAt, returnedAt);
+    expect(between).toContain("if (!service.ok)");
   });
 });

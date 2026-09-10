@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import Database from "better-sqlite3";
 import { resolveElectronBetterSqlite3NativeBinding } from "./better-sqlite3-native-binding";
+import { errMsg } from "../src/shared/err-msg";
 import { acquirePreviousInstanceLock, type PreviousInstanceLock } from "./previous-instance";
 import { previousInstanceRefusal } from "../src/shared/previous-instance";
 import {
@@ -299,7 +300,7 @@ function copyForward(
     ensureUserDataDir(input.destinationDir);
   } catch (error) {
     return fail(
-      `The new data folder ${input.destinationDir} could not be created (${errText(error)}).`,
+      `The new data folder ${input.destinationDir} could not be created (${errMsg(error)}).`,
     );
   }
 
@@ -315,7 +316,10 @@ function copyForward(
         throw new Error(`a file already exists at the staging path ${temp}`);
       }
       if (entry.kind === "directory") {
-        fs.cpSync(source, temp, { recursive: true, errorOnExist: true });
+        // force:false is what makes errorOnExist bite — cpSync overwrites by
+        // default, so without it a staging path that already exists would be
+        // merged into rather than refused.
+        fs.cpSync(source, temp, { recursive: true, force: false, errorOnExist: true });
       } else {
         fs.copyFileSync(source, temp, fs.constants.COPYFILE_EXCL);
         fs.chmodSync(temp, 0o600);
@@ -323,7 +327,7 @@ function copyForward(
       staged.push({ temp, final });
     } catch (error) {
       if (entry.required) {
-        return fail(`${entry.name} could not be copied (${errText(error)}).`);
+        return fail(`${entry.name} could not be copied (${errMsg(error)}).`);
       }
       removeQuietly(temp);
       skipped.push(entry.name);
@@ -358,7 +362,7 @@ function copyForward(
   } catch (error) {
     removeQuietly(`${stagedDb.temp}-wal`);
     removeQuietly(`${stagedDb.temp}-shm`);
-    return fail(`The copy could not be verified (${errText(error)}).`);
+    return fail(`The copy could not be verified (${errMsg(error)}).`);
   }
 
   // Commit: rename each staged file into place.
@@ -369,7 +373,7 @@ function copyForward(
       landed.push(final);
     }
   } catch (error) {
-    return fail(`The copy could not be moved into place (${errText(error)}).`);
+    return fail(`The copy could not be moved into place (${errMsg(error)}).`);
   }
 
   removeQuietly(`${stagedDb.temp}-shm`);
@@ -488,7 +492,9 @@ function credentialDigest(
     .prepare(`SELECT "${keyColumn}" AS k, "${column}" AS v FROM "${table}" ORDER BY "${keyColumn}"`)
     .all() as Array<{ k: unknown; v: unknown }>;
   const hash = crypto.createHash("sha256");
-  for (const row of rows) hash.update(`${String(row.k)} ${String(row.v)} `);
+  // NUL-separated because it cannot occur in any value being hashed, so no
+  // pair of different row sets can produce the same input.
+  for (const row of rows) hash.update(`${String(row.k)}\0${String(row.v)}\0`);
   return hash.digest("hex");
 }
 
@@ -693,6 +699,3 @@ function closeQuietly(db: Database.Database | null): void {
   }
 }
 
-function errText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}

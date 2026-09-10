@@ -178,12 +178,16 @@ export function classifySshHostBrand(input: {
     recorded.endsWith(`/${PREVIOUS_SSH_PREFIX_DIR_NAME}`) ||
     recorded === PREVIOUS_SSH_PREFIX_DIR_NAME;
   if (recorded && !looksPrevious) return { kind: "current" };
-  // An unrecorded host is treated as current: there is no evidence of a
-  // previous layout, and a probe that says the previous prefix is absent is
-  // the same situation.
-  if (!recorded) return input.previousPrefixPresent ? { kind: "stale", previousPrefix: previousSshPrefixPath(input.homeDir) } : { kind: "current" };
-  if (!input.previousPrefixPresent) return { kind: "already-migrated" };
-  return { kind: "stale", previousPrefix: previousSshPrefixPath(input.homeDir) };
+  const stale = (): SshHostBrandVerdict => ({
+    kind: "stale",
+    previousPrefix: previousSshPrefixPath(input.homeDir),
+  });
+  // An unrecorded host has no evidence of a previous layout to go on, so the
+  // host's own filesystem is the whole answer.
+  if (!recorded) return input.previousPrefixPresent ? stale() : { kind: "current" };
+  // Recorded previous. Present means stale; absent means another machine has
+  // already migrated it and only this machine's record is behind.
+  return input.previousPrefixPresent ? stale() : { kind: "already-migrated" };
 }
 
 /**

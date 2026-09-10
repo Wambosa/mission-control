@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   agentlessSshHostMessage,
+  checkSshHostBrand,
   removeSshHost,
   retirePreviousSshLayout,
   runSshProvision,
@@ -502,5 +503,91 @@ describe("reporting a host left without an agent (R22, R27)", () => {
     // And every failure path between the teardown and that return bails out.
     const between = source.slice(installedAt, returnedAt);
     expect(between).toContain("if (!service.ok)");
+  });
+});
+
+describe("removal tears down whichever brand the host carries", () => {
+  const linux = { platform: "linux" as const, homeDir: "/home/sam", prefix: PREFIX };
+  const macos = {
+    platform: "darwin" as const,
+    homeDir: "/Users/ada",
+    prefix: "/Users/ada/.chaos-wrangler",
+  };
+
+  it("unregisters both the current and the previous unit on Linux", () => {
+    // A host added by the previous release still runs under the previous unit.
+    // Unregistering only the current one would delete the prefix out from under
+    // a service that is still serving — and its agent holds its key in memory.
+    const script = sshRemovalScript(linux);
+    for (const unit of ["chaos-wrangler-agent.service", "mission-control-agent.service"]) {
+      expect(script, unit).toContain(`systemctl --user stop ${unit}`);
+      expect(script, unit).toContain(`systemctl --user disable ${unit}`);
+    }
+  });
+
+  it("boots out both labels on macOS", () => {
+    const script = sshRemovalScript(macos);
+    for (const label of ["com.shondiaz.chaoswrangler.agent", "com.mission-control.agent"]) {
+      expect(script, label).toContain(`launchctl bootout gui/$(id -u)/${label}`);
+    }
+  });
+
+  it("removes both unit files", () => {
+    expect(sshRemovalScript(linux)).toContain(
+      `rm -f '/home/sam/.config/systemd/user/mission-control-agent.service'`,
+    );
+    expect(sshRemovalScript(macos)).toContain(
+      `rm -f '/Users/ada/Library/LaunchAgents/com.mission-control.agent.plist'`,
+    );
+  });
+
+  it("still unregisters before deleting the prefix", () => {
+    const script = sshRemovalScript(linux);
+    expect(script.indexOf("systemctl --user disable")).toBeLessThan(script.indexOf("rm -rf"));
+  });
+});
+
+describe("checkSshHostBrand only probes when the record could be stale", () => {
+  function counting(): { run: SshExec; calls: number } {
+    const state = { calls: 0 };
+    const run: SshExec = async () => {
+      state.calls++;
+      return { code: 0, stdout: "absent\n", stderr: "" };
+    };
+    return {
+      get run() {
+        return run;
+      },
+      get calls() {
+        return state.calls;
+      },
+    };
+  }
+
+  it("asks the host nothing when the recorded prefix is already current", async () => {
+    // Probing here would add an SSH round-trip to every connect, and a probe
+    // whose output could not be read would turn a working connect into a hard
+    // failure.
+    const exec = counting();
+    const result = await checkSshHostBrand(
+      "host",
+      { homeDir: "/home/sam", recordedPrefix: "/home/sam/.chaos-wrangler" },
+      exec.run,
+    );
+
+    expect(result).toEqual({ ok: true, verdict: { kind: "current" } });
+    expect(exec.calls).toBe(0);
+  });
+
+  it("asks the host when the recorded prefix is the previous one", async () => {
+    const exec = counting();
+    const result = await checkSshHostBrand(
+      "host",
+      { homeDir: "/home/sam", recordedPrefix: "/home/sam/.mission-control" },
+      exec.run,
+    );
+
+    expect(exec.calls).toBe(1);
+    expect(result).toEqual({ ok: true, verdict: { kind: "already-migrated" } });
   });
 });

@@ -13,9 +13,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import {
+  PRODUCT_DISPLAY_NAME,
   USER_DATA_DB_FILENAME,
   USER_DATA_DIR_ENV_VAR,
-  USER_DATA_DIR_NAME,
   defaultUserDataDir,
   userDataDirOverride,
 } from "./user-data-paths";
@@ -47,6 +47,27 @@ export const PREVIOUS_PRODUCT_DISPLAY_NAME = "Mission Control";
  * machine.
  */
 export const PREVIOUS_USER_DATA_DIR_ENV_VAR = "MC_PREVIOUS_USER_DATA_DIR";
+
+/**
+ * The other half of the development seam: where the migration should copy *to*.
+ *
+ * Without it, seeding a synthetic previous directory would send the copy to the
+ * developer's real data directory — writing a completion marker and a fake
+ * database into the store an installed build then adopts as its own migrated
+ * data. Unlike the override, this does not short-circuit the migration; it only
+ * moves its destination, which is what keeps the whole exercise repo-local.
+ */
+export const DEV_DESTINATION_USER_DATA_DIR_ENV_VAR = "MC_DEV_USER_DATA_DESTINATION";
+
+/** The destination the migration should use: the dev seam's, or the platform's. */
+export function migrationDestinationDir(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: string = process.platform,
+  home: string = os.homedir(),
+): string {
+  const seeded = env[DEV_DESTINATION_USER_DATA_DIR_ENV_VAR]?.trim();
+  return seeded || defaultUserDataDir(platform, home);
+}
 
 /**
  * Where the previous identity kept its data on this platform.
@@ -368,7 +389,7 @@ export function previousDirectoryUnavailableMessage(input: {
   destinationDir: string;
 }): string {
   return [
-    `${USER_DATA_DIR_NAME} cannot open its data folder.`,
+    `${PRODUCT_DISPLAY_NAME} cannot open its data folder.`,
     `The previous folder ${input.previousDir} could not be read, and no data has been carried forward to ${input.destinationDir}.`,
     `Starting anyway would present an empty workspace, so it is refusing instead.`,
     `Restore access to the previous folder, or set ${USER_DATA_DIR_ENV_VAR} to an absolute path holding your data.`,
@@ -439,7 +460,7 @@ export function resolveStandaloneUserDataDir(
   const previous = previousUserDataDir(env, platform, home);
   return {
     directory: previous,
-    notice: `${USER_DATA_DIR_NAME} has not completed its first-launch data migration yet, so this command is using the previous data folder ${previous} rather than creating one at ${destination}. Launch the app once, then run this again.`,
+    notice: `${PRODUCT_DISPLAY_NAME} has not completed its first-launch data migration yet, so this command is using the previous data folder ${previous} rather than creating one at ${destination}. Launch the app once, then run this again.`,
   };
 }
 

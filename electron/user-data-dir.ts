@@ -26,11 +26,13 @@
 import {
   USER_DATA_DIR_ENV_VAR,
   USER_DATA_DIR_NAME,
-  defaultUserDataDir,
   ensureUserDataDir,
   userDataDirOverride,
 } from "../src/shared/user-data-paths";
-import { previousUserDataDir } from "../src/shared/user-data-migration";
+import {
+  migrationDestinationDir,
+  previousUserDataDir,
+} from "../src/shared/user-data-migration";
 import { runUserDataMigration, type MigrationInput, type MigrationReport } from "./user-data-migration";
 
 /** The slice of the platform's app object this needs. Injected, so testable. */
@@ -64,7 +66,7 @@ export function configureUserDataDir(options: UserDataDirOptions): UserDataDirSe
   const migrate = options.runMigration ?? runUserDataMigration;
 
   const override = userDataDirOverride(env);
-  const destinationDir = override ?? defaultUserDataDir();
+  const destinationDir = override ?? migrationDestinationDir(env);
   const previousDir = previousUserDataDir(env);
 
   const report = migrate({

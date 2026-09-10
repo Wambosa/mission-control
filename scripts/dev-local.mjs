@@ -37,10 +37,16 @@ console.log(`[dev] user data dir: ${env.MC_USER_DATA_DIR}`);
 // data-directory override so the real decision path runs against it.
 if (env.MC_DEV_SEED_PREVIOUS_USER_DATA?.trim()) {
   const seeded = resolve(env.MC_DEV_SEED_PREVIOUS_USER_DATA.trim());
+  const destination = resolve(root, ".dev-userdata-migrated");
   env.MC_PREVIOUS_USER_DATA_DIR = seeded;
+  // Clearing the override is what lets the migration run at all. Naming the
+  // destination is what keeps it out of the developer's real data directory —
+  // otherwise this exercise writes a completion marker and a synthetic
+  // database into the store an installed build would then adopt as its own.
   delete env.MC_USER_DATA_DIR;
+  env.MC_DEV_USER_DATA_DESTINATION = destination;
   console.log(`[dev] seeding a synthetic previous data dir: ${seeded}`);
-  console.log(`[dev] the data-directory override is cleared so the migration runs`);
+  console.log(`[dev] migrating into: ${destination}`);
 }
 
 if (mode !== "electron") {

@@ -27,8 +27,11 @@ import {
   type SshHostBrandVerdict,
 } from "../src/shared/ssh-provision";
 import {
+  PREVIOUS_SSH_SERVICE_LABEL,
+  PREVIOUS_SSH_SERVICE_UNIT_NAME,
   previousSshLayoutRemovalScript,
   previousSshServiceStopScript,
+  previousSshServiceUnitPath,
 } from "../src/shared/ssh-service-unit";
 import { unclaimSshHost } from "./ssh-claims";
 
@@ -261,21 +264,33 @@ export type SshRemovalResult = {
 export function sshRemovalScript(target: SshHostTarget): string {
   const prefix = shellQuote(target.prefix);
   const unitPath = sshServiceUnitPath(target);
+  const previousUnitPath = previousSshServiceUnitPath(target);
+  // Unregister both brands. A host added by the previous release still runs its
+  // agent under the previous label, and unregistering only the current one
+  // would delete the prefix out from under a service that is still serving —
+  // the agent holds its key in memory, so removing its directory revokes
+  // nothing. On Linux its unit file would also stay registered; on macOS
+  // launchd would keep respawning a binary that is no longer there.
   const unregister =
     target.platform === "darwin"
       ? [
-          `launchctl bootout gui/$(id -u)/${SSH_SERVICE_LABEL} >/dev/null 2>&1 || true`,
-          `launchctl unload ${shellQuote(unitPath)} >/dev/null 2>&1 || true`,
+          ...[SSH_SERVICE_LABEL, PREVIOUS_SSH_SERVICE_LABEL].map(
+            (label) => `launchctl bootout gui/$(id -u)/${label} >/dev/null 2>&1 || true`,
+          ),
+          ...[unitPath, previousUnitPath].map(
+            (file) => `launchctl unload ${shellQuote(file)} >/dev/null 2>&1 || true`,
+          ),
         ]
-      : [
-          `systemctl --user stop ${SSH_SERVICE_UNIT_NAME} >/dev/null 2>&1 || true`,
-          `systemctl --user disable ${SSH_SERVICE_UNIT_NAME} >/dev/null 2>&1 || true`,
-        ];
+      : [SSH_SERVICE_UNIT_NAME, PREVIOUS_SSH_SERVICE_UNIT_NAME].flatMap((unit) => [
+          `systemctl --user stop ${unit} >/dev/null 2>&1 || true`,
+          `systemctl --user disable ${unit} >/dev/null 2>&1 || true`,
+        ]);
 
   return [
     "set -u",
     ...unregister,
     `rm -f ${shellQuote(unitPath)} || true`,
+    `rm -f ${shellQuote(previousUnitPath)} || true`,
     target.platform === "darwin"
       ? `true`
       : `systemctl --user daemon-reload >/dev/null 2>&1 || true`,
@@ -465,6 +480,17 @@ export async function checkSshHostBrand(
   input: { homeDir: string; recordedPrefix: string | null },
   exec: SshExec = defaultSshExec,
 ): Promise<SshHostBrandCheck> {
+  // Classify from the record first. A host recorded under the current prefix is
+  // current whatever the host says, so probing it would add an SSH round-trip
+  // to every single connect — and worse, a probe that cannot be read turns a
+  // connect that used to work into a hard failure.
+  const fromRecordAlone = classifySshHostBrand({
+    recordedPrefix: input.recordedPrefix,
+    previousPrefixPresent: false,
+    homeDir: input.homeDir,
+  });
+  if (fromRecordAlone.kind === "current") return { ok: true, verdict: fromRecordAlone };
+
   const previousPrefix = previousSshPrefixPath(input.homeDir);
   const present = await probePreviousSshPrefixPresent(alias, previousPrefix, exec);
   if (present === null) {

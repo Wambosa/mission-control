@@ -40,8 +40,8 @@ export function TermsSettingsPage() {
           coordinate, and interact with autonomous and semi-autonomous
           third-party AI agents, command-line tools, scripts, and processes
           (&ldquo;Agents&rdquo;) on your own machine, in your own working
-          directories, and against your own source code and accounts. Mission
-          Control itself does not author, control, supervise, or guarantee the
+          directories, and against your own source code and accounts. Chaos
+          Wrangler itself does not author, control, supervise, or guarantee the
           output, behavior, or safety of any Agent. You are solely responsible
           for selecting which Agents to run, what permissions to grant them,
           and what work to entrust to them.
@@ -116,8 +116,8 @@ export function TermsSettingsPage() {
         <h3 style={HEADING}>6. Third-Party Tools and Services</h3>
         <p style={PARAGRAPH}>
           Chaos Wrangler integrates with third-party Agents, models, APIs,
-          and tools that are governed by their own terms and pricing. Mission
-          Control is not responsible for those services, their availability,
+          and tools that are governed by their own terms and pricing. Chaos
+          Wrangler is not responsible for those services, their availability,
           their output, or any charges they incur on your behalf. You are
           responsible for reviewing and complying with the terms of any
           third-party service you use through the Software.

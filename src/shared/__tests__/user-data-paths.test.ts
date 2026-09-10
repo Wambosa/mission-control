@@ -12,9 +12,11 @@ import {
   userDataDbPath,
 } from "../user-data-paths";
 import {
+  DEV_DESTINATION_USER_DATA_DIR_ENV_VAR,
   MIGRATION_MARKER_FILENAME,
   MIGRATION_MARKER_VERSION,
   PREVIOUS_USER_DATA_DIR_NAME,
+  migrationDestinationDir,
   previousUserDataDir,
   resolveStandaloneUserDataDir,
 } from "../user-data-migration";
@@ -331,5 +333,28 @@ describe("resolveStandaloneUserDataDir", () => {
       expect(result.directory).toBe(previousUserDataDir({}, platform, HOME));
       expect(result.directory).toContain(PREVIOUS_USER_DATA_DIR_NAME);
     }
+  });
+});
+
+describe("the development destination seam", () => {
+  it("moves the migration's destination without disabling the migration", () => {
+    // Seeding a previous directory clears the override so the migration runs.
+    // Without a destination of its own, the copy would land in the developer's
+    // real data directory and an installed build would adopt it.
+    expect(migrationDestinationDir({ MC_DEV_USER_DATA_DESTINATION: "/repo/.dev-migrated" })).toBe(
+      "/repo/.dev-migrated",
+    );
+  });
+
+  it("falls back to the platform's own location when unset", () => {
+    for (const env of [{}, { MC_DEV_USER_DATA_DESTINATION: "   " }]) {
+      expect(migrationDestinationDir(env, "darwin", HOME)).toBe(
+        resolveUserDataDir({}, "darwin", HOME),
+      );
+    }
+  });
+
+  it("is not the data-directory override, which skips the migration entirely", () => {
+    expect(DEV_DESTINATION_USER_DATA_DIR_ENV_VAR).not.toBe(USER_DATA_DIR_ENV_VAR);
   });
 });

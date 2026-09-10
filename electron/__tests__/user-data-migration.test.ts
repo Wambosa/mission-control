@@ -588,3 +588,50 @@ describe("runUserDataMigration — the lock is held across the copy", () => {
     expect(after.verdict).toBe("not-running");
   });
 });
+
+describe("runUserDataMigration — a source that predates the server bootstrap", () => {
+  it("migrates a database holding only the Electron-side settings table", () => {
+    // The Electron stores create the database with just `app_settings` before
+    // the server has bootstrapped the schema. Such a store still holds a real
+    // bearer token, and the destination bootstraps its own schema on first
+    // connection — so this must migrate, not fail.
+    const root = tmpRoot();
+    const previousDir = path.join(root, "MissionControl");
+    const destinationDir = path.join(root, "ChaosWrangler");
+    fs.mkdirSync(previousDir, { recursive: true });
+
+    const db = new Database(path.join(previousDir, USER_DATA_DB_FILENAME));
+    db.pragma("journal_mode = WAL");
+    db.exec("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.prepare("INSERT INTO app_settings VALUES (?, ?)").run("api_token", "bearer-secret-value");
+    db.close();
+
+    const report = run({ previousDir, destinationDir });
+
+    expect(report.outcome).toBe("migrated");
+    expect(report.directory).toBe(destinationDir);
+    const copied = openReadOnly(path.join(destinationDir, USER_DATA_DB_FILENAME));
+    expect(
+      (
+        copied.prepare("SELECT value FROM app_settings WHERE key = 'api_token'").get() as {
+          value: string;
+        }
+      ).value,
+    ).toBe("bearer-secret-value");
+  });
+
+  it("stays migrated on the next launch rather than retrying forever", () => {
+    const root = tmpRoot();
+    const previousDir = path.join(root, "MissionControl");
+    const destinationDir = path.join(root, "ChaosWrangler");
+    fs.mkdirSync(previousDir, { recursive: true });
+    const db = new Database(path.join(previousDir, USER_DATA_DB_FILENAME));
+    db.exec("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.close();
+
+    expect(run({ previousDir, destinationDir }).outcome).toBe("migrated");
+    const second = run({ previousDir, destinationDir });
+    expect(second.outcome).toBe("already-migrated");
+    expect(second.refusal).toBeNull();
+  });
+});

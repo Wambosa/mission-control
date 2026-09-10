@@ -3,6 +3,7 @@ import {
   generateSshApiKey,
   installSshService,
   sshServiceInstallScript,
+  sshServiceStopScript,
   startSshService,
 } from "../ssh-service-unit";
 import type { SshExec } from "../ssh-exec";
@@ -266,6 +267,30 @@ describe("retiring the previous service (R14, R26)", () => {
     });
     for (const line of script.split("\n").filter((l) => l.startsWith("rm "))) {
       expect(line.endsWith("|| true"), line).toBe(true);
+    }
+  });
+});
+
+describe("the idle stop covers hosts from the previous release", () => {
+  it("stops both units on Linux", () => {
+    const script = sshServiceStopScript(description());
+    for (const unit of ["chaos-wrangler-agent.service", "mission-control-agent.service"]) {
+      expect(script, unit).toContain(`systemctl --user stop ${unit}`);
+    }
+  });
+
+  it("boots out both labels on macOS", () => {
+    const script = sshServiceStopScript(mac());
+    for (const label of ["com.shondiaz.chaoswrangler.agent", "com.mission-control.agent"]) {
+      expect(script, label).toContain(`launchctl bootout gui/$(id -u)/${label}`);
+    }
+  });
+
+  it("stays best-effort per step, so an absent unit does not abort the rest", () => {
+    for (const script of [sshServiceStopScript(description()), sshServiceStopScript(mac())]) {
+      for (const line of script.split("\n").filter(Boolean)) {
+        expect(line.endsWith("|| true"), line).toBe(true);
+      }
     }
   });
 });

@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
+  PREVIOUS_SSH_SERVICE_LABEL,
+  PREVIOUS_SSH_SERVICE_UNIT_NAME,
   SSH_SERVICE_LABEL,
   SSH_SERVICE_UNIT_NAME,
   sshServiceDefinition,
@@ -122,12 +124,24 @@ function readLingering(
 export function sshServiceStopScript(
   target: Pick<SshServiceDescription, "platform" | "homeDir">,
 ): string {
-  return target.platform === "darwin"
-    ? // `bootout` stops the agent and unloads it; `bootstrap` on next connect
-      // brings it back. Nothing is deleted either way.
-      `launchctl bootout gui/$(id -u)/${SSH_SERVICE_LABEL} >/dev/null 2>&1 || true\n`
-    : `systemctl --user stop ${SSH_SERVICE_UNIT_NAME} >/dev/null 2>&1 || true\n`;
+  // Both identifiers, because this also runs against hosts the previous
+  // release registered. Stopping only the current label leaves a legacy host's
+  // runtime up, which makes the idle window and teardown-on-disconnect
+  // silently ineffective on exactly the hosts that predate the rename.
+  //
+  // `bootout` stops the agent and unloads it; `bootstrap` on the next connect
+  // brings it back. Nothing is deleted either way.
+  const steps =
+    target.platform === "darwin"
+      ? [SSH_SERVICE_LABEL, PREVIOUS_SSH_SERVICE_LABEL].map(
+          (label) => `launchctl bootout gui/$(id -u)/${label} >/dev/null 2>&1 || true`,
+        )
+      : [SSH_SERVICE_UNIT_NAME, PREVIOUS_SSH_SERVICE_UNIT_NAME].map(
+          (unit) => `systemctl --user stop ${unit} >/dev/null 2>&1 || true`,
+        );
+  return `${steps.join("\n")}\n`;
 }
+
 
 /** Ask a host to stop its runtime. Best effort: an unreachable host is stopped. */
 export async function stopSshService(

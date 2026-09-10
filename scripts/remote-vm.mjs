@@ -133,6 +133,8 @@ function randomSecret() {
 // would resolve in development and fail in a build. A cross-file agreement test
 // pins these to the module instead.
 const USER_DATA_DIR_NAME = "ChaosWrangler";
+// The spaced name, for anything a person reads.
+const PRODUCT_DISPLAY_NAME = "Chaos Wrangler";
 // Hard-coded, and deliberately not derived from the constant above: the
 // previous name is the only handle on the data being migrated, so deriving it
 // would make this silently target nothing.
@@ -185,13 +187,16 @@ export function resolvePreviousUserDataDir(
  * bootstrap a database at the new location before the app has ever launched,
  * which the app's own migration then has to report as a destination conflict.
  */
-/** Resolve once per process and announce the fallback a single time. */
-let announcedStandaloneNotice = false;
 function standaloneUserDataDir() {
   const { directory, notice } = resolveStandaloneUserDataDir();
-  if (notice && !announcedStandaloneNotice) {
-    announcedStandaloneNotice = true;
-    console.warn(`[remote-vm] ${notice}`);
+  if (notice) {
+    // Refuse rather than fall back. Before the app has migrated there is no
+    // sandbox state to manage anyway, and the fallback location is a real
+    // store this command would otherwise open read-write — including from an
+    // agent terminal, which does not inherit the data-directory override.
+    throw new Error(
+      `${notice}\nRefusing to operate on the previous data folder. Set ${USER_DATA_DIR_ENV_VAR} to choose a database explicitly.`,
+    );
   }
   return directory;
 }
@@ -230,7 +235,7 @@ export function resolveStandaloneUserDataDir(
   const previous = resolvePreviousUserDataDir(env, platform, home);
   return {
     directory: previous,
-    notice: `${USER_DATA_DIR_NAME} has not completed its first-launch data migration yet, so this command is using the previous data folder ${previous} rather than creating one at ${destination}. Launch the app once, then run this again.`,
+    notice: `${PRODUCT_DISPLAY_NAME} has not completed its first-launch data migration yet, so this command is using the previous data folder ${previous} rather than creating one at ${destination}. Launch the app once, then run this again.`,
   };
 }
 

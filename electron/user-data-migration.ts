@@ -461,11 +461,14 @@ function verifyCopy(
       }
     }
 
-    // Confirm the destination is recognized as non-fresh before the marker is
-    // written: the app decides a fresh bootstrap by this table's absence.
-    if (!destinationTables.includes("projects")) {
-      throw new Error("the copy would still be treated as a fresh install");
-    }
+    // Deliberately not asserting that the copy carries any particular table.
+    // The table sets were compared above, so such a check could only ever fire
+    // on a *source* that lacks it — and a previous install whose database was
+    // created by the Electron-side stores holds only `app_settings`, because
+    // the server had not bootstrapped the schema yet. That store still holds a
+    // real bearer token worth carrying, and the destination bootstraps its
+    // schema on first connection exactly as the source would have. Failing it
+    // here would put such an install into a permanent migration-failure loop.
 
     return { source: sourcePrint, destination: destinationPrint };
   } finally {

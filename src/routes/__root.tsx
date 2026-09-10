@@ -148,7 +148,7 @@ import {
 } from "~/lib/background-grid";
 import { ThemeOnboardingGate } from "~/components/views/ThemeOnboardingOverlay";
 import "~/styles.css";
-import { PRODUCT_DISPLAY_NAME } from "~/shared/user-data-paths";
+import { PRODUCT_DISPLAY_NAME } from "~/shared/product-name";
 
 const LAUNCH_OVERLAY_DURATION_MS = 2700;
 const MINIMAL_TOP_BAR_CONTENT_TOP_INSET = 2;

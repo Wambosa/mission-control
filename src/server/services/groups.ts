@@ -1,6 +1,6 @@
 import type { Group } from "~/db/schema";
 import { getSqlite } from "~/db/client";
-import { nextGroupColor } from "~/lib/design-meta";
+import { nextGroupColor } from "~/shared/group-colors";
 import { events } from "../events";
 import { logServerEvent } from "../log-event";
 import { ValidationError } from "../errors";

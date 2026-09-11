@@ -182,7 +182,13 @@ export function GroupSwitcher() {
                   key={entry.key}
                   leading={<GroupDot color={entry.color ?? "var(--text-faint)"} />}
                   aria-current={selected ? "true" : undefined}
-                  onClick={() => select(entry.key)}
+                  disabled={entry.pending}
+                  onClick={() => {
+                    // Its create has not come back yet; the server cannot
+                    // resolve this id, so it is not selectable as a scope.
+                    if (entry.pending) return;
+                    select(entry.key);
+                  }}
                   style={
                     selected
                       ? { background: "color-mix(in srgb, var(--accent) 14%, transparent)" }

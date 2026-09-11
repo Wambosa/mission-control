@@ -17,13 +17,8 @@ import { toast } from "sonner";
 import { api } from "~/lib/api";
 import { queryKeys } from "~/queries";
 import type { Group } from "~/db/schema";
-import {
-  createGroup,
-  deleteGroup,
-  isOptimisticGroupId,
-  recolorGroup,
-  renameGroup,
-} from "../group-mutations";
+import { createGroup, deleteGroup, recolorGroup, renameGroup } from "../group-mutations";
+import { isOptimisticGroupId } from "../optimistic-group-id";
 
 const createGroupRequest = vi.mocked(api.createGroup);
 const updateGroupRequest = vi.mocked(api.updateGroup);
@@ -269,5 +264,44 @@ describe("isOptimisticGroupId", () => {
     await createGroup(queryClient, "Gamma");
 
     expect(read()?.every((g) => !isOptimisticGroupId(g.id))).toBe(true);
+  });
+});
+
+describe("concurrent mutations", () => {
+  it("a failed create leaves a group that landed while it was in flight", async () => {
+    queryClient.setQueryData(queryKeys.groups, [group("g-alpha", "Alpha")]);
+    createGroupRequest.mockImplementation(async () => {
+      // Another write lands while this create is still awaiting.
+      queryClient.setQueryData<Group[]>(queryKeys.groups, (current) => [
+        ...(current ?? []),
+        group("g-concurrent", "Concurrent"),
+      ]);
+      throw new Error("nope");
+    });
+
+    await createGroup(queryClient, "Gamma");
+
+    const names = read()?.map((g) => g.name);
+    expect(names).toContain("Concurrent");
+    expect(names).not.toContain("Gamma");
+  });
+
+  it("a failed rename leaves a concurrent recolor of another group intact", async () => {
+    queryClient.setQueryData(queryKeys.groups, [
+      group("g-alpha", "Alpha", "#ff5a1f"),
+      group("g-beta", "Beta", "#ff5a1f"),
+    ]);
+    updateGroupRequest.mockImplementation(async () => {
+      queryClient.setQueryData<Group[]>(queryKeys.groups, (current) =>
+        (current ?? []).map((g) => (g.id === "g-beta" ? { ...g, color: "#34d399" } : g)),
+      );
+      throw new Error("nope");
+    });
+
+    await renameGroup(queryClient, "g-alpha", "Renamed");
+
+    const rows = read();
+    expect(rows?.find((g) => g.id === "g-beta")?.color).toBe("#34d399");
+    expect(rows?.find((g) => g.id === "g-alpha")?.name).toBe("Alpha");
   });
 });

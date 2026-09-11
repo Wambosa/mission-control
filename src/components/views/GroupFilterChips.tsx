@@ -9,8 +9,8 @@ import {
   filterProjectsByActiveGroup,
   isGroupIdActive,
 } from "~/lib/active-group";
-import { isOptimisticGroupId } from "~/lib/group-mutations";
-import { GROUP_COLORS } from "~/lib/design-meta";
+import { nextRovingIndex } from "~/lib/roving-focus";
+import { GROUP_COLORS } from "~/shared/group-colors";
 import { useGroupMutations } from "~/lib/use-group-mutations";
 import type { Group } from "~/db/schema";
 import type { ActiveProjectGroup } from "~/shared/ui-preferences";
@@ -33,6 +33,8 @@ const CHIP_INPUT_STYLE = {
 
 type OpenMenu = { id: string; x: number; y: number };
 type MenuMode = "root" | "recolor";
+/** Only one field is ever open, so starting one edit structurally ends the other. */
+type EditSession = { kind: "idle" } | { kind: "creating" } | { kind: "renaming"; id: string };
 
 /**
  * Dashboard view-filter surface: the chip row for the globally active group —
@@ -63,10 +65,9 @@ export function GroupFilterChips({
   onChange: (next: ActiveProjectGroup) => void;
 }) {
   const { createGroup, renameGroup, recolorGroup, deleteGroup } = useGroupMutations();
-  const [creating, setCreating] = useState(false);
+  const [edit, setEdit] = useState<EditSession>({ kind: "idle" });
   const [menu, setMenu] = useState<OpenMenu | null>(null);
   const [menuMode, setMenuMode] = useState<MenuMode>("root");
-  const [renamingId, setRenamingId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Group | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -75,12 +76,20 @@ export function GroupFilterChips({
   const settledRef = useRef(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRefs = useRef(new Map<string, HTMLButtonElement | null>());
+  // The press that dismisses the menu also lands on the trigger as a click.
+  // Without this the menu would close and immediately reopen itself.
+  const justClosedRef = useRef<string | null>(null);
 
   const entries = buildGroupScopeEntries({ groups, projects, activeGroup });
   const menuGroup = menu ? (groups.find((g) => g.id === menu.id) ?? null) : null;
 
   const closeMenu = useCallback(() => {
-    const trigger = menu ? triggerRefs.current.get(menu.id) : null;
+    const id = menu?.id ?? null;
+    const trigger = id ? triggerRefs.current.get(id) : null;
+    justClosedRef.current = id;
+    window.setTimeout(() => {
+      if (justClosedRef.current === id) justClosedRef.current = null;
+    }, 0);
     setMenu(null);
     setMenuMode("root");
     trigger?.focus();
@@ -103,8 +112,7 @@ export function GroupFilterChips({
     if (items.length === 0) return;
     const current = items.indexOf(document.activeElement as HTMLElement);
     const delta = e.key === "ArrowDown" ? 1 : -1;
-    const next = (current + delta + items.length) % items.length;
-    items[next]?.focus();
+    items[nextRovingIndex(current, items.length, delta)]?.focus();
   }, []);
 
   const openMenuForGroup = useCallback((id: string, at: { x: number; y: number }) => {
@@ -114,6 +122,8 @@ export function GroupFilterChips({
 
   const openMenuFromTrigger = useCallback(
     (id: string) => {
+      // This click belongs to the press that just dismissed the menu.
+      if (justClosedRef.current === id) return;
       const rect = triggerRefs.current.get(id)?.getBoundingClientRect();
       openMenuForGroup(id, {
         x: rect?.left ?? 0,
@@ -135,36 +145,51 @@ export function GroupFilterChips({
     settledRef.current = false;
     setMenu(null);
     setMenuMode("root");
-    setRenamingId(id);
+    setEdit({ kind: "renaming", id });
+  }, []);
+
+  const cancelEditing = useCallback(() => {
+    settledRef.current = true;
+    setEdit({ kind: "idle" });
   }, []);
 
   const commitRename = useCallback(
     async (id: string, raw: string) => {
       if (settledRef.current) return;
       settledRef.current = true;
-      setRenamingId(null);
       const name = raw.trim();
       const current = groups.find((g) => g.id === id);
-      if (name.length === 0 || name === current?.name) return;
-      await renameGroup(id, name);
+      if (name.length === 0 || name === current?.name) {
+        setEdit({ kind: "idle" });
+        return;
+      }
+      const renamed = await renameGroup(id, name);
+      // A refused name keeps its field, so the typed text survives the toast
+      // that explains the refusal instead of vanishing with it.
+      if (renamed) setEdit({ kind: "idle" });
+      else settledRef.current = false;
     },
     [groups, renameGroup],
   );
 
   const startCreating = useCallback(() => {
     settledRef.current = false;
-    setCreating(true);
+    setEdit({ kind: "creating" });
   }, []);
 
   const commitCreate = useCallback(
     async (raw: string) => {
       if (settledRef.current) return;
       settledRef.current = true;
-      setCreating(false);
       const name = raw.trim();
       // An untouched field that loses focus is a cancel, not a rejected name.
-      if (name.length === 0) return;
-      await createGroup(name);
+      if (name.length === 0) {
+        setEdit({ kind: "idle" });
+        return;
+      }
+      const created = await createGroup(name);
+      if (created) setEdit({ kind: "idle" });
+      else settledRef.current = false;
     },
     [createGroup],
   );
@@ -172,11 +197,18 @@ export function GroupFilterChips({
   const confirmDelete = useCallback(async () => {
     if (!pendingDelete) return;
     setDeleting(true);
-    // Move the filter off the group first: deleting the scope the dashboard is
-    // pointed at would otherwise leave it briefly filtered to nothing.
-    if (activeGroup === pendingDelete.id) onChange(ACTIVE_GROUP_ALL);
-    await deleteGroup(pendingDelete.id);
+    // Move the filter off the group before the row disappears, but put it back
+    // if the delete fails — the scope move persists to settings, so leaving it
+    // moved is exactly the silent filter change the non-optimistic delete exists
+    // to prevent.
+    const wasActive = activeGroup === pendingDelete.id;
+    if (wasActive) onChange(ACTIVE_GROUP_ALL);
+    const deleted = await deleteGroup(pendingDelete.id);
     setDeleting(false);
+    if (!deleted) {
+      if (wasActive) onChange(pendingDelete.id);
+      return;
+    }
     setPendingDelete(null);
   }, [activeGroup, deleteGroup, onChange, pendingDelete]);
 
@@ -216,10 +248,10 @@ export function GroupFilterChips({
             // has never seen. Selecting it would persist that id as the active
             // filter, and editing it would address a group that does not exist
             // yet — so it shows as a chip and waits.
-            const pending = isOptimisticGroupId(entry.key);
+            const pending = entry.pending;
             const editable = isGroupIdActive(entry.key) && !pending;
 
-            if (editable && renamingId === entry.key) {
+            if (editable && edit.kind === "renaming" && edit.id === entry.key) {
               return (
                 <input
                   key={entry.key}
@@ -234,8 +266,7 @@ export function GroupFilterChips({
                       void commitRename(entry.key, e.currentTarget.value);
                     } else if (e.key === "Escape") {
                       e.preventDefault();
-                      settledRef.current = true;
-                      setRenamingId(null);
+                      cancelEditing();
                     }
                   }}
                   style={CHIP_INPUT_STYLE}
@@ -345,7 +376,7 @@ export function GroupFilterChips({
             );
           })}
 
-        {creating ? (
+        {edit.kind === "creating" ? (
           <input
             autoFocus
             aria-label="New group name"
@@ -357,8 +388,7 @@ export function GroupFilterChips({
                 void commitCreate(e.currentTarget.value);
               } else if (e.key === "Escape") {
                 e.preventDefault();
-                settledRef.current = true;
-                setCreating(false);
+                cancelEditing();
               }
             }}
             style={CHIP_INPUT_STYLE}
@@ -411,8 +441,7 @@ export function GroupFilterChips({
                   icon="trash"
                   danger
                   onClick={() => {
-                    setMenu(null);
-                    setMenuMode("root");
+                    closeMenu();
                     setPendingDelete(menuGroup);
                   }}
                 >

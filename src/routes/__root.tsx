@@ -45,6 +45,7 @@ import { ScreenshotThumbnail } from "~/components/views/ScreenshotThumbnail";
 import { AddProjectProvider } from "~/lib/add-project-store";
 import { ACTIVE_GROUP_ALL, ACTIVE_GROUP_UNGROUPED, useActiveGroup } from "~/lib/active-group";
 import { GroupSwitcher } from "~/components/views/GroupSwitcher";
+import { isOptimisticGroupId } from "~/lib/optimistic-group-id";
 import { PromptSearchProvider } from "~/lib/prompt-search-store";
 import { PromptSearchButton } from "~/components/views/PromptSearchButton";
 import { useHideableMenu } from "~/lib/hideable-elements";
@@ -638,7 +639,12 @@ function Shell() {
   // Cycle the active group context: All → each group → Ungrouped → All.
   const cycleActiveGroup = useCallback(
     (direction: 1 | -1) => {
-      const order: string[] = [ACTIVE_GROUP_ALL, ...groups.map((g) => g.id)];
+      // Skip a group whose create is still in flight: cycling onto it would
+      // persist an id the server has never issued as the active filter.
+      const order: string[] = [
+        ACTIVE_GROUP_ALL,
+        ...groups.filter((g) => !isOptimisticGroupId(g.id)).map((g) => g.id),
+      ];
       if ((projects ?? []).some((p) => p.groupId == null)) order.push(ACTIVE_GROUP_UNGROUPED);
       if (order.length <= 1) return;
       const index = order.indexOf(activeGroup);

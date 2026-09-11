@@ -1,8 +1,9 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "~/lib/api";
-import { nextGroupColor } from "~/lib/design-meta";
+import { nextGroupColor } from "~/shared/group-colors";
 import { validateGroupName } from "~/lib/group-name";
+import { OPTIMISTIC_GROUP_ID_PREFIX } from "~/lib/optimistic-group-id";
 import { queryKeys } from "~/queries";
 import type { Group } from "~/db/schema";
 
@@ -13,17 +14,6 @@ import type { Group } from "~/db/schema";
  * Create follows the rail's optimistic shape: snapshot, write the expected
  * value, then reconcile with server truth or restore and say what failed.
  */
-const OPTIMISTIC_GROUP_ID_PREFIX = "optimistic-group-";
-
-/**
- * A row that exists only in the cache while its create is in flight. The
- * server has never heard of this id, so the surfaces hide the controls that
- * would address it until the real row replaces it.
- */
-export function isOptimisticGroupId(id: string): boolean {
-  return id.startsWith(OPTIMISTIC_GROUP_ID_PREFIX);
-}
-
 function readGroups(queryClient: QueryClient): Group[] {
   return queryClient.getQueryData<Group[]>(queryKeys.groups) ?? [];
 }
@@ -65,7 +55,11 @@ export async function createGroup(
     );
     return group;
   } catch (error) {
-    queryClient.setQueryData<Group[]>(queryKeys.groups, previous);
+    // Drop only the row this call added. Replaying the whole pre-request
+    // snapshot would erase a group another in-flight write had since landed.
+    queryClient.setQueryData<Group[]>(queryKeys.groups, (current) =>
+      (current ?? []).filter((g) => g.id !== optimistic.id),
+    );
     reportFailure(error, "Could not create the group");
     return null;
   }
@@ -78,10 +72,9 @@ async function patchGroup(
   patch: Partial<Pick<Group, "name" | "color">>,
   fallbackMessage: string,
 ): Promise<Group | null> {
-  const previous = readGroups(queryClient);
-  queryClient.setQueryData<Group[]>(
-    queryKeys.groups,
-    previous.map((g) => (g.id === id ? { ...g, ...patch } : g)),
+  const before = readGroups(queryClient).find((g) => g.id === id);
+  queryClient.setQueryData<Group[]>(queryKeys.groups, (current) =>
+    (current ?? []).map((g) => (g.id === id ? { ...g, ...patch } : g)),
   );
 
   try {
@@ -91,7 +84,10 @@ async function patchGroup(
     );
     return group;
   } catch (error) {
-    queryClient.setQueryData<Group[]>(queryKeys.groups, previous);
+    // Revert this row only, for the same reason create does.
+    queryClient.setQueryData<Group[]>(queryKeys.groups, (current) =>
+      (current ?? []).map((g) => (g.id === id && before ? before : g)),
+    );
     reportFailure(error, fallbackMessage);
     return null;
   }

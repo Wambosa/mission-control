@@ -11,6 +11,7 @@ import {
   ACTIVE_GROUP_UNGROUPED,
   type ActiveProjectGroup,
 } from "~/shared/ui-preferences";
+import { isOptimisticGroupId } from "~/lib/optimistic-group-id";
 import type { Group } from "~/db/schema";
 
 export { ACTIVE_GROUP_ALL, ACTIVE_GROUP_UNGROUPED } from "~/shared/ui-preferences";
@@ -62,6 +63,11 @@ export type GroupScopeEntry = {
    * page header already states the project count.
    */
   count: number | null;
+  /**
+   * True while this group's create is still in flight. Its id is not one the
+   * server can resolve, so no surface may select or edit it yet.
+   */
+  pending: boolean;
 };
 
 /**
@@ -89,12 +95,14 @@ export function buildGroupScopeEntries({
       label: activeGroupLabel(ACTIVE_GROUP_ALL, groups),
       color: allColor,
       count: null,
+      pending: false,
     },
     ...groups.map((g) => ({
       key: g.id as ActiveProjectGroup,
       label: g.name,
       color: g.color as string | null,
       count: filterProjectsByActiveGroup(projects, g.id as ActiveProjectGroup).length,
+      pending: isOptimisticGroupId(g.id),
     })),
   ];
   // The empty Ungrouped bucket stays visible while it is the active scope, so
@@ -105,6 +113,7 @@ export function buildGroupScopeEntries({
       label: "Ungrouped",
       color: UNGROUPED_DOT,
       count: ungroupedCount,
+      pending: false,
     });
   }
   return entries;

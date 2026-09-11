@@ -1,6 +1,6 @@
 import type { Group } from "~/db/schema";
 import { getSqlite } from "~/db/client";
-import { GROUP_COLORS } from "~/lib/design-meta";
+import { nextGroupColor } from "~/lib/design-meta";
 import { events } from "../events";
 import { logServerEvent } from "../log-event";
 import { ValidationError } from "../errors";
@@ -31,18 +31,18 @@ export function listGroups(): Group[] {
  * a 500 reading "internal error", which would make the promise that a
  * rejected name says why true of the client check alone.
  */
-function validGroupName(raw: string | undefined, excludeId?: string): string {
+function validGroupName(raw: string | undefined, existing: Group[], excludeId?: string): string {
   const name = raw?.trim() ?? "";
   if (!name) throw new ValidationError("Group name is required");
-  const clash = listGroups().some((g) => g.id !== excludeId && g.name === name);
+  const clash = existing.some((g) => g.id !== excludeId && g.name === name);
   if (clash) throw new ValidationError(`A group named "${name}" already exists`);
   return name;
 }
 
 export function createGroup(input: { name: string; color?: string }): Group {
-  const name = validGroupName(input.name);
   const existing = listGroups();
-  const color = input.color || GROUP_COLORS[existing.length % GROUP_COLORS.length] || "#ff5a1f";
+  const name = validGroupName(input.name, existing);
+  const color = input.color || nextGroupColor(existing.length);
   const row: Group = {
     id: newId("g"),
     name,
@@ -62,7 +62,7 @@ export function updateGroup(id: string, patch: Partial<Pick<Group, "name" | "col
   if (!existing) return null;
   const next = { ...existing, ...patch };
   // A group may keep its own name; only another group's is a clash.
-  if (patch.name !== undefined) next.name = validGroupName(patch.name, id);
+  if (patch.name !== undefined) next.name = validGroupName(patch.name, listGroups(), id);
   updateGroupRow(id, next);
   // Name and colour are the only patchable fields; report which of them moved
   // rather than firing on a save that changed nothing.

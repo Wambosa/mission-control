@@ -17,7 +17,13 @@ import { toast } from "sonner";
 import { api } from "~/lib/api";
 import { queryKeys } from "~/queries";
 import type { Group } from "~/db/schema";
-import { createGroup, deleteGroup, recolorGroup, renameGroup } from "../group-mutations";
+import {
+  createGroup,
+  deleteGroup,
+  isOptimisticGroupId,
+  recolorGroup,
+  renameGroup,
+} from "../group-mutations";
 
 const createGroupRequest = vi.mocked(api.createGroup);
 const updateGroupRequest = vi.mocked(api.updateGroup);
@@ -234,5 +240,34 @@ describe("deleteGroup", () => {
     await deleteGroup(queryClient, "g-alpha");
 
     expect(invalidate).not.toHaveBeenCalled();
+  });
+});
+
+describe("isOptimisticGroupId", () => {
+  it("recognizes the row a create writes before the server answers", async () => {
+    queryClient.setQueryData(queryKeys.groups, []);
+    let idDuringRequest: string | undefined;
+    createGroupRequest.mockImplementation(async () => {
+      idDuringRequest = read()?.[0]?.id;
+      return { group: group("g-real", "Gamma") };
+    });
+
+    await createGroup(queryClient, "Gamma");
+
+    expect(idDuringRequest).toBeDefined();
+    expect(isOptimisticGroupId(idDuringRequest!)).toBe(true);
+  });
+
+  it("does not mistake a server id for an optimistic one", () => {
+    expect(isOptimisticGroupId("g-real")).toBe(false);
+  });
+
+  it("stops recognizing the row once the server row replaces it", async () => {
+    queryClient.setQueryData(queryKeys.groups, []);
+    createGroupRequest.mockResolvedValue({ group: group("g-real", "Gamma") });
+
+    await createGroup(queryClient, "Gamma");
+
+    expect(read()?.every((g) => !isOptimisticGroupId(g.id))).toBe(true);
   });
 });

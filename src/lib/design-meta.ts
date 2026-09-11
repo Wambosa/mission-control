@@ -62,6 +62,16 @@ export const CLOSE_SETTINGS_EVENT = "mc:close-settings";
 export const ICON_COLORS = ["#ff5a1f", "#8ab4ff", "#c792ea", "#ff9466", "#f472b6", "#34d399", "#fb923c"];
 export const GROUP_COLORS = ["#ff5a1f", "#8ab4ff", "#c792ea", "#ff9466", "#f472b6", "#34d399", "#fb923c"];
 
+/**
+ * The color a group gets when nobody picks one: the palette cycled by how many
+ * groups already exist. The server assigns it and the client predicts the same
+ * value for its optimistic row, so both read the formula from here rather than
+ * keeping two copies of the modulo in step by hand.
+ */
+export function nextGroupColor(existingCount: number): string {
+  return GROUP_COLORS[existingCount % GROUP_COLORS.length] ?? "#ff5a1f";
+}
+
 function metaFor(agent: TaskAgent) {
   const meta = AGENT_REGISTRY[agent];
   return { label: meta.label, color: meta.color, glyph: meta.glyph, cmd: meta.command };

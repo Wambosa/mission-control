@@ -82,7 +82,7 @@ export function buildGroupScopeEntries({
   /** Tint for the all-scope row; surfaces that show no dot there pass nothing. */
   allColor?: string | null;
 }): GroupScopeEntry[] {
-  const ungroupedCount = projects.filter((p) => p.groupId == null).length;
+  const ungroupedCount = filterProjectsByActiveGroup(projects, ACTIVE_GROUP_UNGROUPED).length;
   const entries: GroupScopeEntry[] = [
     {
       key: ACTIVE_GROUP_ALL,
@@ -94,7 +94,7 @@ export function buildGroupScopeEntries({
       key: g.id as ActiveProjectGroup,
       label: g.name,
       color: g.color as string | null,
-      count: projects.filter((p) => p.groupId === g.id).length,
+      count: filterProjectsByActiveGroup(projects, g.id as ActiveProjectGroup).length,
     })),
   ];
   // The empty Ungrouped bucket stays visible while it is the active scope, so

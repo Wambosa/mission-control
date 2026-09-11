@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "~/lib/api";
-import { GROUP_COLORS } from "~/lib/design-meta";
+import { nextGroupColor } from "~/lib/design-meta";
 import { validateGroupName } from "~/lib/group-name";
 import { queryKeys } from "~/queries";
 import type { Group } from "~/db/schema";
@@ -13,15 +13,19 @@ import type { Group } from "~/db/schema";
  * Create follows the rail's optimistic shape: snapshot, write the expected
  * value, then reconcile with server truth or restore and say what failed.
  */
-export const OPTIMISTIC_GROUP_ID_PREFIX = "optimistic-group-";
+const OPTIMISTIC_GROUP_ID_PREFIX = "optimistic-group-";
+
+/**
+ * A row that exists only in the cache while its create is in flight. The
+ * server has never heard of this id, so the surfaces hide the controls that
+ * would address it until the real row replaces it.
+ */
+export function isOptimisticGroupId(id: string): boolean {
+  return id.startsWith(OPTIMISTIC_GROUP_ID_PREFIX);
+}
 
 function readGroups(queryClient: QueryClient): Group[] {
   return queryClient.getQueryData<Group[]>(queryKeys.groups) ?? [];
-}
-
-/** Mirrors the server's own cycling, so the dot rarely changes color on reconcile. */
-function nextGroupColor(existing: Group[]): string {
-  return GROUP_COLORS[existing.length % GROUP_COLORS.length] ?? "#ff5a1f";
 }
 
 function reportFailure(error: unknown, fallback: string): void {
@@ -48,7 +52,7 @@ export async function createGroup(
   const optimistic: Group = {
     id: `${OPTIMISTIC_GROUP_ID_PREFIX}${name}`,
     name,
-    color: nextGroupColor(previous),
+    color: nextGroupColor(previous.length),
     sortOrder: previous.length,
     createdAt: Date.now(),
   };

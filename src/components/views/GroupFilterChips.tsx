@@ -3,7 +3,13 @@ import { ConfirmDialog } from "~/components/ui/ConfirmDialog";
 import { ContextMenuPopover } from "~/components/ui/ContextMenuPopover";
 import { DropdownMenuItem, DropdownMenuSeparator } from "~/components/ui/DropdownMenuItem";
 import { Icon } from "~/components/ui/Icon";
-import { ACTIVE_GROUP_ALL, buildGroupScopeEntries, isGroupIdActive } from "~/lib/active-group";
+import {
+  ACTIVE_GROUP_ALL,
+  buildGroupScopeEntries,
+  filterProjectsByActiveGroup,
+  isGroupIdActive,
+} from "~/lib/active-group";
+import { isOptimisticGroupId } from "~/lib/group-mutations";
 import { GROUP_COLORS } from "~/lib/design-meta";
 import { useGroupMutations } from "~/lib/use-group-mutations";
 import type { Group } from "~/db/schema";
@@ -12,6 +18,18 @@ import type { ActiveProjectGroup } from "~/shared/ui-preferences";
 const CHIP_RADIUS = 999;
 const CHIP_LABEL_MAX = 160;
 const MENU_MIN_WIDTH = 180;
+
+/** The chip-shaped inline field, shared by the create and rename paths. */
+const CHIP_INPUT_STYLE = {
+  width: 150,
+  padding: "5px 12px",
+  borderRadius: CHIP_RADIUS,
+  border: "1px solid var(--accent-border)",
+  background: "var(--surface-1)",
+  color: "var(--text)",
+  fontSize: 12.5,
+  outline: "none",
+} as const;
 
 type OpenMenu = { id: string; x: number; y: number };
 type MenuMode = "root" | "recolor";
@@ -163,7 +181,7 @@ export function GroupFilterChips({
   }, [activeGroup, deleteGroup, onChange, pendingDelete]);
 
   const pendingDeleteCount = pendingDelete
-    ? projects.filter((p) => p.groupId === pendingDelete.id).length
+    ? filterProjectsByActiveGroup(projects, pendingDelete.id).length
     : 0;
 
   return (
@@ -194,7 +212,12 @@ export function GroupFilterChips({
         {groups.length > 0 &&
           entries.map((entry) => {
             const active = activeGroup === entry.key;
-            const editable = isGroupIdActive(entry.key);
+            // A row whose create is still in flight carries an id the server
+            // has never seen. Selecting it would persist that id as the active
+            // filter, and editing it would address a group that does not exist
+            // yet — so it shows as a chip and waits.
+            const pending = isOptimisticGroupId(entry.key);
+            const editable = isGroupIdActive(entry.key) && !pending;
 
             if (editable && renamingId === entry.key) {
               return (
@@ -215,16 +238,7 @@ export function GroupFilterChips({
                       setRenamingId(null);
                     }
                   }}
-                  style={{
-                    width: 150,
-                    padding: "5px 12px",
-                    borderRadius: CHIP_RADIUS,
-                    border: "1px solid var(--accent-border)",
-                    background: "var(--surface-1)",
-                    color: "var(--text)",
-                    fontSize: 12.5,
-                    outline: "none",
-                  }}
+                  style={CHIP_INPUT_STYLE}
                 />
               );
             }
@@ -245,6 +259,7 @@ export function GroupFilterChips({
                 <button
                   type="button"
                   aria-pressed={active}
+                  disabled={pending}
                   onClick={() => onChange(entry.key)}
                   style={{
                     display: "inline-flex",
@@ -256,7 +271,8 @@ export function GroupFilterChips({
                     borderRadius: CHIP_RADIUS,
                     color: active ? "var(--text)" : "var(--text-dim)",
                     fontSize: 12.5,
-                    cursor: "pointer",
+                    cursor: pending ? "default" : "pointer",
+                    opacity: pending ? 0.6 : 1,
                   }}
                 >
                   {entry.color && (
@@ -299,7 +315,8 @@ export function GroupFilterChips({
                   <button
                     type="button"
                     ref={(el) => {
-                      triggerRefs.current.set(entry.key, el);
+                      if (el) triggerRefs.current.set(entry.key, el);
+                      else triggerRefs.current.delete(entry.key);
                     }}
                     aria-haspopup="menu"
                     aria-expanded={menu?.id === entry.key}
@@ -344,16 +361,7 @@ export function GroupFilterChips({
                 setCreating(false);
               }
             }}
-            style={{
-              width: 150,
-              padding: "5px 12px",
-              borderRadius: CHIP_RADIUS,
-              border: "1px solid var(--accent-border)",
-              background: "var(--surface-1)",
-              color: "var(--text)",
-              fontSize: 12.5,
-              outline: "none",
-            }}
+            style={CHIP_INPUT_STYLE}
           />
         ) : (
           <button

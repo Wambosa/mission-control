@@ -1,6 +1,6 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "@tanstack/react-router";
+import { useRouter, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { toast } from "sonner";
@@ -25,6 +25,7 @@ import {
   getGroupRailCluster,
   usesDirectRailProjectShortcuts,
 } from "~/lib/rail-projects";
+import { activeRailIndex } from "./project-bar-active-index";
 import { shouldFlashPinnedProjectLogo } from "./project-bar-activity";
 import { getPinnedProjectStatusDots } from "./project-bar-status-dots";
 
@@ -63,6 +64,10 @@ type RailRow = {
 // flips or its own query subscriptions move, never just because the shell did.
 export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disabled?: boolean }) {
   const router = useRouter();
+  // Subscribed, unlike `router.state` — `memo()` blocks the re-render the
+  // shell would otherwise have carried in, so the ring only tracks the route
+  // if this component is listening for itself.
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const queryClient = useQueryClient();
   const { data: projects } = useProjects();
   const { data: groups = [] } = useGroups();
@@ -676,8 +681,7 @@ export const ProjectBar = memo(function ProjectBar({ disabled = false }: { disab
   // into it from that isolated view.
   if (railClusters.length === 0) return null;
 
-  const activeId = router.state.location.pathname.match(/^\/projects\/([^/]+)/)?.[1];
-  const activeIndex = visible.findIndex((p) => p.id === activeId);
+  const activeIndex = activeRailIndex(visible, pathname);
 
   // Group-number labels only earn their space when a real group exists. With
   // no groups, the lone synthetic Ungrouped cluster becomes a flat rail and

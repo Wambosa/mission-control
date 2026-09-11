@@ -394,9 +394,10 @@ function MissionControlPage() {
 
           {showProjectContent && dashboardView === "table" && filteredProjects.length > 0 && (
             <Section
-              label="All projects"
-              count={filteredProjects.length}
+              label={activeLabel}
+              count={groupScoped ? filteredProjects.length : undefined}
               icon="grid"
+              dot={activeGroupColor}
               divider={false}
               marginBottom={48}
               labelSize={13}

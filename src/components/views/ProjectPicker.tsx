@@ -11,7 +11,7 @@ import { HotkeyTooltip } from "~/components/ui/Tooltip";
 import { STATUS_META } from "~/lib/design-meta";
 import { projectPickerSections } from "~/lib/group-projects";
 import { nextProjectPickerHighlight } from "~/lib/project-picker-navigation";
-import { ACTIVE_GROUP_ALL, useActiveGroup } from "~/lib/active-group";
+import { ACTIVE_GROUP_ALL, ALL_GROUPS_LABEL, useActiveGroup } from "~/lib/active-group";
 import { getGroupRailCluster } from "~/lib/rail-projects";
 import type { TaskStatus } from "~/shared/domain";
 import { useServerEvents } from "~/lib/use-events";
@@ -104,7 +104,7 @@ export function ProjectPicker({ projectId, disabled = false }: { projectId?: str
   const flatItems = useMemo(() => sections.flatMap((s) => s.projects), [sections]);
   // When browsing a group, the footer is part of the same keyboard sequence as
   // the projects above it. Keeping its index directly after the project rows
-  // makes ArrowUp from the first project wrap straight to "All projects".
+  // makes ArrowUp from the first project wrap straight to "All groups".
   const showAllProjectsAction = groupScoped && !searching;
   const allProjectsIndex = showAllProjectsAction ? flatItems.length : -1;
   const selectableCount = flatItems.length + (showAllProjectsAction ? 1 : 0);
@@ -413,10 +413,7 @@ export function ProjectPicker({ projectId, disabled = false }: { projectId?: str
                 }}
               >
                 <Icon name="chevron-down" size={11} style={{ transform: "rotate(90deg)", color: "var(--text-faint)" }} />
-                <span style={{ flex: 1 }}>All projects</span>
-                <span style={{ fontSize: 11, color: "var(--text-faint)", fontVariantNumeric: "tabular-nums" }}>
-                  {projects?.length ?? 0}
-                </span>
+                <span style={{ flex: 1 }}>{ALL_GROUPS_LABEL}</span>
               </button>
             </div>
           )}

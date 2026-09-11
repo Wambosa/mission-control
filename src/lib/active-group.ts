@@ -30,14 +30,84 @@ export function filterProjectsByActiveGroup<T extends { groupId: string | null }
   return projects.filter((p) => p.groupId === active);
 }
 
-/** Display label for the active group ("All projects" / "Ungrouped" / group name). */
+/**
+ * The one place the all-scope wording lives. Every surface that renders an
+ * all-scope entry reads it from here — the header switcher's button face and
+ * its menu row, the dashboard chip row, the project picker and the dashboard's
+ * table section — so the five cannot drift out of agreement the way four
+ * independent literals did.
+ */
+export const ALL_GROUPS_LABEL = "All groups";
+
+/** The dot color standing in for "no group", shared by every scope surface. */
+export const UNGROUPED_DOT = "rgba(232, 230, 223, 0.3)";
+
+/** Display label for the active group ("All groups" / "Ungrouped" / group name). */
 export function activeGroupLabel(
   active: ActiveProjectGroup,
   groups: Group[] | undefined,
 ): string {
-  if (active === ACTIVE_GROUP_ALL) return "All projects";
+  if (active === ACTIVE_GROUP_ALL) return ALL_GROUPS_LABEL;
   if (active === ACTIVE_GROUP_UNGROUPED) return "Ungrouped";
-  return groups?.find((g) => g.id === active)?.name ?? "All projects";
+  return groups?.find((g) => g.id === active)?.name ?? ALL_GROUPS_LABEL;
+}
+
+/** One row of a group scope selector. `count` is null where no tally belongs. */
+export type GroupScopeEntry = {
+  key: ActiveProjectGroup;
+  label: string;
+  color: string | null;
+  /**
+   * Null on the all-scope entry: a filter selector needs no tally, and the
+   * page header already states the project count.
+   */
+  count: number | null;
+};
+
+/**
+ * The scope entries every group selector renders, in display order. The header
+ * switcher and the dashboard chip row differ only in how they paint a row, so
+ * sharing the derivation is what keeps their wording and counts identical.
+ */
+export function buildGroupScopeEntries({
+  groups,
+  projects,
+  activeGroup,
+  allColor = null,
+}: {
+  groups: Group[];
+  /** Group-UNscoped list — counts must ignore the active filter. */
+  projects: Array<{ groupId: string | null }>;
+  activeGroup: ActiveProjectGroup;
+  /** Tint for the all-scope row; surfaces that show no dot there pass nothing. */
+  allColor?: string | null;
+}): GroupScopeEntry[] {
+  const ungroupedCount = projects.filter((p) => p.groupId == null).length;
+  const entries: GroupScopeEntry[] = [
+    {
+      key: ACTIVE_GROUP_ALL,
+      label: activeGroupLabel(ACTIVE_GROUP_ALL, groups),
+      color: allColor,
+      count: null,
+    },
+    ...groups.map((g) => ({
+      key: g.id as ActiveProjectGroup,
+      label: g.name,
+      color: g.color as string | null,
+      count: projects.filter((p) => p.groupId === g.id).length,
+    })),
+  ];
+  // The empty Ungrouped bucket stays visible while it is the active scope, so
+  // emptying it does not pull the row out from under the operator's filter.
+  if (ungroupedCount > 0 || activeGroup === ACTIVE_GROUP_UNGROUPED) {
+    entries.push({
+      key: ACTIVE_GROUP_UNGROUPED,
+      label: "Ungrouped",
+      color: UNGROUPED_DOT,
+      count: ungroupedCount,
+    });
+  }
+  return entries;
 }
 
 /**

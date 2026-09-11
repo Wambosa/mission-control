@@ -10,7 +10,9 @@ import {
 import {
   ACTIVE_GROUP_ALL,
   ACTIVE_GROUP_UNGROUPED,
+  UNGROUPED_DOT,
   activeGroupLabel,
+  buildGroupScopeEntries,
   useActiveGroup,
 } from "~/lib/active-group";
 import { useGroupsDialog } from "~/lib/groups-dialog-store";
@@ -37,8 +39,6 @@ function GroupDot({ color, size = 7 }: { color: string; size?: number }) {
     />
   );
 }
-
-const UNGROUPED_DOT = "rgba(232, 230, 223, 0.3)";
 
 /**
  * Header switcher for the globally active project group — the workspace-like
@@ -102,7 +102,6 @@ export function GroupSwitcher() {
   if (groups.length === 0) return null;
 
   const projects = scopedProjects ?? [];
-  const ungroupedCount = projects.filter((p) => p.groupId == null).length;
   const label = activeGroupLabel(activeGroup, groups);
   const activeColor =
     activeGroup === ACTIVE_GROUP_ALL
@@ -116,23 +115,12 @@ export function GroupSwitcher() {
     setActiveGroup(next);
   };
 
-  const entries: Array<{ key: ActiveProjectGroup; label: string; color: string; count: number }> = [
-    { key: ACTIVE_GROUP_ALL, label: "All projects", color: "var(--text-faint)", count: projects.length },
-    ...groups.map((g) => ({
-      key: g.id,
-      label: g.name,
-      color: g.color,
-      count: projects.filter((p) => p.groupId === g.id).length,
-    })),
-  ];
-  if (ungroupedCount > 0 || activeGroup === ACTIVE_GROUP_UNGROUPED) {
-    entries.push({
-      key: ACTIVE_GROUP_UNGROUPED,
-      label: "Ungrouped",
-      color: UNGROUPED_DOT,
-      count: ungroupedCount,
-    });
-  }
+  const entries = buildGroupScopeEntries({
+    groups,
+    projects,
+    activeGroup,
+    allColor: "var(--text-faint)",
+  });
 
   return (
     <div ref={anchorRef} className="no-drag" style={{ position: "relative", display: "inline-flex" }}>
@@ -197,7 +185,7 @@ export function GroupSwitcher() {
               return (
                 <DropdownMenuItem
                   key={entry.key}
-                  leading={<GroupDot color={entry.color} />}
+                  leading={<GroupDot color={entry.color ?? "var(--text-faint)"} />}
                   aria-current={selected ? "true" : undefined}
                   onClick={() => select(entry.key)}
                   style={
@@ -208,16 +196,18 @@ export function GroupSwitcher() {
                 >
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 8, width: "100%" }}>
                     <span style={{ flex: 1 }}>{entry.label}</span>
-                    <span
-                      style={{
-                        fontFamily: "var(--mono)",
-                        fontSize: 11,
-                        color: "var(--text-dim)",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {entry.count}
-                    </span>
+                    {entry.count !== null && (
+                      <span
+                        style={{
+                          fontFamily: "var(--mono)",
+                          fontSize: 11,
+                          color: "var(--text-dim)",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {entry.count}
+                      </span>
+                    )}
                   </span>
                 </DropdownMenuItem>
               );

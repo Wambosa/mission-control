@@ -20,11 +20,18 @@ import * as path from "node:path";
 // of the user's tooling uses, with an override for anyone who wants a
 // different build. On POSIX there is one ssh and PATH is the right answer.
 
-/** Where Windows keeps the OpenSSH client it ships. */
+/**
+ * Where Windows keeps the OpenSSH client it ships.
+ *
+ * Joined with `path.win32` rather than `path.join`: this path is only ever
+ * built for a win32 target, so it must use backslashes whatever host computed
+ * it. On Windows the two are the same function; off Windows `path.join` is the
+ * POSIX one and would hand back `C:\WINDOWS/System32/OpenSSH/ssh.exe`.
+ */
 function systemSshPath(env: NodeJS.ProcessEnv): string | null {
   const root = env.SystemRoot?.trim() || env.windir?.trim();
   if (!root) return null;
-  return path.join(root, "System32", "OpenSSH", "ssh.exe");
+  return path.win32.join(root, "System32", "OpenSSH", "ssh.exe");
 }
 
 export type SshBinaryChoice = {

@@ -14,8 +14,7 @@ const LEGACY_SERVER_KEY = "recall-graph";
 
 // Candidate locations for the bundled MCP script, dev → packaged. In dev it runs
 // straight from the repo (resolving @modelcontextprotocol/sdk from node_modules);
-// packaged it's the esbuild-bundled, self-contained copy shipped under resources/
-// (mirrors whisper-server.ts asset resolution).
+// packaged it's the esbuild-bundled, self-contained copy shipped under resources/.
 function scriptCandidates(appPath: string): string[] {
   const candidates: string[] = [];
   // Packaged: shipped via extraResources under the app's Resources dir.

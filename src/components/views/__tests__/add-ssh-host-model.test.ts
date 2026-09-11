@@ -37,7 +37,7 @@ describe("describeProvisionPlan", () => {
 
     expect(lines).toEqual([
       "Install a Node runtime",
-      "Install the Mission Control agent",
+      "Install the Chaos Wrangler agent",
       "Install Codex",
     ]);
   });
@@ -85,7 +85,7 @@ describe("sshHostRowFromProbe", () => {
     const row = sshHostRowFromProbe({
       ok: true,
       probe: { ...probe, platform: "windows" },
-      plan: { ok: false, reason: "unsupported-platform", message: "Mission Control runs on Linux and macOS hosts." },
+      plan: { ok: false, reason: "unsupported-platform", message: "Chaos Wrangler runs on Linux and macOS hosts." },
     });
 
     expect(row).toMatchObject({ kind: "unsupported" });
@@ -101,7 +101,7 @@ describe("sshHostRowFromProbe", () => {
 
     expect(row).toMatchObject({ kind: "ready" });
     expect(canProvision(row)).toBe(true);
-    expect(row.kind === "ready" && row.summary).toEqual(["Install the Mission Control agent"]);
+    expect(row.kind === "ready" && row.summary).toEqual(["Install the Chaos Wrangler agent"]);
   });
 });
 
@@ -205,7 +205,7 @@ describe("provisionNotes", () => {
     });
 
     expect(notes[0].tone).toBe("info");
-    expect(notes[0].title).toMatch(/already running Mission Control/);
+    expect(notes[0].title).toMatch(/already running Chaos Wrangler/);
     expect(notes[0].detail).toMatch(/leave that runtime running/);
   });
 

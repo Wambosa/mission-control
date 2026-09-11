@@ -156,7 +156,7 @@ export function checkAgentCliVersion(
 // Node app; `--version` alone can take seconds). Opening many sessions at once
 // (the grid view) would serialize N probes and freeze the app. A passing probe
 // is cached for the app's lifetime; a failing one is retried after a short TTL
-// so an in-place CLI update is picked up without restarting Mission Control.
+// so an in-place CLI update is picked up without restarting Chaos Wrangler.
 const versionCheckCache = new Map<string, { check: AgentVersionCheck; at: number }>();
 const VERSION_CHECK_FAILURE_TTL_MS = 30_000;
 

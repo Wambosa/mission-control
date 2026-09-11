@@ -47,7 +47,7 @@ describe("probeSshHost", () => {
     expect(calls[0].stdin).toContain("uname -s");
     expect(outcome.ok).toBe(true);
     if (!outcome.ok || !outcome.plan.ok) throw new Error("expected a plan");
-    expect(outcome.plan.prefix).toBe("/home/sam/.mission-control");
+    expect(outcome.plan.prefix).toBe("/home/sam/.chaos-wrangler");
     expect(outcome.plan.steps.map((s) => s.kind)).toEqual([
       "runtime",
       "agent",

@@ -2,7 +2,7 @@ import { AGENT_CLI_CONFIG, pathLookupCandidates } from "./agent-cli-config";
 import { compareCliVersions, extractCliVersion } from "./agent-cli-version-compare";
 import { TASK_AGENTS, type TaskAgent } from "./domain";
 
-// What a host already has, and what it therefore needs. Mission Control assumes
+// What a host already has, and what it therefore needs. Chaos Wrangler assumes
 // nothing but a shell on the far side, so it looks before it installs — and an
 // installation the host already has is left exactly where the user put it.
 //
@@ -55,7 +55,7 @@ export type SshProvisionPlan = {
   ok: true;
   platform: SshHostPlatform;
   arch: SshHostArch;
-  /** Where everything Mission Control installs will land. */
+  /** Where everything Chaos Wrangler installs will land. */
   prefix: string;
   /** Empty when the host already has everything. */
   steps: SshProvisionStep[];
@@ -83,14 +83,14 @@ export type SshProvisionResult =
   | {
       ok: true;
       alias: string;
-      /** The one directory Mission Control owns on the host. */
+      /** The one directory Chaos Wrangler owns on the host. */
       prefix: string;
       platform: SshHostPlatform;
       apiKey: string;
       /** The port the runtime actually listens on — adopted, or newly chosen. */
       agentPort: number;
       /**
-       * True when this host already had a runtime and Mission Control attached
+       * True when this host already had a runtime and Chaos Wrangler attached
        * to it instead of registering its own. The key and port then came from
        * the host, not from this client.
        */
@@ -109,7 +109,7 @@ export type SshProvisionResult =
   | { ok: false; error: string };
 
 export type SshProvisionRequirements = {
-  /** The agent version this build of Mission Control speaks. */
+  /** The agent version this build of Chaos Wrangler speaks. */
   expectedAgentVersion: string;
   /** Overridable for tests; defaults to what the agent package declares. */
   minimumNodeVersion?: string;
@@ -117,17 +117,99 @@ export type SshProvisionRequirements = {
   harnesses?: readonly TaskAgent[];
 };
 
+/** The directory name the prefix uses under the SSH user's home. */
+export const SSH_PREFIX_DIR_NAME = ".chaos-wrangler";
+
 /**
- * The one directory Mission Control owns on a host. Everything it installs
+ * The previous release's prefix name, hard-coded.
+ *
+ * Deliberately a literal and not derived from the constant above: it is the
+ * only handle on the layout being retired, and deriving it would make the
+ * teardown silently target nothing. Note how close it sits to
+ * {@link REMOTE_AGENT_COMMAND} — the upstream binary differs from the old
+ * prefix by one suffix, which is exactly why a mechanical rewrite of this file
+ * is dangerous.
+ */
+export const PREVIOUS_SSH_PREFIX_DIR_NAME = ".mission-control";
+
+/**
+ * The one directory Chaos Wrangler owns on a host. Everything it installs
  * lands beneath it, and removing the host deletes it — so it is derived from
  * the SSH user's own home rather than any absolute location.
  */
 export function sshPrefixPath(homeDir: string): string {
-  return `${homeDir.replace(/\/+$/, "")}/.mission-control`;
+  return `${homeDir.replace(/\/+$/, "")}/${SSH_PREFIX_DIR_NAME}`;
+}
+
+/** Where the previous release put its prefix on the same host. */
+export function previousSshPrefixPath(homeDir: string): string {
+  return `${homeDir.replace(/\/+$/, "")}/${PREVIOUS_SSH_PREFIX_DIR_NAME}`;
 }
 
 /**
- * POSIX single-quoting. Every host path Mission Control interpolates into a
+ * Is this host still laid out under the previous brand?
+ *
+ * Three answers, and the middle one is the one that is easy to get wrong. With
+ * more than one install pointed at a single host, the second and third machines
+ * arrive at a host another has already re-provisioned. Their own record still
+ * says "previous", so trusting the record alone would tear down a host that is
+ * already correct — and a local migration that fell back restores a database
+ * snapshot predating any re-provisioning, so the record can rewind. The
+ * recorded value is therefore a candidate, and the host's own filesystem is the
+ * verdict.
+ */
+export type SshHostBrandVerdict =
+  /** Recorded under the current prefix; nothing to do. */
+  | { kind: "current" }
+  /** Recorded previous, and the previous prefix is really there. */
+  | { kind: "stale"; previousPrefix: string }
+  /** Recorded previous, but the host has moved on. Advance the record only. */
+  | { kind: "already-migrated" };
+
+export function classifySshHostBrand(input: {
+  /** The prefix this machine has recorded for the host. Null when unknown. */
+  recordedPrefix: string | null;
+  /** Whether the previous prefix directory exists on the host right now. */
+  previousPrefixPresent: boolean;
+  homeDir: string;
+}): SshHostBrandVerdict {
+  const recorded = input.recordedPrefix?.trim() ?? "";
+  const looksPrevious =
+    recorded.endsWith(`/${PREVIOUS_SSH_PREFIX_DIR_NAME}`) ||
+    recorded === PREVIOUS_SSH_PREFIX_DIR_NAME;
+  if (recorded && !looksPrevious) return { kind: "current" };
+  const stale = (): SshHostBrandVerdict => ({
+    kind: "stale",
+    previousPrefix: previousSshPrefixPath(input.homeDir),
+  });
+  // An unrecorded host has no evidence of a previous layout to go on, so the
+  // host's own filesystem is the whole answer.
+  if (!recorded) return input.previousPrefixPresent ? stale() : { kind: "current" };
+  // Recorded previous. Present means stale; absent means another machine has
+  // already migrated it and only this machine's record is behind.
+  return input.previousPrefixPresent ? stale() : { kind: "already-migrated" };
+}
+
+/**
+ * Guard a recursive delete before it is ever rendered into a script.
+ *
+ * The teardown removes a directory tree on a machine the installer does not
+ * own. A relative path, an empty string, or anything not actually named after
+ * the previous prefix is refused rather than expanded by a shell.
+ */
+export function isRemovablePreviousPrefix(target: string | null | undefined): boolean {
+  const value = target?.trim() ?? "";
+  if (!value) return false;
+  if (!value.startsWith("/")) return false;
+  if (value.includes("\0")) return false;
+  const segments = value.split("/").filter(Boolean);
+  if (segments.length < 2) return false;
+  if (segments.includes("..")) return false;
+  return segments[segments.length - 1] === PREVIOUS_SSH_PREFIX_DIR_NAME;
+}
+
+/**
+ * POSIX single-quoting. Every host path Chaos Wrangler interpolates into a
  * script goes through here, because a home directory is the user's to name.
  */
 export function shellQuote(value: string): string {
@@ -230,7 +312,7 @@ function versionAtLeast(reported: string | null, minimum: string): boolean {
 }
 
 /**
- * Turn what the host has into what Mission Control must install. A harness
+ * Turn what the host has into what Chaos Wrangler must install. A harness
  * already on PATH is satisfied and is never reinstalled or shadowed; a runtime
  * too old to run the agent counts as missing, because it cannot do the job.
  */
@@ -242,14 +324,14 @@ export function deriveSshProvisionPlan(
     return {
       ok: false,
       reason: "unsupported-platform",
-      message: `Mission Control runs on Linux and macOS hosts. This host reported "${probe.platform || "an unknown platform"}".`,
+      message: `Chaos Wrangler runs on Linux and macOS hosts. This host reported "${probe.platform || "an unknown platform"}".`,
     };
   }
   if (!isTargetArch(probe.arch)) {
     return {
       ok: false,
       reason: "unsupported-arch",
-      message: `Mission Control has no runtime build for this host's architecture ("${probe.arch || "unknown"}").`,
+      message: `Chaos Wrangler has no runtime build for this host's architecture ("${probe.arch || "unknown"}").`,
     };
   }
   if (!probe.homeDir) {
@@ -281,7 +363,7 @@ export function deriveSshProvisionPlan(
   }
 
   for (const agent of harnesses) {
-    // A harness the host already has is the user's, not Mission Control's to
+    // A harness the host already has is the user's, not Chaos Wrangler's to
     // replace or shadow. Updating an out-of-date one is a separate, explicit
     // action against that host's own installation.
     if (probe.harnessVersions[agent]) continue;

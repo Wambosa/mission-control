@@ -15,7 +15,7 @@ export const OPENCODE_MISSION_CONTROL_PLUGIN_SEGMENTS = [
 
 export function opencodeMissionControlPluginSource(): string {
   return `// ${OPENCODE_MISSION_CONTROL_PLUGIN_MARKER}
-/** Mission Control status bridge for OpenCode (auto-installed). */
+/** Chaos Wrangler status bridge for OpenCode (auto-installed). */
 
 function sessionIdFrom(event) {
   const props = event?.properties ?? {};

@@ -19,9 +19,23 @@ import {
   sshServiceUnitPath,
 } from "../src/shared/ssh-service-unit";
 import { describeRetainedHost } from "../src/shared/ssh-claims";
+import {
+  PREVIOUS_SSH_PREFIX_DIR_NAME,
+  classifySshHostBrand,
+  isRemovablePreviousPrefix,
+  previousSshPrefixPath,
+  type SshHostBrandVerdict,
+} from "../src/shared/ssh-provision";
+import {
+  PREVIOUS_SSH_SERVICE_LABEL,
+  PREVIOUS_SSH_SERVICE_UNIT_NAME,
+  previousSshLayoutRemovalScript,
+  previousSshServiceStopScript,
+  previousSshServiceUnitPath,
+} from "../src/shared/ssh-service-unit";
 import { unclaimSshHost } from "./ssh-claims";
 
-// The install half of first connect. Everything Mission Control lays down goes
+// The install half of first connect. Everything Chaos Wrangler lays down goes
 // under one directory the SSH user already owns, so provisioning needs no root,
 // installs nothing globally, and touches no shell configuration — removing the
 // host is `rm -rf` on that one directory and nothing else.
@@ -62,7 +76,7 @@ export type SshProvisionRunResult =
   | { ok: false; failedStep: SshProvisionCommand["id"]; error: string };
 
 export type SshProvisionOptions = {
-  /** The agent version this build of Mission Control speaks. */
+  /** The agent version this build of Chaos Wrangler speaks. */
   agentVersion?: string;
   onProgress?: (progress: SshProvisionProgress) => void;
   exec?: SshExec;
@@ -150,7 +164,7 @@ function installRuntimeScript(prefix: string, platform: SshHostPlatform, arch: S
 
 /**
  * npm's `--global` means "global to the prefix", and the prefix here is the one
- * directory Mission Control owns. Nothing lands outside it, and no other npm
+ * directory Chaos Wrangler owns. Nothing lands outside it, and no other npm
  * install on the host is touched.
  */
 function installAgentScript(prefix: string, agentVersion: string): string {
@@ -189,7 +203,7 @@ export function sshProvisionCommands(
   const commands: SshProvisionCommand[] = [
     {
       id: "prefix",
-      label: "Creating the Mission Control directory",
+      label: "Creating the Chaos Wrangler directory",
       script: createPrefixScript(plan.prefix),
     },
   ];
@@ -204,7 +218,7 @@ export function sshProvisionCommands(
   if (plan.steps.some((step) => step.kind === "agent")) {
     commands.push({
       id: "agent",
-      label: "Installing the Mission Control agent",
+      label: "Installing the Chaos Wrangler agent",
       script: installAgentScript(plan.prefix, agentVersion),
     });
   }
@@ -224,7 +238,7 @@ export type SshHostTarget = {
 export type SshRemovalResult = {
   /**
    * Always true: the local record must go even when the host does not answer,
-   * or a machine that died takes its Mission Control entry hostage.
+   * or a machine that died takes its Chaos Wrangler entry hostage.
    */
   ok: true;
   /** What is still on the host, when anything is. */
@@ -250,21 +264,33 @@ export type SshRemovalResult = {
 export function sshRemovalScript(target: SshHostTarget): string {
   const prefix = shellQuote(target.prefix);
   const unitPath = sshServiceUnitPath(target);
+  const previousUnitPath = previousSshServiceUnitPath(target);
+  // Unregister both brands. A host added by the previous release still runs its
+  // agent under the previous label, and unregistering only the current one
+  // would delete the prefix out from under a service that is still serving —
+  // the agent holds its key in memory, so removing its directory revokes
+  // nothing. On Linux its unit file would also stay registered; on macOS
+  // launchd would keep respawning a binary that is no longer there.
   const unregister =
     target.platform === "darwin"
       ? [
-          `launchctl bootout gui/$(id -u)/${SSH_SERVICE_LABEL} >/dev/null 2>&1 || true`,
-          `launchctl unload ${shellQuote(unitPath)} >/dev/null 2>&1 || true`,
+          ...[SSH_SERVICE_LABEL, PREVIOUS_SSH_SERVICE_LABEL].map(
+            (label) => `launchctl bootout gui/$(id -u)/${label} >/dev/null 2>&1 || true`,
+          ),
+          ...[unitPath, previousUnitPath].map(
+            (file) => `launchctl unload ${shellQuote(file)} >/dev/null 2>&1 || true`,
+          ),
         ]
-      : [
-          `systemctl --user stop ${SSH_SERVICE_UNIT_NAME} >/dev/null 2>&1 || true`,
-          `systemctl --user disable ${SSH_SERVICE_UNIT_NAME} >/dev/null 2>&1 || true`,
-        ];
+      : [SSH_SERVICE_UNIT_NAME, PREVIOUS_SSH_SERVICE_UNIT_NAME].flatMap((unit) => [
+          `systemctl --user stop ${unit} >/dev/null 2>&1 || true`,
+          `systemctl --user disable ${unit} >/dev/null 2>&1 || true`,
+        ]);
 
   return [
     "set -u",
     ...unregister,
     `rm -f ${shellQuote(unitPath)} || true`,
+    `rm -f ${shellQuote(previousUnitPath)} || true`,
     target.platform === "darwin"
       ? `true`
       : `systemctl --user daemon-reload >/dev/null 2>&1 || true`,
@@ -290,7 +316,7 @@ export async function removeSshHost(
 
   // Give up this client's claim before deciding anything. The runtime belongs
   // to the host, not to whoever is walking away from it — so a host another
-  // Mission Control still uses keeps everything, and only the local record
+  // Chaos Wrangler still uses keeps everything, and only the local record
   // goes. Without this the first client to remove a shared host deletes the
   // prefix out from under every other one.
   if (options.clientId) {
@@ -305,7 +331,7 @@ export async function removeSshHost(
     ok: true,
     leftBehind: {
       prefix: target.prefix,
-      reason: sshStepFailure("Removing Mission Control from this host", result),
+      reason: sshStepFailure("Removing Chaos Wrangler from this host", result),
     },
   };
 }
@@ -335,4 +361,165 @@ export async function runSshProvision(
   }
 
   return { ok: true, prefix: plan.prefix };
+}
+
+// ---------------------------------------------------------------------------
+// Retiring a host provisioned under the previous brand
+// ---------------------------------------------------------------------------
+
+export type SshRetirementResult =
+  /** The previous layout is gone, or was never there. Safe to install. */
+  | { ok: true; removed: boolean }
+  /** Another client still uses this host. Its previous layout stays. */
+  | { ok: true; removed: false; retained: { reason: string } }
+  /**
+   * Nothing was removed. `agentUnrevoked` means the previous service could not
+   * be confirmed stopped, so its agent may still be serving with a key this
+   * app cannot take back.
+   */
+  | { ok: false; error: string; agentUnrevoked: boolean };
+
+/**
+ * Take the previous release's layout off a host, in the one order that is safe.
+ *
+ * Claims first, because with several installs pointed at one host this is the
+ * expected path and not an edge case: a host another client still claims keeps
+ * its previous directory, and this app reports it as running an agent it cannot
+ * revoke rather than deleting a peer's runtime out from under them.
+ *
+ * Then the stop, and only then the removal. Removing the directory of a service
+ * that is still running revokes nothing — the agent holds its key in memory —
+ * so an unconfirmed stop stops the whole teardown.
+ *
+ * Re-provisioning after this is a full reinstall: the prefix held the fetched
+ * runtime and every installed harness CLI, so the host sits without an agent
+ * for as long as that download takes.
+ */
+export async function retirePreviousSshLayout(
+  alias: string,
+  target: { platform: SshHostPlatform; homeDir: string; previousPrefix: string },
+  options: { exec?: SshExec; clientId?: string } = {},
+): Promise<SshRetirementResult> {
+  const exec = options.exec ?? defaultSshExec;
+
+  if (!isRemovablePreviousPrefix(target.previousPrefix)) {
+    return {
+      ok: false,
+      agentUnrevoked: false,
+      error: `Refusing to remove ${target.previousPrefix || "an unnamed path"}: a teardown target must be an absolute path ending in ${PREVIOUS_SSH_PREFIX_DIR_NAME}.`,
+    };
+  }
+
+  if (options.clientId) {
+    const remaining = await unclaimSshHost(alias, target.previousPrefix, options.clientId, exec);
+    const retained = describeRetainedHost(remaining);
+    if (retained) return { ok: true, removed: false, retained: { reason: retained } };
+  }
+
+  const stopped = await exec(sshShellArgs(alias), previousSshServiceStopScript(target.platform));
+  if (stopped.code !== 0) {
+    return {
+      ok: false,
+      agentUnrevoked: true,
+      error: sshStepFailure("Stopping the previous agent service", stopped),
+    };
+  }
+
+  const removed = await exec(sshShellArgs(alias), previousSshLayoutRemovalScript(target));
+  if (removed.code !== 0) {
+    return {
+      ok: false,
+      agentUnrevoked: false,
+      error: sshStepFailure("Removing the previous layout", removed),
+    };
+  }
+
+  return { ok: true, removed: true };
+}
+
+/**
+ * Ask the host whether the previous layout is actually there.
+ *
+ * The recorded prefix cannot answer this on its own. A local migration that
+ * fell back restores a database snapshot predating any re-provisioning, so the
+ * record can rewind; and with several installs pointed at one host, the second
+ * and third arrive at a host the first has already migrated while their own
+ * records still say otherwise. The host's filesystem is the only witness.
+ */
+export async function probePreviousSshPrefixPresent(
+  alias: string,
+  previousPrefix: string,
+  exec: SshExec = defaultSshExec,
+): Promise<boolean | null> {
+  if (!isRemovablePreviousPrefix(previousPrefix)) return false;
+  const result = await exec(
+    sshShellArgs(alias),
+    `if [ -d ${shellQuote(previousPrefix)} ]; then echo present; else echo absent; fi\n`,
+  );
+  if (result.code !== 0) return null;
+  const answer = result.stdout.trim();
+  if (answer.endsWith("present")) return true;
+  if (answer.endsWith("absent")) return false;
+  return null;
+}
+
+export type SshHostBrandCheck =
+  | { ok: true; verdict: SshHostBrandVerdict }
+  | { ok: false; error: string };
+
+/**
+ * The gate that runs before a service start and before a provisioning run.
+ *
+ * Both are separate handlers and only the start path was ever guarded, so a
+ * host under the previous identifiers would have had a service started by a
+ * label that no longer exists — failing inside the service manager on Linux
+ * and succeeding while starting nothing on macOS.
+ */
+export async function checkSshHostBrand(
+  alias: string,
+  input: { homeDir: string; recordedPrefix: string | null },
+  exec: SshExec = defaultSshExec,
+): Promise<SshHostBrandCheck> {
+  // Classify from the record first. A host recorded under the current prefix is
+  // current whatever the host says, so probing it would add an SSH round-trip
+  // to every single connect — and worse, a probe that cannot be read turns a
+  // connect that used to work into a hard failure.
+  const fromRecordAlone = classifySshHostBrand({
+    recordedPrefix: input.recordedPrefix,
+    previousPrefixPresent: false,
+    homeDir: input.homeDir,
+  });
+  if (fromRecordAlone.kind === "current") return { ok: true, verdict: fromRecordAlone };
+
+  const previousPrefix = previousSshPrefixPath(input.homeDir);
+  const present = await probePreviousSshPrefixPresent(alias, previousPrefix, exec);
+  if (present === null) {
+    return { ok: false, error: `Could not tell whether ${alias} still uses its previous layout.` };
+  }
+  return {
+    ok: true,
+    verdict: classifySshHostBrand({
+      recordedPrefix: input.recordedPrefix,
+      previousPrefixPresent: present,
+      homeDir: input.homeDir,
+    }),
+  };
+}
+
+/**
+ * What to tell the user when the reinstall failed after the previous layout was
+ * already torn down.
+ *
+ * This state is only reachable because the teardown stops the previous service
+ * before the new one is installed, and it is indistinguishable from a host that
+ * was never provisioned unless it is reported. Saying "provisioning failed"
+ * would leave the user believing their host still has a working agent.
+ */
+export function agentlessSshHostMessage(alias: string, error: string): string {
+  return `${error} ${alias} has no running agent: its previous runtime was stopped and removed before the new one could be installed. Re-provision it to bring one back.`;
+}
+
+/** What to tell the user about a host that has to be re-provisioned first. */
+export function staleSshHostMessage(alias: string, previousPrefix: string): string {
+  return `${alias} was set up by the previous version of this app and still runs its agent from ${previousPrefix}. Re-provision the host to move it over — nothing is started against it until you do.`;
 }

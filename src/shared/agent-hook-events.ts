@@ -50,7 +50,7 @@ export function mapHookEventToStatus(payload: AgentHookPayload): TaskStatus | nu
       return isPermissionNotification(payload) ? "needs-input" : null;
     // Matchers restrict these hooks to AskUserQuestion already; the tool_name
     // guard keeps the mapping precise if a user points their own broader
-    // PreToolUse/PostToolUse hooks at Mission Control.
+    // PreToolUse/PostToolUse hooks at Chaos Wrangler.
     case AGENT_HOOK_EVENTS.preToolUse:
       return payload.tool_name === ASK_USER_QUESTION_TOOL ? "needs-input" : null;
     case AGENT_HOOK_EVENTS.postToolUse:

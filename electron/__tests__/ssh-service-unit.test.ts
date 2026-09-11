@@ -3,16 +3,21 @@ import {
   generateSshApiKey,
   installSshService,
   sshServiceInstallScript,
+  sshServiceStopScript,
   startSshService,
 } from "../ssh-service-unit";
 import type { SshExec } from "../ssh-exec";
-import type { SshServiceDescription } from "../../src/shared/ssh-service-unit";
+import {
+  previousSshLayoutRemovalScript,
+  previousSshServiceStopScript,
+  type SshServiceDescription,
+} from "../../src/shared/ssh-service-unit";
 
 function description(overrides: Partial<SshServiceDescription> = {}): SshServiceDescription {
   return {
     platform: "linux",
     homeDir: "/home/sam",
-    prefix: "/home/sam/.mission-control",
+    prefix: "/home/sam/.chaos-wrangler",
     agentPort: 9333,
     apiKey: "b8f1c2d3e4",
     agentVersion: "1.2.3",
@@ -21,7 +26,7 @@ function description(overrides: Partial<SshServiceDescription> = {}): SshService
 }
 
 const mac = () =>
-  description({ platform: "darwin", homeDir: "/Users/ada", prefix: "/Users/ada/.mission-control" });
+  description({ platform: "darwin", homeDir: "/Users/ada", prefix: "/Users/ada/.chaos-wrangler" });
 
 function exec(result: Partial<{ code: number; stdout: string; stderr: string }> = {}): {
   run: SshExec;
@@ -51,14 +56,14 @@ describe("sshServiceInstallScript", () => {
   it("writes the secret-bearing file with a mode only the user can read", () => {
     const script = sshServiceInstallScript(description());
 
-    expect(script).toContain("chmod 600 '/home/sam/.mission-control/service/agent.env'");
-    expect(script).toContain("chmod 700 '/home/sam/.mission-control/service/run-agent.sh'");
+    expect(script).toContain("chmod 600 '/home/sam/.chaos-wrangler/service/agent.env'");
+    expect(script).toContain("chmod 700 '/home/sam/.chaos-wrangler/service/run-agent.sh'");
   });
 
   it("creates the directory the service manager reads before writing into it", () => {
     const script = sshServiceInstallScript(description());
     const mkdir = script.indexOf("/home/sam/.config/systemd/user");
-    const write = script.indexOf("mission-control-agent.service' <<");
+    const write = script.indexOf("chaos-wrangler-agent.service' <<");
 
     expect(mkdir).toBeGreaterThan(-1);
     expect(mkdir).toBeLessThan(write);
@@ -88,7 +93,7 @@ describe("installSshService", () => {
     expect(result).toEqual({
       ok: true,
       lingering: "enabled",
-      unitPath: "/home/sam/.config/systemd/user/mission-control-agent.service",
+      unitPath: "/home/sam/.config/systemd/user/chaos-wrangler-agent.service",
     });
     expect(scripts).toHaveLength(1);
   });
@@ -169,7 +174,7 @@ describe("startSshService", () => {
 
     await startSshService("workshop", description(), run);
 
-    expect(scripts[0]).toContain("systemctl --user start mission-control-agent.service");
+    expect(scripts[0]).toContain("systemctl --user start chaos-wrangler-agent.service");
     expect(scripts[0]).not.toMatch(/\bsudo\b/);
   });
 
@@ -180,5 +185,112 @@ describe("startSshService", () => {
 
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.error).toMatch(/Failed to connect to bus/);
+  });
+});
+
+describe("the rendered service carries the new identifiers (R12, AE6)", () => {
+  it("registers under the new label and unit name", () => {
+    const linux = sshServiceInstallScript(description());
+    expect(linux).toContain("chaos-wrangler-agent.service");
+    expect(linux).not.toContain("mission-control-agent.service");
+
+    const macos = sshServiceInstallScript(mac());
+    expect(macos).toContain("com.shondiaz.chaoswrangler.agent");
+    expect(macos).not.toContain("com.mission-control.agent");
+  });
+
+  it("keeps the upstream agent binary name in the start command", () => {
+    // The binary differs from the previous prefix by one suffix and is the
+    // most likely thing a mechanical rewrite of this file would break. It is
+    // the upstream vendor's published name: renaming it stops it resolving.
+    expect(sshServiceInstallScript(description())).toContain("bin/mission-control-agent");
+  });
+
+  it("registers exactly one service", () => {
+    const linux = sshServiceInstallScript(description());
+    expect(linux.match(/systemctl --user enable --now/g)).toHaveLength(1);
+    expect(linux.match(/chaos-wrangler-agent\.service/g)?.length).toBeGreaterThan(0);
+
+    const macos = sshServiceInstallScript(mac());
+    expect(macos.match(/launchctl bootstrap/g)).toHaveLength(1);
+  });
+});
+
+describe("retiring the previous service (R14, R26)", () => {
+  it("confirms the stop rather than swallowing its exit code", () => {
+    const linux = previousSshServiceStopScript("linux");
+    expect(linux).toContain("is-active --quiet mission-control-agent.service");
+    expect(linux).toContain("exit 1");
+
+    const macos = previousSshServiceStopScript("darwin");
+    expect(macos).toContain("launchctl print gui/$(id -u)/com.mission-control.agent");
+    expect(macos).toContain("exit 1");
+  });
+
+  it("treats a host that never had the previous service as stopped", () => {
+    // is-active and launchctl print both exit non-zero for "not installed",
+    // which is the same answer as "not running" — so no special case is needed
+    // and the common second-machine path does not fail.
+    for (const platform of ["linux", "darwin"] as const) {
+      const script = previousSshServiceStopScript(platform);
+      // The failure branch is guarded by a positive test for still-running.
+      expect(script).toMatch(/if .*(is-active|launchctl print)/);
+    }
+  });
+
+  it("deletes the previous unit file as well as the prefix", () => {
+    const linux = previousSshLayoutRemovalScript({
+      platform: "linux",
+      homeDir: "/home/sam",
+      previousPrefix: "/home/sam/.mission-control",
+    });
+    expect(linux).toContain(`rm -rf '/home/sam/.mission-control'`);
+    expect(linux).toContain(
+      `rm -f '/home/sam/.config/systemd/user/mission-control-agent.service'`,
+    );
+    expect(linux).toContain("daemon-reload");
+
+    const macos = previousSshLayoutRemovalScript({
+      platform: "darwin",
+      homeDir: "/Users/ada",
+      previousPrefix: "/Users/ada/.mission-control",
+    });
+    expect(macos).toContain(`rm -f '/Users/ada/Library/LaunchAgents/com.mission-control.agent.plist'`);
+    expect(macos).not.toContain("systemctl");
+  });
+
+  it("stays non-strict per removal step, matching the existing removal path", () => {
+    const script = previousSshLayoutRemovalScript({
+      platform: "linux",
+      homeDir: "/home/sam",
+      previousPrefix: "/home/sam/.mission-control",
+    });
+    for (const line of script.split("\n").filter((l) => l.startsWith("rm "))) {
+      expect(line.endsWith("|| true"), line).toBe(true);
+    }
+  });
+});
+
+describe("the idle stop covers hosts from the previous release", () => {
+  it("stops both units on Linux", () => {
+    const script = sshServiceStopScript(description());
+    for (const unit of ["chaos-wrangler-agent.service", "mission-control-agent.service"]) {
+      expect(script, unit).toContain(`systemctl --user stop ${unit}`);
+    }
+  });
+
+  it("boots out both labels on macOS", () => {
+    const script = sshServiceStopScript(mac());
+    for (const label of ["com.shondiaz.chaoswrangler.agent", "com.mission-control.agent"]) {
+      expect(script, label).toContain(`launchctl bootout gui/$(id -u)/${label}`);
+    }
+  });
+
+  it("stays best-effort per step, so an absent unit does not abort the rest", () => {
+    for (const script of [sshServiceStopScript(description()), sshServiceStopScript(mac())]) {
+      for (const line of script.split("\n").filter(Boolean)) {
+        expect(line.endsWith("|| true"), line).toBe(true);
+      }
+    }
   });
 });

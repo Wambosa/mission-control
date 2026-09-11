@@ -5,14 +5,14 @@ import {
 } from "../pty-hook-env";
 
 describe("PTY hook env", () => {
-  it("builds Mission Control API URLs only for valid local ports", () => {
+  it("builds Chaos Wrangler API URLs only for valid local ports", () => {
     expect(buildLocalMissionControlApiUrl(5173)).toBe("http://127.0.0.1:5173");
     expect(buildLocalMissionControlApiUrl(null)).toBeNull();
     expect(buildLocalMissionControlApiUrl(0)).toBeNull();
     expect(buildLocalMissionControlApiUrl(65536)).toBeNull();
   });
 
-  it("builds synthetic hook URLs from a loopback Mission Control origin", () => {
+  it("builds synthetic hook URLs from a loopback Chaos Wrangler origin", () => {
     expect(
       buildSyntheticHookUrl(
         { apiUrl: "http://127.0.0.1:5173", token: "secret" },

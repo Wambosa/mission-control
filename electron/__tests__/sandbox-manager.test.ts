@@ -57,10 +57,10 @@ describe("sandbox-manager clone compatibility helpers", () => {
     expect(gitAuthCloneFailureHint("generate", new Error("network failed"))).toBeNull();
   });
 
-  it("points an SSH host at its own credentials, not a Mission Control panel", () => {
+  it("points an SSH host at its own credentials, not a Chaos Wrangler panel", () => {
     // The host is the user's own machine and already holds their keys. Telling
-    // them to copy keys onto it, or to let Mission Control generate a second
-    // one, is advice for a VM Mission Control built - not for this.
+    // them to copy keys onto it, or to let Chaos Wrangler generate a second
+    // one, is advice for a VM Chaos Wrangler built - not for this.
     const err = new Error("git clone failed: git@github.com: Permission denied (publickey).");
 
     const hint = gitAuthCloneFailureHint("none", err, "ssh-host");

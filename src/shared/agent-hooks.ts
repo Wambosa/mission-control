@@ -112,7 +112,7 @@ function buildPosixHookCommand(
   style: "claude" | "cursor",
   injectContext: boolean,
 ): string {
-  // Read stdin (the agent's hook payload JSON) and forward to Mission Control.
+  // Read stdin (the agent's hook payload JSON) and forward to Chaos Wrangler.
   // Fail-soft: never block the user's session if MC is down.
   const url = `"$MC_API_URL/api/hooks/${endpointSlug}?taskId=$MC_TASK_ID&hookEvent=${encodeURIComponent(event)}"`;
   if (style === "cursor") {
@@ -212,7 +212,7 @@ function buildManagedGroup(
   };
 }
 
-// A hook command that posts to Mission Control's own hook endpoint is ours by
+// A hook command that posts to Chaos Wrangler's own hook endpoint is ours by
 // construction — $MC_TASK_ID / $MC_API_URL only exist inside MC-spawned
 // sessions. Early installer versions wrote these entries WITHOUT the marker, so
 // marker-only filtering let them accumulate as duplicates: each fires an extra
@@ -236,7 +236,7 @@ function isMissionControlGroup(group: HookGroup): boolean {
 }
 
 /**
- * Ensure the agent's project-local hook config carries Mission Control's hook
+ * Ensure the agent's project-local hook config carries Chaos Wrangler's hook
  * entries. Existing user hooks are preserved; we only add, replace, or remove
  * entries that are ours — tagged with the `_mcManaged` marker, or legacy
  * untagged entries recognized by their MC hook-endpoint command.

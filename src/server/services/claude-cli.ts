@@ -28,7 +28,7 @@ const CMD_SHIM_TARGET = /%(?:~dp0|dp0)%[\\/]+([^"]+\.(?:cjs|js|mjs))"/gi;
 /**
  * Internal print-mode helpers (title generation, commit messages, model
  * probes, markdown refinement) run a full agent CLI headlessly. If that CLI
- * inherits a live session's Mission Control hook env — MC_TASK_ID / MC_API_URL
+ * inherits a live session's Chaos Wrangler hook env — MC_TASK_ID / MC_API_URL
  * / MC_API_TOKEN — the spawned agent fires MC's own UserPromptSubmit/Stop hooks
  * back at the server, which records the helper's prompt to history and
  * recursively re-triggers title generation (a runaway `claude -p` fan-out).

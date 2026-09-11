@@ -148,6 +148,7 @@ import {
 } from "~/lib/background-grid";
 import { ThemeOnboardingGate } from "~/components/views/ThemeOnboardingOverlay";
 import "~/styles.css";
+import { PRODUCT_DISPLAY_NAME } from "~/shared/product-name";
 
 const LAUNCH_OVERLAY_DURATION_MS = 2700;
 const MINIMAL_TOP_BAR_CONTENT_TOP_INSET = 2;
@@ -209,7 +210,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "MissionControl" },
+      { title: PRODUCT_DISPLAY_NAME },
     ],
   }),
   // Prime the bearer cache via IPC so the module-level token in src/lib/api.ts
@@ -1019,7 +1020,7 @@ function LaunchOverlay({
       className="launch-overlay"
       data-active={active ? "true" : undefined}
       role="status"
-      aria-label="Mission Control loading"
+      aria-label="Chaos Wrangler loading"
       onAnimationEnd={(event) => {
         if (event.currentTarget === event.target) onDone();
       }}

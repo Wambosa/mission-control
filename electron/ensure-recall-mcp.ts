@@ -65,7 +65,7 @@ async function ensureMcpConfigGitIgnored(cwd: string, fs: ScaffoldingFs): Promis
     const existing = new Set(content.split(/\r?\n/).map((l) => l.trim()));
     if (existing.has(".mcp.json") || existing.has("/.mcp.json")) return;
     const prefix = content && !content.endsWith("\n") ? "\n" : "";
-    const addition = `${prefix}\n# Mission Control Recall (code graph MCP) — machine-specific, do not commit\n.mcp.json\n`;
+    const addition = `${prefix}\n# Chaos Wrangler Recall (code graph MCP) — machine-specific, do not commit\n.mcp.json\n`;
     await fs.writeFile(gitignore, content + addition);
   } catch {
     /* best-effort */
@@ -146,7 +146,7 @@ export async function ensureRecallMcpForAgent(
 /**
  * The inverse of ensureRecallMcpForAgent, for when the Recall master switch is
  * off: strip the managed entry (and the legacy key) from the project's
- * `.mcp.json` so the next session — Mission Control's or a plain Claude session
+ * `.mcp.json` so the next session — Chaos Wrangler's or a plain Claude session
  * in the same directory — stops loading the Recall server. Only our fixed keys
  * are touched; user-configured servers and top-level keys survive. When removal
  * leaves nothing but an empty `mcpServers`, the whole file is deleted (it's

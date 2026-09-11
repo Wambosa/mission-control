@@ -4,7 +4,7 @@ import type { SshExec } from "../ssh-exec";
 import type { SettingsKV } from "../sandbox-settings";
 import type { SshClaim } from "../../src/shared/ssh-claims";
 
-const PREFIX = "/home/sam/.mission-control";
+const PREFIX = "/home/sam/.chaos-wrangler";
 const CLIENT = "a3f1c8d20b4e5f67";
 
 function kv(initial: Record<string, string> = {}): SettingsKV & { store: Record<string, string> } {

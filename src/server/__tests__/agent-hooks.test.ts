@@ -155,7 +155,7 @@ describe("agent hook installation", () => {
     );
   });
 
-  it("removes legacy marker-less Mission Control hook groups but keeps user hooks", () => {
+  it("removes legacy marker-less Chaos Wrangler hook groups but keeps user hooks", () => {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "mc-hooks-"));
     const file = path.join(cwd, ".claude", "settings.local.json");
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -291,7 +291,7 @@ describe("agent hook installation", () => {
     );
   });
 
-  it("installs the OpenCode Mission Control plugin", () => {
+  it("installs the OpenCode Chaos Wrangler plugin", () => {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "mc-hooks-"));
 
     installAgentHooks("opencode", cwd);

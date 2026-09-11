@@ -1,7 +1,7 @@
 /**
  * Agent-specific PTY environment overrides.
  *
- * OpenCode's OpenTUI stack uses two features that xterm.js (Mission Control's
+ * OpenCode's OpenTUI stack uses two features that xterm.js (Chaos Wrangler's
  * terminal renderer) does not handle cleanly:
  *
  * 1. OSC 66 "explicit width" probing — garbles startup output until redraw.
@@ -9,7 +9,7 @@
  *    trick (rendering █ as ▀ with independent fg/bg colors per half-row). xterm
  *    draws those cells incorrectly, which produces the banded OPENCODE wordmark.
  *
- * Keep OpenCode on 256-color rendering inside Mission Control by stripping
+ * Keep OpenCode on 256-color rendering inside Chaos Wrangler by stripping
  * truecolor hints and disabling the incompatible probes.
  */
 export function applyAgentPtyEnv(

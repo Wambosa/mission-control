@@ -1,22 +1,23 @@
 ---
 name: recall
-description: "Save durable project knowledge to Mission Control's Recall (project memory) so future sessions start already knowing it, AND navigate this project's indexed code graph. Use when you discover or decide something worth remembering about THIS project — an architecture fact, a decision and its rationale, a convention, a stack detail, a glossary term, a known issue, or a useful discovery (\"X lives in Y\", \"Z is generated\"). Also use when you need to LOCATE or READ code — where a symbol is defined (and its verbatim source), what calls it, or what a change would impact — via the graph_search / graph_node / get_neighbors / impact_of / shortest_path MCP tools instead of grepping. Requires a Mission Control agent session (MC_API_URL, MC_API_TOKEN, MC_TASK_ID are injected automatically). Not for transient to-dos, run-specific notes, or projects running outside Mission Control."
+description: "Save durable project knowledge to Chaos Wrangler's Recall (project memory) so future sessions start already knowing it, AND navigate this project's indexed code graph. Use when you discover or decide something worth remembering about THIS project — an architecture fact, a decision and its rationale, a convention, a stack detail, a glossary term, a known issue, or a useful discovery (\"X lives in Y\", \"Z is generated\"). Also use when you need to LOCATE or READ code — where a symbol is defined (and its verbatim source), what calls it, or what a change would impact — via the graph_search / graph_node / get_neighbors / impact_of / shortest_path MCP tools instead of grepping. Requires a Chaos Wrangler agent session (MC_API_URL, MC_API_TOKEN, MC_TASK_ID are injected automatically). Not for transient to-dos, run-specific notes, or projects running outside Chaos Wrangler."
 user-invocable: true
 ---
+<!-- mc:recall-skill (managed) -->
 
-Mission Control agent sessions receive env vars automatically:
+Chaos Wrangler agent sessions receive env vars automatically:
 
 - `MC_API_URL` — loopback API base (e.g. `http://127.0.0.1:54321`)
 - `MC_API_TOKEN` — bearer token for that API
 - `MC_TASK_ID` — the active task/session id
 
-Mission Control maintains **Recall**, a curated, per-project memory that it assembles into a **Session Brief** and hands to every new session. When you learn something durable about this project, write it back so the next session doesn't rediscover it.
+Chaos Wrangler maintains **Recall**, a curated, per-project memory that it assembles into a **Session Brief** and hands to every new session. When you learn something durable about this project, write it back so the next session doesn't rediscover it.
 
-Skip this entirely when the MC env vars are missing (plain shell outside Mission Control).
+Skip this entirely when the MC env vars are missing (plain shell outside Chaos Wrangler).
 
 ## Navigating the code (Recall code graph)
 
-Mission Control also indexes this project into a **code graph** — every function, class, method, type, interface, and file, plus the calls/imports between them. It's exposed as MCP tools on the `recall` server. **Prefer these over `grep`/`glob` when you need to locate code or trace relationships** — the graph is pre-indexed, ranked by how central a symbol is, and complete (it won't miss a dynamically-shaped call site the way a text search can):
+Chaos Wrangler also indexes this project into a **code graph** — every function, class, method, type, interface, and file, plus the calls/imports between them. It's exposed as MCP tools on the `recall` server. **Prefer these over `grep`/`glob` when you need to locate code or trace relationships** — the graph is pre-indexed, ranked by how central a symbol is, and complete (it won't miss a dynamically-shaped call site the way a text search can):
 
 - `graph_search(query, include_source?)` — find **where a symbol is defined** by name or path (functions, classes, methods, types, React components, files). Your first move when you'd otherwise `grep` for a definition. Returns the most-connected matches first; pass `include_source: true` to get the top matches' verbatim source inline.
 - `graph_node(node)` — **read a symbol's definition source** (verbatim, line-numbered) without opening the file. Prefer this over `Read` when you need the body of one function/class/component.

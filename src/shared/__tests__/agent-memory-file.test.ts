@@ -89,3 +89,53 @@ describe("agent-memory-file writer", () => {
     expect(fs.existsSync(path.join(cwd, ".gitignore"))).toBe(false);
   });
 });
+
+describe("blocks written by an earlier build (R20, KTD10)", () => {
+  it("replaces a block written under the previous prose rather than duplicating it", async () => {
+    // The marker, not the prose inside it, is what identifies the block — so a
+    // file the previous build wrote is updated in place instead of gaining a
+    // second managed block beside the first.
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "mc-memory-prev-"));
+    const file = path.join(cwd, "CLAUDE.local.md");
+    fs.writeFileSync(
+      file,
+      [
+        "# CLAUDE.local.md",
+        "",
+        "<!-- mc:recall:start (managed by Mission Control — do not edit inside these markers) -->",
+        "# Project memory (Mission Control Recall)",
+        "",
+        "Old content from the previous release.",
+        "<!-- mc:recall:end -->",
+        "",
+        "My own notes.",
+      ].join("\n"),
+    );
+
+    await writeAgentMemoryFile(
+      "claude-code",
+      cwd,
+      "# Project memory (Chaos Wrangler Recall)\n\nFresh content.",
+    );
+
+    const updated = fs.readFileSync(file, "utf8");
+    expect(updated.match(/mc:recall:start/g)).toHaveLength(1);
+    expect(updated.match(/mc:recall:end/g)).toHaveLength(1);
+    expect(updated).toContain("Fresh content.");
+    expect(updated).not.toContain("Old content from the previous release.");
+    expect(updated).toContain("My own notes.");
+  });
+
+  it("keeps the marker text exactly as already-installed files carry it", async () => {
+    // These read as prose but are matched exactly. Rewording either one
+    // orphans every block the previous build wrote.
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "mc-memory-marker-"));
+    await writeAgentMemoryFile("claude-code", cwd, "# Project memory\n\nbody");
+
+    const written = fs.readFileSync(path.join(cwd, "CLAUDE.local.md"), "utf8");
+    expect(written).toContain(
+      "<!-- mc:recall:start (managed by Mission Control — do not edit inside these markers) -->",
+    );
+    expect(written).toContain("<!-- mc:recall:end -->");
+  });
+});

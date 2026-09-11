@@ -1,5 +1,5 @@
 {
-  "name": "mission-control",
+  "name": "chaos-wrangler",
   "version": "1.0.0",
   "description": "Desktop control surface for managing agentic coding work across many projects.",
   "license": "MIT",
@@ -175,8 +175,8 @@
     ]
   },
   "build": {
-    "appId": "labs.agentsystem.missioncontrol",
-    "productName": "MissionControl",
+    "appId": "com.shondiaz.chaoswrangler",
+    "productName": "Chaos Wrangler",
     "files": [
       "dist/**/*",
       "!dist/**/*.dmg",
@@ -192,7 +192,7 @@
       "package.json"
     ],
     "directories": {
-      "output": "../mission-control-build",
+      "output": "../chaos-wrangler-build",
       "buildResources": "build"
     },
     "extraResources": [
@@ -212,7 +212,7 @@
       ],
       "category": "public.app-category.developer-tools",
       "extendInfo": {
-        "NSScreenCaptureUsageDescription": "Mission Control captures a screen region you select so you can attach it to an AI session as visual context.",
+        "NSScreenCaptureUsageDescription": "Chaos Wrangler captures a screen region you select so you can attach it to an AI session as visual context.",
         "NSDocumentsFolderUsageDescription": "An AI coding session can open a project in your Documents folder, so it needs to read the files there.",
         "NSDesktopFolderUsageDescription": "An AI coding session can open a project on your Desktop, so it needs to read the files there.",
         "NSDownloadsFolderUsageDescription": "An AI coding session can open a project in your Downloads folder, so it needs to read the files there.",
@@ -237,7 +237,7 @@
       "target": [
         "nsis"
       ],
-      "artifactName": "${productName}-${version}-Setup.${ext}"
+      "artifactName": "${name}-${version}-Setup.${ext}"
     },
     "publish": null
   }

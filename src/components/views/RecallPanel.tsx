@@ -1025,7 +1025,7 @@ export function RecallPanel({
 
       <TabPanel id="memories" active={tab === "memories"}>
         <p style={{ margin: 0, fontSize: 11.5, color: "var(--text-dim)", lineHeight: 1.5 }}>
-          Curated facts about this project. Mission Control assembles the most relevant into a{" "}
+          Curated facts about this project. Chaos Wrangler assembles the most relevant into a{" "}
           <strong style={{ color: "var(--text)" }}>Session Brief</strong> and hands it to each new agent
           session, so agents don't rediscover the project from scratch.
         </p>

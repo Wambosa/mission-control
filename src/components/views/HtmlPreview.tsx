@@ -100,7 +100,7 @@ export function HtmlPreview({
     return (
       <HtmlPreviewNotice
         title="Preview server not loaded"
-        body="This preview needs app-process code that a reload can't pick up. Fully quit and restart Mission Control, then reopen the file."
+        body="This preview needs app-process code that a reload can't pick up. Fully quit and restart Chaos Wrangler, then reopen the file."
       />
     );
   }

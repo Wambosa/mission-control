@@ -26,6 +26,29 @@ env.MC_DEV_PORT = String(parsePort(env.MC_DEV_PORT, DEFAULT_DEV_PORT));
 env.MC_USER_DATA_DIR ||= resolve(root, ".dev-userdata");
 console.log(`[dev] user data dir: ${env.MC_USER_DATA_DIR}`);
 
+// Forcing MC_USER_DATA_DIR above short-circuits the first-launch migration
+// entirely — by design, since the override is what lets a working copy run
+// beside an installed build. The cost is that the migration, the
+// previous-instance guard and the standalone entry-point guard would first
+// execute on a packaged build against a real user's data.
+//
+// So development gets its own way in: point MC_DEV_SEED_PREVIOUS_USER_DATA at a
+// directory to seed a synthetic previous install, and the launcher clears the
+// data-directory override so the real decision path runs against it.
+if (env.MC_DEV_SEED_PREVIOUS_USER_DATA?.trim()) {
+  const seeded = resolve(env.MC_DEV_SEED_PREVIOUS_USER_DATA.trim());
+  const destination = resolve(root, ".dev-userdata-migrated");
+  env.MC_PREVIOUS_USER_DATA_DIR = seeded;
+  // Clearing the override is what lets the migration run at all. Naming the
+  // destination is what keeps it out of the developer's real data directory —
+  // otherwise this exercise writes a completion marker and a synthetic
+  // database into the store an installed build would then adopt as its own.
+  delete env.MC_USER_DATA_DIR;
+  env.MC_DEV_USER_DATA_DESTINATION = destination;
+  console.log(`[dev] seeding a synthetic previous data dir: ${seeded}`);
+  console.log(`[dev] migrating into: ${destination}`);
+}
+
 if (mode !== "electron") {
   console.error(`[dev] unknown mode "${mode}". Expected "electron".`);
   process.exit(1);
@@ -37,7 +60,7 @@ env.MC_DEV_PORT = String(port);
 env.MC_DEV_URL ||= origin;
 env.MC_SERVER_ORIGIN ||= origin;
 
-console.log(`[dev] using Mission Control dev server on ${origin}`);
+console.log(`[dev] using Chaos Wrangler dev server on ${origin}`);
 
 await runElectronDev(origin);
 
@@ -154,7 +177,7 @@ function cleanupStaleDevServer(port) {
   if (stalePids.length === 0) return;
 
   console.log(
-    `[dev] stopping stale Mission Control dev server on ${env.MC_DEV_HOST}:${port} ` +
+    `[dev] stopping stale Chaos Wrangler dev server on ${env.MC_DEV_HOST}:${port} ` +
       `(pid${stalePids.length === 1 ? "" : "s"} ${stalePids.join(", ")})`,
   );
 

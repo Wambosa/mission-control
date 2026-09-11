@@ -13,7 +13,7 @@ function register(overrides: Partial<Parameters<typeof registerSshHost>[0]> = {}
   return registerSshHost({
     alias: "space-black",
     name: "space-black",
-    prefix: "/Users/admin/.mission-control",
+    prefix: "/Users/admin/.chaos-wrangler",
     platform: "darwin",
     apiKey: "b8f1c2d3e4",
     agentPort: 9333,

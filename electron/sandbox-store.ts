@@ -1,9 +1,11 @@
-import * as path from "node:path";
-import * as fs from "node:fs";
 import { randomBytes } from "node:crypto";
 import Database from "better-sqlite3";
 import { resolveElectronBetterSqlite3NativeBinding } from "./better-sqlite3-native-binding";
 import type { SandboxConfig } from "./sandbox-types";
+import {
+  restrictDbFilePermissions,
+  userDataDbPath,
+} from "../src/shared/user-data-paths";
 import {
   isSandboxKind,
   normalizeRemoteAgentUrl,
@@ -15,26 +17,13 @@ import {
 // Electron-main read access to the `sandboxes` table (owned by the server via
 // Drizzle, but the container lifecycle lives in the main process). Mirrors how
 // project-roots.ts reads `projects` directly. Port assignments are written back
-// here so they stay stable across restarts. Same missioncontrol.db file.
+// here so they stay stable across restarts. Same database file.
 
 let _db: Database.Database | null = null;
 
-// The DB holds sandbox pairing tokens (and the API bearer) in cleartext; with
-// default perms it is world-readable. Lock it (and WAL/SHM sidecars) to
-// owner-only. Best-effort — a no-op on non-POSIX filesystems.
-function restrictDbFilePermissions(dbPath: string): void {
-  for (const p of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
-    try {
-      if (fs.existsSync(p)) fs.chmodSync(p, 0o600);
-    } catch {
-      /* best effort */
-    }
-  }
-}
-
 function db(userDataDir: string): Database.Database {
   if (_db) return _db;
-  const dbPath = path.join(userDataDir, "missioncontrol.db");
+  const dbPath = userDataDbPath(userDataDir);
   const d = new Database(dbPath, {
     nativeBinding: resolveElectronBetterSqlite3NativeBinding(),
   });

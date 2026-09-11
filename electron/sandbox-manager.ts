@@ -18,7 +18,15 @@ import { SandboxRegistry, type RegistryDeps } from "./sandbox-registry";
 import { readSshHostAliases } from "./ssh-hosts";
 import { isSafeSshAlias } from "../src/shared/ssh-config";
 import { probeSshHost } from "./ssh-provision-probe";
-import { removeSshHost, runSshProvision, sshProvisionCommands } from "./ssh-provision";
+import {
+  agentlessSshHostMessage,
+  checkSshHostBrand,
+  removeSshHost,
+  retirePreviousSshLayout,
+  runSshProvision,
+  sshProvisionCommands,
+  staleSshHostMessage,
+} from "./ssh-provision";
 import { installSshHarnesses } from "./ssh-provision-harnesses";
 import {
   generateSshApiKey,
@@ -90,7 +98,7 @@ let initialized = false;
 // the host. Injected by main.ts (never trusted from the renderer).
 let getSandboxHookEnv: (() => { port: number; token: string } | null) | null = null;
 
-/** Relay a sandbox agent hook frame to the host Mission Control API. */
+/** Relay a sandbox agent hook frame to the host Chaos Wrangler API. */
 function forwardSandboxHook(
   slug: string,
   taskId: string,
@@ -272,10 +280,10 @@ export function gitAuthCloneFailureHint(
 ): string | null {
   if (!describe(err).includes("Permission denied (publickey)")) return null;
   // On an SSH host the credentials are the host's own, so the fix is on that
-  // machine — not in a Mission Control panel that would offer to put a second
+  // machine — not in a Chaos Wrangler panel that would offer to put a second
   // key there.
   if (kind === "ssh-host") {
-    return "This host could not authenticate to Git with its own SSH credentials. Check the key or agent the host itself uses — Mission Control does not install Git credentials onto a machine you already own.";
+    return "This host could not authenticate to Git with its own SSH credentials. Check the key or agent the host itself uses — Chaos Wrangler does not install Git credentials onto a machine you already own.";
   }
   if (mode === "none") {
     return "This sandbox is set to no Git authentication. Choose Copy file keys from ~/.ssh or Generate a sandbox key in the sandbox configure panel, then try the clone again.";
@@ -570,6 +578,22 @@ async function openSshTunnelFor(
   // is safe to do on every connect.
   const target = sshServiceTargetFor(config);
   if (target) {
+    // Before any service start. After the rename a start addresses the new
+    // unit, so a host still laid out under the previous one fails inside the
+    // service manager on Linux and succeeds while starting nothing on macOS —
+    // which reads as a host that is simply broken.
+    const brand = await checkSshHostBrand(target.alias, {
+      homeDir: target.homeDir,
+      recordedPrefix: config.sshHost?.prefix ?? null,
+    });
+    if (!brand.ok) return { ok: false, error: brand.error };
+    if (brand.verdict.kind === "stale") {
+      return {
+        ok: false,
+        error: staleSshHostMessage(target.alias, brand.verdict.previousPrefix),
+      };
+    }
+
     const started = await startSshService(target.alias, target);
     if (!started.ok) return { ok: false, error: started.error };
   }
@@ -583,7 +607,7 @@ async function openSshTunnelFor(
 /**
  * Where a scope keeps the projects it works on.
  *
- * `/workspace` is a Mission Control VM's container layout, and it was baked
+ * `/workspace` is a Chaos Wrangler VM's container layout, and it was baked
  * into the shared path mapping as a constant — so every remote file, git, and
  * PTY call against an SSH host asked for a directory that machine has never
  * had, and that sits outside the root the agent confines itself to. A host
@@ -662,7 +686,7 @@ async function stopSshRuntime(config: SandboxConfig): Promise<void> {
 }
 
 /**
- * Take Mission Control back off a host being removed: unregister the service,
+ * Take Chaos Wrangler back off a host being removed: unregister the service,
  * delete the prefix, leave the SSH config alone. Returns what survived, if
  * anything — never an error, because a host that cannot be reached must not
  * stop the user from forgetting it.
@@ -904,7 +928,7 @@ async function provisionGitAuthFor(
   // An SSH host authenticates to Git as itself. It is the user's own machine,
   // already holding their keys and their known_hosts — the same premise the
   // whole SSH feature rests on. Copying keys onto it or generating a second
-  // one would be Mission Control installing credentials into a machine that
+  // one would be Chaos Wrangler installing credentials into a machine that
   // already has them, and demanding the user pick one of those first is asking
   // them to solve a problem they do not have.
   if (config?.kind === "ssh-host") return {};
@@ -1137,7 +1161,7 @@ function publicSettings(
 }
 
 function buildDiagnostics(): string {
-  const lines: string[] = ["Mission Control sandbox diagnostics"];
+  const lines: string[] = ["Chaos Wrangler sandbox diagnostics"];
   for (const { sandboxId, state } of getRegistry().allStates()) {
     const detail =
       state.status === "connected" || state.status === "update-required"
@@ -1601,6 +1625,45 @@ export function registerSandboxManager(
       const plan = probed.plan;
       const homeDir = probed.probe.homeDir ?? "";
 
+      // The other gate. Provisioning is a separate handler from the start path
+      // and was never guarded, so a stale host would have had the new layout
+      // installed beside the old one, leaving two registered services.
+      let retiredThisRun = false;
+      const brand = await checkSshHostBrand(alias, {
+        homeDir,
+        recordedPrefix: existingHostConfig(alias)?.prefix ?? null,
+      });
+      if (!brand.ok) return { ok: false, error: brand.error };
+      if (brand.verdict.kind === "stale") {
+        // Re-provisioning is a full reinstall: the prefix held the fetched
+        // runtime and every installed harness, so the host has no agent for
+        // as long as that download takes.
+        const retired = await retirePreviousSshLayout(
+          alias,
+          {
+            platform: plan.platform,
+            homeDir,
+            previousPrefix: brand.verdict.previousPrefix,
+          },
+          { clientId: sshClientId(kv()) },
+        );
+        if (!retired.ok) {
+          return {
+            ok: false,
+            error: retired.agentUnrevoked
+              ? `${retired.error} The host is still running an agent under the previous brand that this app cannot revoke, so nothing was removed.`
+              : retired.error,
+          };
+        }
+        if ("retained" in retired) {
+          return {
+            ok: false,
+            error: `${retired.retained.reason} Its previous layout was kept, and it is still running an agent under the previous brand that this app cannot revoke.`,
+          };
+        }
+        retiredThisRun = retired.removed;
+      }
+
       const sendProgress = (step: string, index: number, total: number) => {
         if (!event.sender.isDestroyed()) {
           event.sender.send(IPC.sshHostsProvisionProgress, { alias, step, index, total });
@@ -1618,7 +1681,14 @@ export function registerSandboxManager(
           if (status === "running") sendProgress(command.label, index, total);
         },
       });
-      if (!provisioned.ok) return { ok: false, error: provisioned.error };
+      if (!provisioned.ok) {
+        return {
+          ok: false,
+          error: retiredThisRun
+            ? agentlessSshHostMessage(alias, provisioned.error)
+            : provisioned.error,
+        };
+      }
 
       const harnessResults = await installSshHarnesses(alias, plan, {
         onProgress: ({ agent, index, status }) => {
@@ -1626,10 +1696,10 @@ export function registerSandboxManager(
         },
       });
 
-      sendProgress("Registering the Mission Control service", total - 1, total);
+      sendProgress("Registering the Chaos Wrangler service", total - 1, total);
 
       // Look before writing. A host can already be running a runtime another
-      // Mission Control provisioned — a second machine, or a dev build beside
+      // Chaos Wrangler provisioned — a second machine, or a dev build beside
       // an installed one — and that runtime's key and port are the ones the
       // other client still holds. Generating fresh ones here would revoke its
       // access silently, so an existing runtime is adopted rather than
@@ -1655,7 +1725,16 @@ export function registerSandboxManager(
         // runtime back to $HOME.
         workspaceRoot: existingHostConfig(alias)?.workspaceRoot ?? null,
       });
-      if (!service.ok) return { ok: false, error: service.error };
+      if (!service.ok) {
+        // Nothing has advanced this machine's recorded prefix, so the host
+        // stays detectable as stale and a retry finds it again.
+        return {
+          ok: false,
+          error: retiredThisRun
+            ? agentlessSshHostMessage(alias, service.error)
+            : service.error,
+        };
+      }
 
       // Say who is using it, so removal by one client cannot take the host
       // away from another. A claim that fails to write is a warning, not a

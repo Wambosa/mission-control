@@ -16,7 +16,7 @@ export function screenshotSupported(): boolean {
 export function screenshotCaptureErrorMessage(error: string): string {
   switch (error) {
     case "screen-permission":
-      return "Enable Screen Recording for Mission Control in System Settings › Privacy & Security › Screen Recording.";
+      return "Enable Screen Recording for Chaos Wrangler in System Settings › Privacy & Security › Screen Recording.";
     case "unsupported":
       return "Screenshots are only available on macOS.";
     default:

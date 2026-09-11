@@ -1495,7 +1495,7 @@ function ProjectPage() {
       <div style={{ flex: 1, padding: 32 }}>
         <EmptyState
           title="Could not load project"
-          subtitle="Mission Control could not load this hosted project. Check your connection, then retry."
+          subtitle="Chaos Wrangler could not load this hosted project. Check your connection, then retry."
           icon="shield"
           action={
             <div style={{ display: "flex", gap: 8 }}>
@@ -1707,7 +1707,7 @@ function ProjectPage() {
     if (!project) return;
     setRemovingMissingProject(true);
     setProjectPathActionError(null);
-    setCleanupStatus("Removing this project from Mission Control.");
+    setCleanupStatus("Removing this project from Chaos Wrangler.");
     try {
       await terminals.closeForProject(project.id);
       await api.deleteProject(project.id);
@@ -2087,7 +2087,7 @@ function ProjectPage() {
                     setOverflowOpen(false);
                     setConfirmRemove(true);
                   }}
-                  title="Remove this project from Mission Control. The folder on disk is not touched."
+                  title="Remove this project from Chaos Wrangler. The folder on disk is not touched."
                 >
                   Remove project
                 </DropdownMenuItem>
@@ -2323,7 +2323,7 @@ function ProjectPage() {
           ) : tasksQuery.isError ? (
             <EmptyState
               title="Could not load sessions"
-              subtitle="Mission Control could not load sessions for this project. Retry before starting new work."
+              subtitle="Chaos Wrangler could not load sessions for this project. Retry before starting new work."
               icon="shield"
               action={
                 <Btn variant="primary" icon="refresh" onClick={() => void tasksQuery.refetch()}>
@@ -2520,10 +2520,10 @@ function ProjectPage() {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--text)" }}>
-            {projectPathIssue?.message ?? "Mission Control cannot find this project folder."}
+            {projectPathIssue?.message ?? "Chaos Wrangler cannot find this project folder."}
             {" "}
             Choose the folder in its new location, or remove the project from
-            Mission Control.
+            Chaos Wrangler.
           </div>
           {projectPathActionError && (
             <div
@@ -2585,7 +2585,7 @@ function ProjectPage() {
         <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--text)" }}>
           {projectPathCheck.state === "error"
             ? projectPathCheck.message
-            : "Mission Control could not verify this project path."}
+            : "Chaos Wrangler could not verify this project path."}
         </div>
       </Modal>
 

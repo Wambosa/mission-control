@@ -1,6 +1,11 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  agentlessSshHostMessage,
+  checkSshHostBrand,
   removeSshHost,
+  retirePreviousSshLayout,
   runSshProvision,
   sshProvisionCommands,
   sshRemovalScript,
@@ -10,14 +15,14 @@ import type { SshExec } from "../ssh-exec";
 import type { SshProvisionPlan } from "../../src/shared/ssh-provision";
 
 const AGENT_VERSION = "0.3.1";
-const PREFIX = "/home/sam/.mission-control";
+const PREFIX = "/home/sam/.chaos-wrangler";
 
 function plan(overrides: Partial<SshProvisionPlan> = {}): SshProvisionPlan {
   return {
     ok: true,
     platform: "linux",
     arch: "x64",
-    prefix: "/home/sam/.mission-control",
+    prefix: "/home/sam/.chaos-wrangler",
     steps: [
       { kind: "runtime", reason: "missing", presentVersion: null },
       { kind: "agent", reason: "missing", presentVersion: null },
@@ -54,7 +59,7 @@ describe("sshProvisionCommands", () => {
     expect(commands.map((c) => c.id)).toEqual(["prefix", "runtime", "agent"]);
     // Each script binds the prefix once and refers to it from there on.
     for (const command of commands) {
-      expect(command.script).toContain("MC_PREFIX='/home/sam/.mission-control'");
+      expect(command.script).toContain("MC_PREFIX='/home/sam/.chaos-wrangler'");
     }
     const runtime = commands.find((c) => c.id === "runtime")!.script;
     expect(runtime).toContain("node-v24");
@@ -105,31 +110,31 @@ describe("sshProvisionCommands", () => {
   it("never installs globally or writes to a shell configuration file", () => {
     const scripts = scriptsFor();
 
-    // npm's "global" is only ever global to the prefix Mission Control owns.
+    // npm's "global" is only ever global to the prefix Chaos Wrangler owns.
     const installs = scripts.match(/npm install[^\n]*/g) ?? [];
     expect(installs).not.toHaveLength(0);
     for (const install of installs) {
       expect(install).toContain(`--prefix "$MC_PREFIX"`);
     }
-    expect(scripts).toContain("MC_PREFIX='/home/sam/.mission-control'");
+    expect(scripts).toContain("MC_PREFIX='/home/sam/.chaos-wrangler'");
     expect(scripts).not.toMatch(/\/usr\/local\/(lib|bin)/);
     expect(scripts).not.toMatch(/\.(bashrc|zshrc|profile|bash_profile|zprofile|zshenv)\b/);
   });
 
   it("quotes a home directory the user was free to name", () => {
-    const awkward = scriptsFor(plan({ prefix: "/home/o'brien/my dir/.mission-control" }));
+    const awkward = scriptsFor(plan({ prefix: "/home/o'brien/my dir/.chaos-wrangler" }));
 
-    expect(awkward).toContain(`MC_PREFIX='/home/o'\\''brien/my dir/.mission-control'`);
+    expect(awkward).toContain(`MC_PREFIX='/home/o'\\''brien/my dir/.chaos-wrangler'`);
   });
 
   it("derives every host path from the SSH user's home directory", () => {
-    const elsewhere = scriptsFor(plan({ platform: "darwin", prefix: "/Users/ada/.mission-control" }));
+    const elsewhere = scriptsFor(plan({ platform: "darwin", prefix: "/Users/ada/.chaos-wrangler" }));
 
-    expect(elsewhere).toContain("/Users/ada/.mission-control");
+    expect(elsewhere).toContain("/Users/ada/.chaos-wrangler");
     expect(elsewhere).not.toContain("/home/sam");
     // Absolute paths that are not the prefix belong to the host, not to us.
     for (const path of elsewhere.match(/(?<=')\/[^']*(?=')/g) ?? []) {
-      expect(path.startsWith("/Users/ada/.mission-control")).toBe(true);
+      expect(path.startsWith("/Users/ada/.chaos-wrangler")).toBe(true);
     }
   });
 
@@ -167,8 +172,8 @@ describe("sshRemovalScript", () => {
   });
 
   it("deletes the unit file too, which lives outside the prefix", () => {
-    expect(script()).toContain("/home/sam/.config/systemd/user/mission-control-agent.service");
-    expect(macScript()).toContain("/Users/ada/Library/LaunchAgents/com.mission-control.agent.plist");
+    expect(script()).toContain("/home/sam/.config/systemd/user/chaos-wrangler-agent.service");
+    expect(macScript()).toContain("/Users/ada/Library/LaunchAgents/com.shondiaz.chaoswrangler.agent.plist");
   });
 
   it("never touches the user's SSH config", () => {
@@ -183,7 +188,7 @@ describe("sshRemovalScript", () => {
     for (const text of [script(), macScript()]) {
       expect(text).not.toMatch(/\bsudo\b/);
       for (const target of text.match(/rm -rf [^\n]*/g) ?? []) {
-        expect(target).toMatch(/\.mission-control|\.mc|LaunchAgents|systemd\/user/);
+        expect(target).toMatch(/\.chaos-wrangler|\.mc|LaunchAgents|systemd\/user/);
       }
     }
   });
@@ -249,7 +254,7 @@ describe("runSshProvision", () => {
       onProgress: (progress) => steps.push(progress),
     });
 
-    expect(result).toEqual({ ok: true, prefix: "/home/sam/.mission-control" });
+    expect(result).toEqual({ ok: true, prefix: "/home/sam/.chaos-wrangler" });
     expect(scripts).toHaveLength(3);
     expect(steps.filter((s) => s.status === "done").map((s) => s.command.id)).toEqual([
       "prefix",
@@ -298,5 +303,291 @@ describe("runSshProvision", () => {
     });
 
     expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("retirePreviousSshLayout (R14, R21, R22, R26, AE14, AE16)", () => {
+  const TARGET = {
+    platform: "linux" as const,
+    homeDir: "/home/sam",
+    previousPrefix: "/home/sam/.mission-control",
+  };
+
+  /** An exec that answers each call in turn and records what it was given. */
+  function scripted(
+    replies: Array<Partial<{ code: number; stdout: string; stderr: string }>>,
+  ): { run: SshExec; scripts: string[] } {
+    const scripts: string[] = [];
+    let call = 0;
+    const run: SshExec = async (_args, stdin) => {
+      scripts.push(stdin);
+      const reply = replies[call++] ?? {};
+      return { code: 0, stdout: "", stderr: "", ...reply };
+    };
+    return { run, scripts };
+  }
+
+  it("stops the previous service, then removes its layout (AE14)", async () => {
+    const { run, scripts } = scripted([{}, {}]);
+
+    const result = await retirePreviousSshLayout("host", TARGET, { exec: run });
+
+    expect(result).toEqual({ ok: true, removed: true });
+    expect(scripts).toHaveLength(2);
+    // Order is the point: the stop is confirmed before anything is deleted.
+    expect(scripts[0]).toContain("systemctl --user stop mission-control-agent.service");
+    expect(scripts[0]).toContain("is-active --quiet mission-control-agent.service");
+    expect(scripts[1]).toContain(`rm -rf '/home/sam/.mission-control'`);
+    expect(scripts[1]).toContain("mission-control-agent.service");
+  });
+
+  it("does not remove anything when the stop cannot be confirmed (R26)", async () => {
+    // The agent holds its key in memory, so deleting its directory would revoke
+    // nothing while leaving the app believing the host was retired.
+    const { run, scripts } = scripted([{ code: 1, stderr: "previous service is still active" }]);
+
+    const result = await retirePreviousSshLayout("host", TARGET, { exec: run });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.agentUnrevoked).toBe(true);
+      expect(result.error).toContain("Stopping the previous agent service");
+    }
+    expect(scripts).toHaveLength(1);
+    expect(scripts.some((s) => s.includes("rm -rf"))).toBe(false);
+  });
+
+  it("retains a host another client still claims, and deletes nothing (AE16)", async () => {
+    // With several installs sharing one host this is the expected path. The
+    // previous directory stays, and so does an agent this app cannot revoke.
+    const { run, scripts } = scripted([{ stdout: "remaining=2\n" }]);
+
+    const result = await retirePreviousSshLayout("host", TARGET, {
+      exec: run,
+      clientId: "client-a",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.removed).toBe(false);
+      expect("retained" in result && result.retained.reason).toBeTruthy();
+    }
+    expect(scripts.some((s) => s.includes("rm -rf"))).toBe(false);
+    expect(scripts.some((s) => s.includes("is-active"))).toBe(false);
+  });
+
+  it("proceeds once this client's claim was the last one", async () => {
+    const { run } = scripted([{ stdout: "remaining=0\n" }, {}, {}]);
+
+    const result = await retirePreviousSshLayout("host", TARGET, {
+      exec: run,
+      clientId: "client-a",
+    });
+
+    expect(result).toEqual({ ok: true, removed: true });
+  });
+
+  it("reports the host unchanged when the removal itself fails", async () => {
+    // Not agentless: the service is confirmed stopped, so nothing is serving —
+    // but the directory is still there, and the record must not advance.
+    const { run } = scripted([{}, { code: 1, stderr: "permission denied" }]);
+
+    const result = await retirePreviousSshLayout("host", TARGET, { exec: run });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.agentUnrevoked).toBe(false);
+      expect(result.error).toContain("Removing the previous layout");
+    }
+  });
+
+  it("refuses a teardown target that is not named after the previous prefix", async () => {
+    const { run, scripts } = scripted([{}, {}]);
+
+    for (const previousPrefix of ["", "   ", "/home/sam", ".mission-control", "/"]) {
+      const result = await retirePreviousSshLayout(
+        "host",
+        { ...TARGET, previousPrefix },
+        { exec: run },
+      );
+      expect(result.ok, previousPrefix).toBe(false);
+      if (!result.ok) expect(result.error).toContain("absolute path");
+    }
+    // Nothing was even attempted against the host.
+    expect(scripts).toHaveLength(0);
+  });
+
+  it("quotes a home directory containing a space and an apostrophe", async () => {
+    const { run, scripts } = scripted([{}, {}]);
+    const home = "/home/o'brien/my dir";
+
+    await retirePreviousSshLayout(
+      "host",
+      { platform: "linux", homeDir: home, previousPrefix: `${home}/.mission-control` },
+      { exec: run },
+    );
+
+    expect(scripts[1]).toContain(`rm -rf '/home/o'\\''brien/my dir/.mission-control'`);
+  });
+
+  it("uses launchd on macOS and never mentions systemd", async () => {
+    const { run, scripts } = scripted([{}, {}]);
+
+    await retirePreviousSshLayout(
+      "host",
+      {
+        platform: "darwin",
+        homeDir: "/Users/ada",
+        previousPrefix: "/Users/ada/.mission-control",
+      },
+      { exec: run },
+    );
+
+    expect(scripts[0]).toContain("launchctl bootout gui/$(id -u)/com.mission-control.agent");
+    expect(scripts[0]).toContain("launchctl print gui/$(id -u)/com.mission-control.agent");
+    expect(scripts[0]).not.toContain("systemctl");
+    expect(scripts[1]).toContain("Library/LaunchAgents/com.mission-control.agent.plist");
+    expect(scripts[1]).not.toContain("systemctl");
+  });
+
+  it("is idempotent against a host whose previous layout is already gone", async () => {
+    // Absence reads as stopped, and each removal step is non-strict, so a
+    // second run over the same host reports the same success.
+    const { run } = scripted([{}, {}]);
+    const first = await retirePreviousSshLayout("host", TARGET, { exec: run });
+    const second = await retirePreviousSshLayout("host", TARGET, { exec: run });
+
+    expect(first).toEqual({ ok: true, removed: true });
+    expect(second).toEqual({ ok: true, removed: true });
+  });
+
+  it("leaves the upstream agent binary name out of the teardown", async () => {
+    // The binary differs from the previous prefix by one suffix, and it is the
+    // upstream vendor's published name — a teardown must not target it.
+    const { run, scripts } = scripted([{}, {}]);
+    await retirePreviousSshLayout("host", TARGET, { exec: run });
+
+    for (const script of scripts) {
+      expect(script).not.toContain("rm -rf '/home/sam/.mission-control/bin/mission-control-agent'");
+    }
+  });
+});
+
+describe("reporting a host left without an agent (R22, R27)", () => {
+  it("says the host has no running agent, not just that provisioning failed", () => {
+    // This state is only reachable because the teardown stops the previous
+    // service before the new one is installed, and it is indistinguishable
+    // from a never-provisioned host unless it is reported. A user told only
+    // "provisioning failed" would assume their host still works.
+    const message = agentlessSshHostMessage("build-box", "Installing the runtime failed.");
+
+    expect(message).toContain("Installing the runtime failed.");
+    expect(message).toContain("build-box");
+    expect(message).toContain("no running agent");
+    expect(message).toContain("Re-provision");
+  });
+
+  it("advances the recorded prefix only after the service is installed", () => {
+    // R27: the handler returns the new prefix — the value the caller persists —
+    // strictly after installSshService has succeeded, so a re-provisioning that
+    // fails anywhere earlier leaves the host detectable as stale.
+    const source = fs.readFileSync(
+      path.join(__dirname, "..", "sandbox-manager.ts"),
+      "utf8",
+    );
+    const installedAt = source.indexOf("const service = await installSshService(");
+    const returnedAt = source.indexOf("prefix: plan.prefix,\n        platform: plan.platform,");
+    expect(installedAt).toBeGreaterThan(-1);
+    expect(returnedAt).toBeGreaterThan(installedAt);
+
+    // And every failure path between the teardown and that return bails out.
+    const between = source.slice(installedAt, returnedAt);
+    expect(between).toContain("if (!service.ok)");
+  });
+});
+
+describe("removal tears down whichever brand the host carries", () => {
+  const linux = { platform: "linux" as const, homeDir: "/home/sam", prefix: PREFIX };
+  const macos = {
+    platform: "darwin" as const,
+    homeDir: "/Users/ada",
+    prefix: "/Users/ada/.chaos-wrangler",
+  };
+
+  it("unregisters both the current and the previous unit on Linux", () => {
+    // A host added by the previous release still runs under the previous unit.
+    // Unregistering only the current one would delete the prefix out from under
+    // a service that is still serving — and its agent holds its key in memory.
+    const script = sshRemovalScript(linux);
+    for (const unit of ["chaos-wrangler-agent.service", "mission-control-agent.service"]) {
+      expect(script, unit).toContain(`systemctl --user stop ${unit}`);
+      expect(script, unit).toContain(`systemctl --user disable ${unit}`);
+    }
+  });
+
+  it("boots out both labels on macOS", () => {
+    const script = sshRemovalScript(macos);
+    for (const label of ["com.shondiaz.chaoswrangler.agent", "com.mission-control.agent"]) {
+      expect(script, label).toContain(`launchctl bootout gui/$(id -u)/${label}`);
+    }
+  });
+
+  it("removes both unit files", () => {
+    expect(sshRemovalScript(linux)).toContain(
+      `rm -f '/home/sam/.config/systemd/user/mission-control-agent.service'`,
+    );
+    expect(sshRemovalScript(macos)).toContain(
+      `rm -f '/Users/ada/Library/LaunchAgents/com.mission-control.agent.plist'`,
+    );
+  });
+
+  it("still unregisters before deleting the prefix", () => {
+    const script = sshRemovalScript(linux);
+    expect(script.indexOf("systemctl --user disable")).toBeLessThan(script.indexOf("rm -rf"));
+  });
+});
+
+describe("checkSshHostBrand only probes when the record could be stale", () => {
+  function counting(): { run: SshExec; calls: number } {
+    const state = { calls: 0 };
+    const run: SshExec = async () => {
+      state.calls++;
+      return { code: 0, stdout: "absent\n", stderr: "" };
+    };
+    return {
+      get run() {
+        return run;
+      },
+      get calls() {
+        return state.calls;
+      },
+    };
+  }
+
+  it("asks the host nothing when the recorded prefix is already current", async () => {
+    // Probing here would add an SSH round-trip to every connect, and a probe
+    // whose output could not be read would turn a working connect into a hard
+    // failure.
+    const exec = counting();
+    const result = await checkSshHostBrand(
+      "host",
+      { homeDir: "/home/sam", recordedPrefix: "/home/sam/.chaos-wrangler" },
+      exec.run,
+    );
+
+    expect(result).toEqual({ ok: true, verdict: { kind: "current" } });
+    expect(exec.calls).toBe(0);
+  });
+
+  it("asks the host when the recorded prefix is the previous one", async () => {
+    const exec = counting();
+    const result = await checkSshHostBrand(
+      "host",
+      { homeDir: "/home/sam", recordedPrefix: "/home/sam/.mission-control" },
+      exec.run,
+    );
+
+    expect(exec.calls).toBe(1);
+    expect(result).toEqual({ ok: true, verdict: { kind: "already-migrated" } });
   });
 });

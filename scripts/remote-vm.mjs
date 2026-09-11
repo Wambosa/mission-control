@@ -127,11 +127,116 @@ function randomSecret() {
   return randomBytes(32).toString("hex");
 }
 
-function resolveUserDataDir(env = process.env, platform = process.platform, home = os.homedir()) {
-  if (env.MC_USER_DATA_DIR?.trim()) return env.MC_USER_DATA_DIR.trim();
-  if (platform === "darwin") return path.join(home, "Library/Application Support/MissionControl");
-  if (platform === "win32") return path.join(home, "AppData/Roaming/MissionControl");
-  return path.join(home, ".config/MissionControl");
+// This script's own copy of the values src/shared/user-data-paths.ts owns. The
+// package ships this file without the source tree, and it runs as a plain Node
+// process from inside the packaged archive, so an import of the shared module
+// would resolve in development and fail in a build. A cross-file agreement test
+// pins these to the module instead.
+const USER_DATA_DIR_NAME = "ChaosWrangler";
+// The spaced name, for anything a person reads.
+const PRODUCT_DISPLAY_NAME = "Chaos Wrangler";
+// Hard-coded, and deliberately not derived from the constant above: the
+// previous name is the only handle on the data being migrated, so deriving it
+// would make this silently target nothing.
+const PREVIOUS_USER_DATA_DIR_NAME = "MissionControl";
+const USER_DATA_DB_FILENAME = "missioncontrol.db";
+const USER_DATA_DIR_ENV_VAR = "MC_USER_DATA_DIR";
+const PREVIOUS_USER_DATA_DIR_ENV_VAR = "MC_PREVIOUS_USER_DATA_DIR";
+const MIGRATION_MARKER_FILENAME = ".user-data-migration.json";
+const MIGRATION_MARKER_VERSION = 1;
+
+function platformUserDataDir(dirName, platform, home) {
+  if (!home?.trim()) {
+    throw new Error(
+      `Cannot determine the home directory, so the ${USER_DATA_DIR_NAME} data directory cannot be resolved. Set ${USER_DATA_DIR_ENV_VAR} to an absolute path.`,
+    );
+  }
+  if (platform === "darwin") {
+    return path.join(home, "Library/Application Support", dirName);
+  }
+  if (platform === "win32") {
+    return path.join(home, "AppData/Roaming", dirName);
+  }
+  return path.join(home, ".config", dirName);
+}
+
+export function resolveUserDataDir(env = process.env, platform = process.platform, home = os.homedir()) {
+  const override = env[USER_DATA_DIR_ENV_VAR]?.trim();
+  if (override) return override;
+  return platformUserDataDir(USER_DATA_DIR_NAME, platform, home);
+}
+
+export function resolvePreviousUserDataDir(
+  env = process.env,
+  platform = process.platform,
+  home = os.homedir(),
+) {
+  const seeded = env[PREVIOUS_USER_DATA_DIR_ENV_VAR]?.trim();
+  if (seeded) return seeded;
+  return platformUserDataDir(PREVIOUS_USER_DATA_DIR_NAME, platform, home);
+}
+
+/**
+ * A minimal mirror of the shared module's marker read.
+ *
+ * This command runs as a plain Node process from inside the packaged archive,
+ * which ships without the source tree, so it cannot import the shared module —
+ * a cross-file agreement test pins the filename and schema version instead.
+ *
+ * Run standalone, this command would otherwise create the data directory and
+ * bootstrap a database at the new location before the app has ever launched,
+ * which the app's own migration then has to report as a destination conflict.
+ */
+function standaloneUserDataDir() {
+  const { directory, notice } = resolveStandaloneUserDataDir();
+  if (notice) {
+    // Refuse rather than fall back. Before the app has migrated there is no
+    // sandbox state to manage anyway, and the fallback location is a real
+    // store this command would otherwise open read-write — including from an
+    // agent terminal, which does not inherit the data-directory override.
+    throw new Error(
+      `${notice}\nRefusing to operate on the previous data folder. Set ${USER_DATA_DIR_ENV_VAR} to choose a database explicitly.`,
+    );
+  }
+  return directory;
+}
+
+export function resolveStandaloneUserDataDir(
+  env = process.env,
+  platform = process.platform,
+  home = os.homedir(),
+  readMarker = (file) => {
+    try {
+      return fs.readFileSync(file, "utf8");
+    } catch {
+      return null;
+    }
+  },
+) {
+  const override = env[USER_DATA_DIR_ENV_VAR]?.trim();
+  if (override) return { directory: override, notice: null };
+
+  const destination = platformUserDataDir(USER_DATA_DIR_NAME, platform, home);
+  const raw = readMarker(path.join(destination, MIGRATION_MARKER_FILENAME));
+  if (raw !== null) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (
+        typeof parsed?.markerVersion === "number" &&
+        parsed.markerVersion <= MIGRATION_MARKER_VERSION
+      ) {
+        return { directory: destination, notice: null };
+      }
+    } catch {
+      /* an unreadable marker is treated as no marker at all */
+    }
+  }
+
+  const previous = resolvePreviousUserDataDir(env, platform, home);
+  return {
+    directory: previous,
+    notice: `${PRODUCT_DISPLAY_NAME} has not completed its first-launch data migration yet, so this command is using the previous data folder ${previous} rather than creating one at ${destination}. Launch the app once, then run this again.`,
+  };
 }
 
 function expandHome(file) {
@@ -501,7 +606,7 @@ chmod 0600 /etc/mission-control-agent.env
 
 cat >/etc/systemd/system/mission-control-agent.service <<'MC_AGENT_SERVICE'
 [Unit]
-Description=Mission Control Agent
+Description=Chaos Wrangler Agent
 After=network-online.target
 Wants=network-online.target
 
@@ -703,7 +808,7 @@ chmod 0755 /usr/local/lib/mc-idle-check.sh
 
 cat >/etc/systemd/system/mission-control-idle.service <<'MC_IDLE_SERVICE'
 [Unit]
-Description=Mission Control idle auto-stop check
+Description=Chaos Wrangler idle auto-stop check
 
 [Service]
 Type=oneshot
@@ -714,7 +819,7 @@ MC_IDLE_SERVICE
 
 cat >/etc/systemd/system/mission-control-idle.timer <<'MC_IDLE_TIMER'
 [Unit]
-Description=Run the Mission Control idle auto-stop check every minute
+Description=Run the Chaos Wrangler idle auto-stop check every minute
 
 [Timer]
 OnBootSec=2min
@@ -783,7 +888,7 @@ MC_TLS_PROXY
 
 cat >/etc/systemd/system/mission-control-tls.service <<'MC_TLS_SERVICE'
 [Unit]
-Description=Mission Control TLS sidecar
+Description=Chaos Wrangler TLS sidecar
 After=network-online.target mission-control-agent.service
 Wants=network-online.target
 
@@ -1005,13 +1110,13 @@ function electronBetterSqliteNativeBinding() {
   );
   if (fs.existsSync(binding)) return binding;
   throw new CliError(
-    "Electron better-sqlite3 native binding is missing. Restart Mission Control after running pnpm native:electron.",
+    "Electron better-sqlite3 native binding is missing. Restart Chaos Wrangler after running pnpm native:electron.",
   );
 }
 
-function openMissionControlDb(userDataDir = resolveUserDataDir()) {
+function openMissionControlDb(userDataDir = standaloneUserDataDir()) {
   fs.mkdirSync(userDataDir, { recursive: true });
-  const dbPath = path.join(userDataDir, "missioncontrol.db");
+  const dbPath = path.join(userDataDir, USER_DATA_DB_FILENAME);
   const nativeBinding = electronBetterSqliteNativeBinding();
   const db = nativeBinding ? new Database(dbPath, { nativeBinding }) : new Database(dbPath);
   ensureRemoteVmSchema(db);
@@ -1173,7 +1278,7 @@ function ensureAwsSecurityGroup(opts, accessCidr, agentPort = AGENT_PORT) {
         "--group-name",
         DEFAULT_AWS_SECURITY_GROUP,
         "--description",
-        "Mission Control remote VM agent access",
+        "Chaos Wrangler remote VM agent access",
         "--vpc-id",
         vpcId,
       ]);
@@ -1181,9 +1286,9 @@ function ensureAwsSecurityGroup(opts, accessCidr, agentPort = AGENT_PORT) {
     }
   }
 
-  authorizeAwsIngress(opts, securityGroupId, agentPort, accessCidr, "Mission Control agent access");
+  authorizeAwsIngress(opts, securityGroupId, agentPort, accessCidr, "Chaos Wrangler agent access");
   if (opts.keyName) {
-    authorizeAwsIngress(opts, securityGroupId, 22, accessCidr, "Mission Control optional SSH access");
+    authorizeAwsIngress(opts, securityGroupId, 22, accessCidr, "Chaos Wrangler optional SSH access");
   }
 
   return { securityGroupId, managed: !opts.securityGroupId, vpcId };
@@ -1909,7 +2014,7 @@ async function destroy(id, flags) {
       );
     }
     // --keep-row terminates the instance but leaves the sandbox row for the caller
-    // to delete (so Mission Control's server-side cleanup runs project teardown).
+    // to delete (so Chaos Wrangler's server-side cleanup runs project teardown).
     if (boolFlag(flags, "keep-row")) {
       console.log(`[remote-vm] instance terminated; sandbox row ${id} left for caller to remove`);
     } else {
@@ -1925,7 +2030,7 @@ async function destroy(id, flags) {
 }
 
 function printHelp() {
-  console.log(`Mission Control remote VM CLI
+  console.log(`Chaos Wrangler remote VM CLI
 
 Usage:
   pnpm remote-vm deploy aws --name <name> --region <region> [--size t3.medium]

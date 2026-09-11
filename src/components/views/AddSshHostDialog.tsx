@@ -18,7 +18,7 @@ import {
 
 // Adding a host is picking a name out of the user's own SSH config. There is
 // nothing else to ask: no address, no secret, no certificate. Whatever the
-// machine is missing, Mission Control installs.
+// machine is missing, Chaos Wrangler installs.
 
 const sectionLabelStyle = {
   fontFamily: "var(--mono)",
@@ -112,7 +112,7 @@ function PlanSummary({ state }: { state: SshHostRowState }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingTop: 4 }}>
       {state.summary.length ? (
         <>
-          <span style={sectionLabelStyle}>Mission Control will install</span>
+          <span style={sectionLabelStyle}>Chaos Wrangler will install</span>
           <ul style={{ margin: 0, paddingLeft: 18, ...dimText }}>
             {state.summary.map((line) => (
               <li key={line}>{line}</li>
@@ -120,7 +120,7 @@ function PlanSummary({ state }: { state: SshHostRowState }) {
           </ul>
         </>
       ) : (
-        <span style={dimText}>This host already has everything Mission Control needs.</span>
+        <span style={dimText}>This host already has everything Chaos Wrangler needs.</span>
       )}
       {existing.length > 0 && (
         <span style={{ ...dimText, color: "var(--text-faint)" }}>
@@ -273,7 +273,7 @@ export function AddSshHostDialog({
         ) : (
           <>
         <p style={{ margin: 0, ...dimText }}>
-          These are the hosts in your SSH config. Mission Control connects the way you already do —
+          These are the hosts in your SSH config. Chaos Wrangler connects the way you already do —
           your keys, your <code style={{ fontFamily: "var(--mono)" }}>known_hosts</code>, your
           settings — and installs whatever the machine is missing.
         </p>

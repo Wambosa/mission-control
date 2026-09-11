@@ -3,7 +3,7 @@ import * as net from "node:net";
 import { normalizeRemoteAgentUrl } from "../src/shared/sandbox";
 import { sshBinary } from "./ssh-binary";
 
-// The SSH hop. Mission Control shells out to the user's own `ssh` so their
+// The SSH hop. Chaos Wrangler shells out to the user's own `ssh` so their
 // config, agent, and known_hosts apply exactly as they do in a terminal — the
 // whole point of defining hosts in the SSH config. The tunnel forwards a
 // loopback port on this machine to the runtime's loopback port on the host, so
@@ -115,7 +115,7 @@ function firstMeaningfulLine(stderr: string): string {
 
 /**
  * Turn an `ssh` exit into something the user can act on. Host-key trouble is
- * called out as SSH's refusal, not Mission Control's, and never comes with an
+ * called out as SSH's refusal, not Chaos Wrangler's, and never comes with an
  * offer to bypass it.
  */
 /**
@@ -141,7 +141,7 @@ export function classifySshFailure(stderr: string, exitCode: number | null): Ssh
   ) {
     return {
       kind: "host-key",
-      message: `SSH refused this host: ${detail || "host key verification failed"}. Resolve it with ssh yourself — Mission Control will not accept a host key on your behalf.`,
+      message: `SSH refused this host: ${detail || "host key verification failed"}. Resolve it with ssh yourself — Chaos Wrangler will not accept a host key on your behalf.`,
     };
   }
   if (
@@ -156,7 +156,7 @@ export function classifySshFailure(stderr: string, exitCode: number | null): Ssh
     if (offersInteractiveAuth(stderr)) {
       return {
         kind: "auth",
-        message: `This host asked for a password, and Mission Control connects without prompting: ${detail || "permission denied"}. Set up key authentication for it (ssh-copy-id), or point your SSH config at a key it accepts.`,
+        message: `This host asked for a password, and Chaos Wrangler connects without prompting: ${detail || "permission denied"}. Set up key authentication for it (ssh-copy-id), or point your SSH config at a key it accepts.`,
       };
     }
     return {

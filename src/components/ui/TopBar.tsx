@@ -58,8 +58,8 @@ export function TopBar({
         <button
           type="button"
           onClick={onHome}
-          aria-label="Mission Control home"
-          title="Mission Control — home"
+          aria-label="Chaos Wrangler home"
+          title="Chaos Wrangler — home"
           className="mc-topbar-home"
           style={{
             display: "inline-flex",
@@ -78,7 +78,7 @@ export function TopBar({
         >
           <img
             src="/images/robot.png"
-            alt="Mission Control"
+            alt="Chaos Wrangler"
             width={22}
             height={22}
             style={{ borderRadius: 5, display: "block" }}
@@ -96,7 +96,7 @@ export function TopBar({
               gap: 6,
             }}
           >
-            <span>Mission</span>
+            <span>Chaos</span>
             <span
               aria-hidden
               style={{
@@ -107,7 +107,7 @@ export function TopBar({
                 boxShadow: "0 0 6px var(--accent)",
               }}
             />
-            <span style={{ color: "var(--accent-ink)" }}>Control</span>
+            <span style={{ color: "var(--accent-ink)" }}>Wrangler</span>
           </span>
         </button>
         {leading && (

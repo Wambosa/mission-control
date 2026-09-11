@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Re-sign a locally-built MissionControl.app so macOS Screen Recording
+// Re-sign a locally-built Chaos Wrangler.app so macOS Screen Recording
 // (and other TCC permissions) actually persist across launches.
 //
 // Why this exists:
@@ -20,10 +20,10 @@
 //   it).
 //
 // Usage:
-//   node scripts/resign-local-macos.mjs                 # /Applications/MissionControl.app
+//   node scripts/resign-local-macos.mjs                 # /Applications/Chaos Wrangler.app
 //   node scripts/resign-local-macos.mjs /path/to/App    # a specific bundle
 //
-// After running: fully quit MissionControl (Cmd+Q, not just close the window),
+// After running: fully quit Chaos Wrangler (Cmd+Q, not just close the window),
 // relaunch, trigger a capture, and grant Screen Recording once.
 
 import { execFileSync } from "node:child_process";
@@ -32,8 +32,8 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const APP_ID = "labs.agentsystem.missioncontrol";
-const appPath = path.resolve(process.argv[2] ?? "/Applications/MissionControl.app");
+const APP_ID = "com.shondiaz.chaoswrangler";
+const appPath = path.resolve(process.argv[2] ?? "/Applications/Chaos Wrangler.app");
 const entitlements = path.join(repoRoot, "build", "entitlements.mac.plist");
 
 if (process.platform !== "darwin") {
@@ -74,6 +74,6 @@ console.log("\nResetting stale Screen Recording grant...");
 run("tccutil", ["reset", "ScreenCapture", APP_ID]);
 
 console.log(
-  "\nDone. Now fully quit MissionControl (Cmd+Q), relaunch, trigger a capture,\n" +
+  "\nDone. Now fully quit Chaos Wrangler (Cmd+Q), relaunch, trigger a capture,\n" +
     "and grant Screen Recording once — it will persist until the next rebuild.\n",
 );

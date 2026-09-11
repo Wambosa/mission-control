@@ -132,7 +132,7 @@ describe("attachTerminalKeyHandler clipboard handling", () => {
     const { term, electron, handler } = createHarness();
     electron.clipboard.readText.mockResolvedValueOnce("");
     electron.terminalImages.saveClipboard.mockResolvedValueOnce({
-      path: "/tmp/Mission Control/screenshot.png",
+      path: "/tmp/Chaos Wrangler/screenshot.png",
     });
     const event = keyEvent({ ctrlKey: true, code: "KeyV", key: "v" });
 
@@ -140,7 +140,7 @@ describe("attachTerminalKeyHandler clipboard handling", () => {
     await flushPromises();
 
     expect(electron.terminalImages.saveClipboard).toHaveBeenCalledOnce();
-    expect(term.paste).toHaveBeenCalledWith('"/tmp/Mission Control/screenshot.png" ');
+    expect(term.paste).toHaveBeenCalledWith('"/tmp/Chaos Wrangler/screenshot.png" ');
   });
 });
 

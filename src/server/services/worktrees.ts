@@ -499,7 +499,7 @@ export async function deleteWorktree(input: {
       "push",
       "-u",
       "-m",
-      `Mission Control backup before deleting worktree ${row.name}`,
+      `Chaos Wrangler backup before deleting worktree ${row.name}`,
     ]);
   } else if (isDirty && !input.force) {
     throw new WorktreeDirtyError(info);

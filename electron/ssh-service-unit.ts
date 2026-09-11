@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
+  PREVIOUS_SSH_SERVICE_LABEL,
+  PREVIOUS_SSH_SERVICE_UNIT_NAME,
   SSH_SERVICE_LABEL,
   SSH_SERVICE_UNIT_NAME,
   sshServiceDefinition,
@@ -36,7 +38,7 @@ export type SshServiceInstallResult =
 const LINGER_MARKER = "mc:linger=";
 
 /**
- * The bearer secret for one host's runtime. Mission Control generates it and
+ * The bearer secret for one host's runtime. Chaos Wrangler generates it and
  * keeps it — R5's promise is that the user never pastes an API key, not that
  * there isn't one.
  */
@@ -122,12 +124,24 @@ function readLingering(
 export function sshServiceStopScript(
   target: Pick<SshServiceDescription, "platform" | "homeDir">,
 ): string {
-  return target.platform === "darwin"
-    ? // `bootout` stops the agent and unloads it; `bootstrap` on next connect
-      // brings it back. Nothing is deleted either way.
-      `launchctl bootout gui/$(id -u)/${SSH_SERVICE_LABEL} >/dev/null 2>&1 || true\n`
-    : `systemctl --user stop ${SSH_SERVICE_UNIT_NAME} >/dev/null 2>&1 || true\n`;
+  // Both identifiers, because this also runs against hosts the previous
+  // release registered. Stopping only the current label leaves a legacy host's
+  // runtime up, which makes the idle window and teardown-on-disconnect
+  // silently ineffective on exactly the hosts that predate the rename.
+  //
+  // `bootout` stops the agent and unloads it; `bootstrap` on the next connect
+  // brings it back. Nothing is deleted either way.
+  const steps =
+    target.platform === "darwin"
+      ? [SSH_SERVICE_LABEL, PREVIOUS_SSH_SERVICE_LABEL].map(
+          (label) => `launchctl bootout gui/$(id -u)/${label} >/dev/null 2>&1 || true`,
+        )
+      : [SSH_SERVICE_UNIT_NAME, PREVIOUS_SSH_SERVICE_UNIT_NAME].map(
+          (unit) => `systemctl --user stop ${unit} >/dev/null 2>&1 || true`,
+        );
+  return `${steps.join("\n")}\n`;
 }
+
 
 /** Ask a host to stop its runtime. Best effort: an unreachable host is stopped. */
 export async function stopSshService(
@@ -175,7 +189,7 @@ export async function startSshService(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const result = await exec(sshShellArgs(alias), sshServiceStartScript(target));
   if (result.code !== 0) {
-    return { ok: false, error: sshStepFailure("Starting the Mission Control runtime", result) };
+    return { ok: false, error: sshStepFailure("Starting the Chaos Wrangler runtime", result) };
   }
   return { ok: true };
 }
@@ -193,7 +207,7 @@ export async function installSshService(
   const definition = sshServiceDefinition(description);
   const result = await exec(sshShellArgs(alias), sshServiceInstallScript(description));
   if (result.code !== 0) {
-    return { ok: false, error: sshStepFailure("Registering the Mission Control service", result) };
+    return { ok: false, error: sshStepFailure("Registering the Chaos Wrangler service", result) };
   }
   return {
     ok: true,

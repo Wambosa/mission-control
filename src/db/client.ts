@@ -1,14 +1,17 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import * as path from "node:path";
-import * as fs from "node:fs";
-import * as os from "node:os";
 import * as schema from "./schema";
 import { resolveElectronBetterSqlite3NativeBinding } from "./better-sqlite3-native-binding";
 import { migrateMultiSandbox } from "./migrate-multi-sandbox";
 import { logServerEvent } from "~/server/log-event";
 import { DEFAULT_BRANCH, DEFAULT_TASK_STATUS } from "~/shared/domain";
 import { LOCAL_SCOPE_ID } from "~/shared/sandbox";
+import {
+  ensureUserDataDir,
+  resolveUserDataDir,
+  restrictDbFilePermissions,
+  userDataDbPath,
+} from "~/shared/user-data-paths";
 
 const migrationFiles = import.meta.glob("./migrations/*.sql", {
   eager: true,
@@ -19,40 +22,18 @@ const migrationFiles = import.meta.glob("./migrations/*.sql", {
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 let _sqlite: Database.Database | null = null;
 
-export function resolveUserDataDir(): string {
-  if (process.env.MC_USER_DATA_DIR) return process.env.MC_USER_DATA_DIR;
-  const platform = process.platform;
-  const home = os.homedir();
-  if (platform === "darwin") return path.join(home, "Library/Application Support/MissionControl");
-  if (platform === "win32") return path.join(home, "AppData/Roaming/MissionControl");
-  return path.join(home, ".config/MissionControl");
-}
-
-export function resolveSkillsDir(): string {
-  return path.join(resolveUserDataDir(), "skills");
-}
-
-// missioncontrol.db holds the API bearer token and every sandbox pairing token
-// in cleartext. Created with default perms it is world-readable (~0644), so any
-// other local user / backup / sync process can lift those secrets straight off
-// disk. Tighten the directory to owner-only and the DB (plus its WAL/SHM
-// sidecars) to 0600. Best-effort: on filesystems/platforms without POSIX modes
-// (e.g. Windows) chmod is a harmless no-op.
-export function restrictDbFilePermissions(dbPath: string): void {
-  for (const p of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
-    try {
-      if (fs.existsSync(p)) fs.chmodSync(p, 0o600);
-    } catch {
-      /* best effort */
-    }
-  }
-}
+// The user-data directory, its database filename and the permission repair all
+// live in ~/shared/user-data-paths. Re-exported here because this module is the
+// import site the server layer already reaches for.
+export {
+  resolveUserDataDir,
+  resolveSkillsDir,
+  restrictDbFilePermissions,
+} from "~/shared/user-data-paths";
 
 export function getDb() {
   if (_db) return _db;
-  const dir = resolveUserDataDir();
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const dbPath = path.join(dir, "missioncontrol.db");
+  const dbPath = userDataDbPath(ensureUserDataDir(resolveUserDataDir()));
   _sqlite = new Database(dbPath, {
     nativeBinding: resolveElectronBetterSqlite3NativeBinding(),
   });

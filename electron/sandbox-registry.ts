@@ -486,7 +486,7 @@ export class SandboxInstance {
   }
 
   /**
-   * Detach (app quit). Deliberately not a teardown: quitting Mission Control
+   * Detach (app quit). Deliberately not a teardown: quitting Chaos Wrangler
    * is what R14 promises sessions survive, and the runtime's own idle stop
    * handles a host nobody comes back to.
    */

@@ -1,6 +1,8 @@
 import * as path from "node:path";
 import type { TaskAgent } from "../src/shared/domain";
 import { nodeScaffoldingFs, type ScaffoldingFs } from "../src/shared/scaffolding-fs";
+import { PRODUCT_DISPLAY_NAME } from "../src/shared/user-data-paths";
+import { PREVIOUS_PRODUCT_DISPLAY_NAME } from "../src/shared/user-data-migration";
 
 
 // Per-harness skill folder segments (mirrors DIAGRAM_SKILL_INSTALL_TARGETS).
@@ -95,14 +97,29 @@ export async function ensureRecallSkillForAgent(
   }
 }
 
-// A copy is only "ours" when its SKILL.md self-identifies as Mission Control's
-// Recall skill — every bundled version has carried both phrases. The installer
-// above never overwrites an existing SKILL.md, so a user-authored skill that
-// happens to live at the same path must survive removal.
+/**
+ * Is this SKILL.md one the app installed?
+ *
+ * The installer never overwrites an existing SKILL.md, so a user-authored
+ * skill living at the same path has to survive removal — which is why this
+ * asks the question at all rather than deleting the directory outright.
+ *
+ * Newly installed copies carry an explicit marker, which is the durable answer:
+ * a predicate that matches the product's name in prose stops recognizing its
+ * own files the moment that name changes. Copies written before the marker
+ * existed are still recognized by prose, and **both** names are accepted —
+ * dropping the previous one would orphan every skill file the previous build
+ * installed, leaving a second copy beside it in the user's repository.
+ */
+export const RECALL_SKILL_MARKER = "<!-- mc:recall-skill (managed) -->";
+
 async function isManagedRecallSkill(skillFile: string, fs: ScaffoldingFs): Promise<boolean> {
   try {
     const content = await fs.readFile(skillFile);
-    return content.includes("Mission Control") && content.includes("Recall");
+    if (content.includes(RECALL_SKILL_MARKER)) return true;
+    const namesTheApp =
+      content.includes(PRODUCT_DISPLAY_NAME) || content.includes(PREVIOUS_PRODUCT_DISPLAY_NAME);
+    return namesTheApp && content.includes("Recall");
   } catch {
     return false;
   }

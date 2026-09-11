@@ -2,16 +2,16 @@ import { AGENT_CLI_CONFIG } from "~/shared/agent-cli-config";
 import type { SshProbeOutcome, SshProvisionPlan } from "~/shared/ssh-provision";
 
 // The decisions behind the add-host dialog, kept out of the component so they
-// can be tested without a browser. What a probe means, what Mission Control
+// can be tested without a browser. What a probe means, what Chaos Wrangler
 // would install, and whether a host is ready to be worked on.
 
 /** Where one host in the list currently stands. */
 export type SshHostRowState =
   | { kind: "unprobed" }
   | { kind: "probing" }
-  /** SSH said no. Mission Control reports it and offers nothing to bypass it. */
+  /** SSH said no. Chaos Wrangler reports it and offers nothing to bypass it. */
   | { kind: "refused"; message: string }
-  /** Reached, but not a host Mission Control can provision. */
+  /** Reached, but not a host Chaos Wrangler can provision. */
   | { kind: "unsupported"; message: string }
   | { kind: "ready"; plan: SshProvisionPlan; summary: string[] }
   | { kind: "provisioning"; step: string; index: number; total: number }
@@ -21,7 +21,7 @@ export type SshHostRowState =
   | { kind: "failed"; message: string };
 
 /**
- * What Mission Control would install, in the user's words. An empty list means
+ * What Chaos Wrangler would install, in the user's words. An empty list means
  * the host already has everything, which is worth saying rather than showing
  * an empty space.
  */
@@ -36,7 +36,7 @@ export function describeProvisionPlan(plan: SshProvisionPlan): string[] {
       );
     } else if (step.kind === "agent") {
       lines.push(
-        step.reason === "outdated" ? "Update the Mission Control agent" : "Install the Mission Control agent",
+        step.reason === "outdated" ? "Update the Chaos Wrangler agent" : "Install the Chaos Wrangler agent",
       );
     } else {
       lines.push(`Install ${AGENT_CLI_CONFIG[step.agent].label}`);
@@ -112,7 +112,7 @@ export type SshProvisionSummaryInput = {
  * What a finished provision leaves the user needing to know. A toast is the
  * wrong home for any of it: these fire as the dialog closes, and the one thing
  * worth reading — a harness that did not install, a runtime that was adopted
- * from another Mission Control — scrolls away before it can be read.
+ * from another Chaos Wrangler — scrolls away before it can be read.
  *
  * An empty list means nothing needs saying, and the dialog can just close.
  */
@@ -123,9 +123,9 @@ export function provisionNotes(result: SshProvisionSummaryInput): SshProvisionNo
   if (result.adopted) {
     notes.push({
       tone: "info",
-      title: "This host was already running Mission Control",
+      title: "This host was already running Chaos Wrangler",
       detail:
-        "Its existing runtime was connected to rather than replaced, so another Mission Control using it keeps working. Removing the host here will leave that runtime running.",
+        "Its existing runtime was connected to rather than replaced, so another Chaos Wrangler using it keeps working. Removing the host here will leave that runtime running.",
     });
   }
 
@@ -146,15 +146,15 @@ export function provisionNotes(result: SshProvisionSummaryInput): SshProvisionNo
       tone: "warn",
       title: `${result.alias} could not enable lingering`,
       detail:
-        "Sessions survive Mission Control quitting, but the runtime stops when you log out of that host.",
+        "Sessions survive Chaos Wrangler quitting, but the runtime stops when you log out of that host.",
     });
   }
 
   if (result.claimWarning) {
     notes.push({
       tone: "warn",
-      title: `${result.alias} did not record this Mission Control`,
-      detail: `${result.claimWarning} The host works, but removing it here may take the runtime away from another Mission Control using it.`,
+      title: `${result.alias} did not record this Chaos Wrangler`,
+      detail: `${result.claimWarning} The host works, but removing it here may take the runtime away from another Chaos Wrangler using it.`,
     });
   }
 

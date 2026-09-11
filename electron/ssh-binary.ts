@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-// Which `ssh` Mission Control runs.
+// Which `ssh` Chaos Wrangler runs.
 //
 // Spawning bare "ssh" hands the decision to PATH order, and on Windows that is
 // not the same ssh the user's other tools run. A machine with Git for Windows

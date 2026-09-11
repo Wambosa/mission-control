@@ -14,7 +14,7 @@ function writeStaleBrief(cwd: string): string {
   const file = path.join(cwd, "CLAUDE.local.md");
   fs.writeFileSync(
     file,
-    "user notes\n\n<!-- mc:recall:start (managed by Mission Control — do not edit inside these markers) -->\nstale brief from a previous session\n<!-- mc:recall:end -->\n",
+    "user notes\n\n<!-- mc:recall:start (managed by Chaos Wrangler — do not edit inside these markers) -->\nstale brief from a previous session\n<!-- mc:recall:end -->\n",
     "utf8",
   );
   return file;

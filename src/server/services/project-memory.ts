@@ -497,7 +497,7 @@ function renderArchitectureSection(projectId: string): string | null {
   if (!summary.godNodes.length) return null;
 
   const lines: string[] = [
-    "# Architecture at a glance (Mission Control code graph)",
+    "# Architecture at a glance (Chaos Wrangler code graph)",
     "",
     `Indexed ${status.fileCount.toLocaleString()} files, ${status.nodeCount.toLocaleString()} symbols, ${status.edgeCount.toLocaleString()} relationships. The most-connected modules — where core logic tends to live:`,
     "",
@@ -559,9 +559,9 @@ export function assembleSessionBrief(
   const lines: string[] = [];
   if (archSection) lines.push(archSection, "");
   lines.push(
-    "# Project memory (Mission Control Recall)",
+    "# Project memory (Chaos Wrangler Recall)",
     "",
-    "Curated facts about this project, maintained by Mission Control so you don't have to rediscover it. Treat these as starting context and verify against the current code before relying on them.",
+    "Curated facts about this project, maintained by Chaos Wrangler so you don't have to rediscover it. Treat these as starting context and verify against the current code before relying on them.",
   );
   for (const type of MEMORY_TYPES) {
     const group = selected.filter((m) => m.type === type);

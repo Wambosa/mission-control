@@ -289,7 +289,7 @@ describe("project-memory service", () => {
       createMemory({ projectId: project.id, type: "stack", title: "Electron + SQLite" });
       createMemory({ projectId: project.id, type: "known-issue", title: "warm pool timing" });
       const { markdown, memoryIds } = assembleSessionBrief(project.id, "local");
-      expect(markdown).toContain("# Project memory (Mission Control Recall)");
+      expect(markdown).toContain("# Project memory (Chaos Wrangler Recall)");
       expect(markdown).toContain("## Overview");
       expect(markdown).toContain("## Tech stack");
       expect(markdown).toContain("Electron + SQLite");

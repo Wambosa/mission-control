@@ -80,6 +80,7 @@ import {
 } from "../src/shared/project-image-limits";
 import { shortId } from "../src/shared/short-id";
 import { errMsg } from "../src/shared/err-msg";
+import { configureUserDataDir, migrationNotice } from "./user-data-dir";
 import { configureProjectRootsDb, disposeProjectRootsDb, loadProjectRoots } from "./project-roots";
 import { resolveSafeOpenPath } from "./open-path-policy";
 import { buildLocalMissionControlApiUrl } from "./pty-hook-env";
@@ -100,33 +101,27 @@ import {
   productionRuntimePortStart,
 } from "./runtime-port";
 
-const APP_NAME = "MissionControl";
+// The one line this ordering allows. Everything it does — the previous-instance
+// guard, the migration, setting the app name and the platform path — lives in
+// ./user-data-dir, and it must stay *above* log.initialize() and above the
+// first app.getPath call: resolving a platform path both caches a stale value
+// and creates the directory it resolved, which is the bug the comment inside
+// that module documents at length. It is also the only point in startup where
+// no database connection is open yet.
+const userDataSetup = configureUserDataDir({ app });
+const missionControlUserDataDir = userDataSetup.directory;
 
-function defaultUserDataDir(): string {
-  const home = os.homedir();
-  if (process.platform === "darwin") {
-    return path.join(home, "Library/Application Support", APP_NAME);
+if (userDataSetup.refused) {
+  // Pre-ready, so this is stderr plus the pre-ready dialog — which is
+  // invisible on Linux, hence the stderr line carrying the same text.
+  console.error(`[main] ${userDataSetup.report.refusal}`);
+  try {
+    dialog.showErrorBox("Cannot start", userDataSetup.report.refusal ?? "");
+  } catch {
+    /* no display available */
   }
-  if (process.platform === "win32") {
-    return path.join(home, "AppData/Roaming", APP_NAME);
-  }
-  return path.join(home, ".config", APP_NAME);
+  app.exit(1);
 }
-
-function configureUserDataDir(): string {
-  // Keep Electron-side IPC stores aligned with src/db/client.ts. In dev the
-  // generated dist-electron/package.json only declares CommonJS, so Electron's
-  // package-name-derived default can become "Electron" or "mission-control",
-  // splitting API tokens and project roots across separate SQLite files.
-  const dir = (process.env.MC_USER_DATA_DIR || defaultUserDataDir()).trim();
-  fs.mkdirSync(dir, { recursive: true });
-  app.setName(APP_NAME);
-  app.setPath("userData", dir);
-  process.env.MC_USER_DATA_DIR = dir;
-  return dir;
-}
-
-const missionControlUserDataDir = configureUserDataDir();
 
 // Kill Chromium's own two-finger/Magic Mouse swipe-to-go-back. The macOS
 // `AppleEnableSwipeNavigateWithScrolls` default (set per-window in createWindow)
@@ -203,6 +198,21 @@ log.info("app.launch", {
   arch: process.arch,
   packaged: app.isPackaged,
   electron: process.versions.electron,
+});
+
+// The migration ran before the logger existed — by necessity, since resolving
+// a platform path would have cached a stale directory. So its outcome is
+// emitted here instead, as the second line of the run.
+const migrationOutcomeNotice = migrationNotice(userDataSetup.report);
+log[migrationOutcomeNotice.level](migrationOutcomeNotice.event, {
+  event: migrationOutcomeNotice.event,
+  outcome: userDataSetup.report.outcome,
+  directory: userDataSetup.report.directory,
+  previousDir: userDataSetup.report.previousDir,
+  destinationDir: userDataSetup.report.destinationDir,
+  skipped: userDataSetup.report.skipped,
+  divergence: userDataSetup.report.divergence,
+  detail: userDataSetup.report.detail,
 });
 
 // Renderer console → log file. The renderer had no file transport at all, so a
@@ -376,7 +386,7 @@ body{display:flex;align-items:center;justify-content:center;padding:32px;box-siz
 .w{max-width:520px;}
 h1{font-size:15px;font-weight:600;margin:0 0 12px;color:${heading};text-align:center;}
 pre{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.5;color:${codeFg};background:${codeBg};border-radius:8px;padding:12px;margin:0;}
-</style></head><body><div class="w"><h1>Mission Control failed to start</h1><pre>${htmlEscape(message)}</pre></div></body></html>`;
+</style></head><body><div class="w"><h1>Chaos Wrangler failed to start</h1><pre>${htmlEscape(message)}</pre></div></body></html>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
@@ -766,7 +776,7 @@ function startRemoteVmDeployJob(input: RemoteVmDeployInput): RemoteVmDeployJob {
   let args: string[];
   try {
     if (!script) {
-      throw new Error("Remote VM deploy script is missing from this Mission Control build.");
+      throw new Error("Remote VM deploy script is missing from this Chaos Wrangler build.");
     }
     args = buildRemoteVmDeployArgs(job.input);
     log.info("sandbox.agent-creds.deploy", {
@@ -891,7 +901,7 @@ function destroyRemoteVm(
   if (!script) {
     return Promise.resolve({
       ok: false,
-      error: "Remote VM script is missing from this Mission Control build.",
+      error: "Remote VM script is missing from this Chaos Wrangler build.",
     });
   }
   const args = [script, "destroy", id, "--yes"];
@@ -935,7 +945,7 @@ function runRemoteVmLifecycle(
   if (!script) {
     return Promise.resolve({
       ok: false,
-      error: "Remote VM script is missing from this Mission Control build.",
+      error: "Remote VM script is missing from this Chaos Wrangler build.",
     });
   }
   const args = [script, command, id];
@@ -973,7 +983,7 @@ function runRemoteVmReconcile(sandboxId: string): Promise<RemoteVmReconcileResul
   if (!script) {
     return Promise.resolve({
       ok: false,
-      error: "Remote VM script is missing from this Mission Control build.",
+      error: "Remote VM script is missing from this Chaos Wrangler build.",
     });
   }
   return new Promise((resolve) => {
@@ -1138,7 +1148,7 @@ async function startProductionServer(): Promise<string> {
     });
     if (!serverBooted) {
       rejectEarlyExit?.(
-        new Error(`Mission Control server exited with code ${code} before it finished starting.`),
+        new Error(`Chaos Wrangler server exited with code ${code} before it finished starting.`),
       );
       return;
     }
@@ -1594,7 +1604,7 @@ const SCREENSHOT_PREVIEW_WIDTH_PX = 320;
 
 /**
  * Native macOS region capture via `screencapture -i`. The OS draws the crosshair
- * and selection rectangle above every window, so the Mission Control window
+ * and selection rectangle above every window, so the Chaos Wrangler window
  * stays put and visible throughout — the user selects any region on screen,
  * including over the app. Cancelling (Esc) writes no file.
  */
@@ -2410,6 +2420,20 @@ app.on("before-quit", (event) => {
 });
 
 app.whenReady().then(() => {
+  // The migration's own report, once. R25 wants this seen and not only logged:
+  // a successful migration leaves a second live copy of the bearer token and
+  // every pairing token on disk, and a retained credential store the user has
+  // not been told about is not a rollback.
+  if (migrationOutcomeNotice.message) {
+    const level = migrationOutcomeNotice.level;
+    void dialog.showMessageBox({
+      type: level === "error" ? "error" : level === "warn" ? "warning" : "info",
+      title: "Data folder",
+      message: migrationOutcomeNotice.message,
+      buttons: ["OK"],
+      noLink: true,
+    });
+  }
   // pty:spawn validates `cwd` against this DB before letting any binary run,
   // so it must be configured before any window can issue an IPC call.
   configureProjectRootsDb(missionControlUserDataDir);

@@ -10,7 +10,7 @@ Solo developers and small teams running multiple AI coding agents (Claude Code, 
 
 ## Product Purpose
 
-Mission Control is an Electron desktop control surface for agentic coding work. It shows at a glance which projects/sessions need attention and lets the user pop into a project to drive its agents — a grid of live terminal sessions instead of a cluttered sidebar. Success = the tool disappears into the task; status is legible at a glance; nothing steals attention from the terminals.
+Chaos Wrangler is an Electron desktop control surface for agentic coding work. It shows at a glance which projects/sessions need attention and lets the user pop into a project to drive its agents — a grid of live terminal sessions instead of a cluttered sidebar. Success = the tool disappears into the task; status is legible at a glance; nothing steals attention from the terminals.
 
 ## Brand Personality
 

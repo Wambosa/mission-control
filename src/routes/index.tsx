@@ -363,7 +363,7 @@ function MissionControlPage() {
           {(projectsQuery.isError || groupsQuery.isError) && (
             <EmptyState
               title="Could not load projects"
-              subtitle="Mission Control could not load your local workspace. Restart Mission Control, then retry."
+              subtitle="Chaos Wrangler could not load your local workspace. Restart Chaos Wrangler, then retry."
               icon="shield"
               action={
                 <Btn

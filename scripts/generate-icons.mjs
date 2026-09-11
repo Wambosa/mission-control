@@ -1,4 +1,4 @@
-// Regenerates the packaged app-icon assets from a single master PNG.
+// Regenerates the packaged app-icon assets from two master PNGs.
 //
 // Why this exists: electron-builder, when handed only `build/icon.png`,
 // synthesizes `icon.icns` by stuffing PNG payloads into the `icp4`/`icp5`/`icp6`
@@ -8,7 +8,13 @@
 // with Apple's own `iconutil` uses the native `ic04`/`ic05` (ARGB) small-size
 // members, which macOS decodes correctly.
 //
-// Run on macOS (needs `sips` + `iconutil`) whenever `build/icon.png` changes:
+// Two masters, not one: below 64 pixels the network glyph resolves as a yellow
+// smear and crowds the creature, so those members come from a second master
+// that omits the glyph and scales the creature up into the freed space. The
+// pipeline resizes without simplifying, and the sizes that need simplifying are
+// exactly the ones this script exists to get right.
+//
+// Run on macOS (needs `sips` + `iconutil`) whenever either master changes:
 //   pnpm gen:icons
 // The generated `build/icon.icns` and `build/icon.ico` are committed so that
 // cross-platform builds (incl. CI on non-macOS) consume the known-good files
@@ -22,8 +28,20 @@ import process from "node:process";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const SRC = path.join(ROOT, "build", "icon.png");
+const SRC_SMALL = path.join(ROOT, "build", "icon-small.png");
 const OUT_ICNS = path.join(ROOT, "build", "icon.icns");
 const OUT_ICO = path.join(ROOT, "build", "icon.ico");
+
+/** Below this, the full artwork stops reading and the simplified master takes over. */
+const SIMPLIFIED_BELOW_PX = 64;
+
+/**
+ * The master a given member is cut from.
+ *
+ * Both the icns member loop and the ico size loop go through this, so the two
+ * platforms cannot drift on where the threshold sits.
+ */
+const masterFor = (size) => (size < SIMPLIFIED_BELOW_PX ? SRC_SMALL : SRC);
 
 if (process.platform !== "darwin") {
   console.error(
@@ -33,9 +51,11 @@ if (process.platform !== "darwin") {
   process.exit(0);
 }
 
-if (!existsSync(SRC)) {
-  console.error(`[gen:icons] Missing master icon: ${SRC}`);
-  process.exit(1);
+for (const master of [SRC, SRC_SMALL]) {
+  if (!existsSync(master)) {
+    console.error(`[gen:icons] Missing master icon: ${master}`);
+    process.exit(1);
+  }
 }
 
 const sips = (args) => execFileSync("sips", args, { stdio: ["ignore", "ignore", "inherit"] });
@@ -58,7 +78,17 @@ try {
     [1024, "icon_512x512@2x.png"],
   ];
   for (const [size, name] of icnsMembers) {
-    sips(["-s", "format", "png", "-z", String(size), String(size), SRC, "--out", path.join(iconset, name)]);
+    sips([
+      "-s",
+      "format",
+      "png",
+      "-z",
+      String(size),
+      String(size),
+      masterFor(size),
+      "--out",
+      path.join(iconset, name),
+    ]);
   }
   execFileSync("iconutil", ["-c", "icns", iconset, "-o", OUT_ICNS]);
   console.error(`[gen:icons] Wrote ${path.relative(ROOT, OUT_ICNS)}`);
@@ -67,7 +97,7 @@ try {
   const icoSizes = [16, 24, 32, 48, 64, 128, 256];
   const pngs = icoSizes.map((size) => {
     const p = path.join(work, `ico_${size}.png`);
-    sips(["-s", "format", "png", "-z", String(size), String(size), SRC, "--out", p]);
+    sips(["-s", "format", "png", "-z", String(size), String(size), masterFor(size), "--out", p]);
     return { size, data: readFileSync(p) };
   });
   writeFileSync(OUT_ICO, buildIco(pngs));

@@ -7,6 +7,7 @@ import { Btn } from "~/components/ui/Btn";
 import { ShimmerBar } from "~/components/ui/ShimmerBar";
 import { StatusDot, StatusPill } from "~/components/ui/StatusDot";
 import { ProjectStatusBadge } from "~/components/ui/ProjectStatusBadge";
+import { isOptimisticGroupId } from "~/lib/optimistic-group-id";
 import { TASK_STATUSES } from "~/shared/domain";
 import { getProjectActivity, isProjectActive, type ProjectWithCounts } from "~/shared/projects";
 import type { Group } from "~/db/schema";
@@ -277,7 +278,9 @@ export function ProjectCard({
                 </span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              {groups.map((group) => {
+              {/* A group whose create is still in flight has an id the server
+                  cannot resolve, so it is not an assignment target yet. */}
+              {groups.filter((g) => !isOptimisticGroupId(g.id)).map((group) => {
                 const selected = project.groupId === group.id;
                 return (
                   <DropdownMenuItem

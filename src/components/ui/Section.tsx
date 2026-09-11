@@ -15,7 +15,8 @@ export function Section({
   children,
 }: {
   label: string;
-  count: number;
+  /** Omitted where a tally would say nothing — e.g. an all-scope heading. */
+  count?: number;
   icon?: IconName;
   dot?: string;
   divider?: boolean;
@@ -62,16 +63,18 @@ export function Section({
         >
           {label}
         </span>
-        <span
-          style={{
-            fontFamily: "var(--mono)",
-            fontSize: Math.max(11, labelSize - 1),
-            color: "var(--text-faint)",
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {count}
-        </span>
+        {count !== undefined && (
+          <span
+            style={{
+              fontFamily: "var(--mono)",
+              fontSize: Math.max(11, labelSize - 1),
+              color: "var(--text-faint)",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {count}
+          </span>
+        )}
         {collapsible && (
           <button
             type="button"

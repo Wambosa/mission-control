@@ -39,9 +39,13 @@ export async function update(rawId: string, request: Request): Promise<Response>
   if (!idParsed.success) return notFound();
   const parsed = await parseJsonBody(request, updateGroupBody);
   if (!parsed.ok) return parsed.response;
-  const g = updateGroup(idParsed.data, parsed.data);
-  if (!g) return notFound();
-  return json({ group: g });
+  try {
+    const g = updateGroup(idParsed.data, parsed.data);
+    if (!g) return notFound();
+    return json({ group: g });
+  } catch (e) {
+    return rethrowUnlessDomain(e);
+  }
 }
 
 export async function reorder(request: Request): Promise<Response> {

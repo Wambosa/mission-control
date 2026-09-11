@@ -60,7 +60,6 @@ export type OpenSettingsEventDetail = { panel?: string };
 export const CLOSE_SETTINGS_EVENT = "mc:close-settings";
 
 export const ICON_COLORS = ["#ff5a1f", "#8ab4ff", "#c792ea", "#ff9466", "#f472b6", "#34d399", "#fb923c"];
-export const GROUP_COLORS = ["#ff5a1f", "#8ab4ff", "#c792ea", "#ff9466", "#f472b6", "#34d399", "#fb923c"];
 
 function metaFor(agent: TaskAgent) {
   const meta = AGENT_REGISTRY[agent];

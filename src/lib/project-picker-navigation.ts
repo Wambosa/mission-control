@@ -2,7 +2,7 @@ export type ProjectPickerNavigationKey = "ArrowDown" | "ArrowUp" | "Home" | "End
 
 /**
  * Move through the project picker's single selectable sequence. The count can
- * include non-project actions such as the group-scoped "All projects" footer.
+ * include non-project actions such as the group-scoped "All groups" footer.
  */
 export function nextProjectPickerHighlight(
   current: number,

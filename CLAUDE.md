@@ -23,9 +23,11 @@ manager is pinned; `pnpm` may only be on PATH via corepack, in which case
 `corepack pnpm@11.1.2 <cmd>` works but scripts that shell out to a bare `pnpm`
 will fail — put a shim on PATH if you hit that.
 
-Two tests in `electron/__tests__/ssh-binary.test.ts` fail on macOS by design
-(they assert Windows path separators). That is the known-good baseline, not a
-regression you introduced.
+The suite is green on every platform. It did not used to be: two tests in
+`electron/__tests__/ssh-binary.test.ts` failed off Windows because the resolver
+built its Windows path with `path.join`, which is the POSIX one everywhere
+else. It uses `path.win32` now, so a red suite is a real regression — there is
+no expected-failure baseline to wave away.
 
 ## The four layers
 

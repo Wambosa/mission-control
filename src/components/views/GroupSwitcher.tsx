@@ -3,10 +3,7 @@ import { createPortal } from "react-dom";
 import { Btn } from "~/components/ui/Btn";
 import { CardFrame } from "~/components/ui/CardFrame";
 import { Icon } from "~/components/ui/Icon";
-import {
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "~/components/ui/DropdownMenuItem";
+import { DropdownMenuItem } from "~/components/ui/DropdownMenuItem";
 import {
   ACTIVE_GROUP_ALL,
   ACTIVE_GROUP_UNGROUPED,
@@ -15,7 +12,6 @@ import {
   buildGroupScopeEntries,
   useActiveGroup,
 } from "~/lib/active-group";
-import { useGroupsDialog } from "~/lib/groups-dialog-store";
 import { useHideableMenu } from "~/lib/hideable-elements";
 import { useProjects } from "~/queries";
 import { useBinding } from "~/lib/keybindings/store";
@@ -49,7 +45,6 @@ function GroupDot({ color, size = 7 }: { color: string; size?: number }) {
 export function GroupSwitcher() {
   const { activeGroup, setActiveGroup, groups } = useActiveGroup();
   const { data: scopedProjects } = useProjects();
-  const groupsDialog = useGroupsDialog();
   const [open, setOpen] = useState(false);
   useSuspendAppDragRegion(open);
   const nextGroupBinding = useBinding("group.next");
@@ -212,16 +207,6 @@ export function GroupSwitcher() {
                 </DropdownMenuItem>
               );
             })}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              icon="group"
-              onClick={() => {
-                setOpen(false);
-                groupsDialog.open();
-              }}
-            >
-              Manage groups…
-            </DropdownMenuItem>
           </CardFrame>,
           document.body,
         )}

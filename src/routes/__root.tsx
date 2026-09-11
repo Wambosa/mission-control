@@ -43,7 +43,6 @@ import { ProjectPicker } from "~/components/views/ProjectPicker";
 import { ProjectBar } from "~/components/views/ProjectBar";
 import { ScreenshotThumbnail } from "~/components/views/ScreenshotThumbnail";
 import { AddProjectProvider } from "~/lib/add-project-store";
-import { GroupsDialogProvider } from "~/lib/groups-dialog-store";
 import { ACTIVE_GROUP_ALL, ACTIVE_GROUP_UNGROUPED, useActiveGroup } from "~/lib/active-group";
 import { GroupSwitcher } from "~/components/views/GroupSwitcher";
 import { PromptSearchProvider } from "~/lib/prompt-search-store";
@@ -241,7 +240,6 @@ function RootComponent() {
           <TerminalProvider>
             <UserTerminalProvider>
               <AddProjectProvider>
-                <GroupsDialogProvider>
                 <PromptSearchProvider>
                   <HeaderActionsProvider>
                     <DiagramDialogHost>
@@ -273,7 +271,6 @@ function RootComponent() {
                     </DiagramDialogHost>
                   </HeaderActionsProvider>
                 </PromptSearchProvider>
-                </GroupsDialogProvider>
               </AddProjectProvider>
             </UserTerminalProvider>
           </TerminalProvider>

@@ -24,7 +24,6 @@ import {
   activeGroupLabel,
   useGroupScopedProjects,
 } from "~/lib/active-group";
-import { useGroupsDialog } from "~/lib/groups-dialog-store";
 import {
   COLLAPSED_SECTION_PINNED,
   COLLAPSED_SECTION_UNGROUPED,
@@ -65,7 +64,6 @@ function MissionControlPage() {
   const allScopedProjects = projectsQuery.unscopedData ?? [];
   const { activeGroup, setActiveGroup } = projectsQuery;
   const groups = groupsQuery.data ?? [];
-  const groupsDialog = useGroupsDialog();
   const { isCollapsed, toggleCollapsed } = useCollapsedGroups();
   const [search, setSearch] = useState("");
   const [editingProject, setEditingProject] = useState<ProjectWithCounts | null>(null);
@@ -331,17 +329,6 @@ function MissionControlPage() {
                 onChange={persistDashboardView}
               />
 
-              <Btn
-                variant="ghost"
-                icon="group"
-                onClick={groupsDialog.open}
-                style={{
-                  height: 36,
-                  ["--mc-btn-height" as string]: "36px",
-                }}
-              >
-                Groups
-              </Btn>
               <HotkeyTooltip action="project.add">
                 <Btn
                   variant="primary"

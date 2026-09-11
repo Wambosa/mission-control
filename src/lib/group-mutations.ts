@@ -66,3 +66,74 @@ export async function createGroup(
     return null;
   }
 }
+
+/** Shared optimistic patch for the two edits that can safely precede the server. */
+async function patchGroup(
+  queryClient: QueryClient,
+  id: string,
+  patch: Partial<Pick<Group, "name" | "color">>,
+  fallbackMessage: string,
+): Promise<Group | null> {
+  const previous = readGroups(queryClient);
+  queryClient.setQueryData<Group[]>(
+    queryKeys.groups,
+    previous.map((g) => (g.id === id ? { ...g, ...patch } : g)),
+  );
+
+  try {
+    const { group } = await api.updateGroup(id, patch);
+    queryClient.setQueryData<Group[]>(queryKeys.groups, (current) =>
+      (current ?? []).map((g) => (g.id === id ? group : g)),
+    );
+    return group;
+  } catch (error) {
+    queryClient.setQueryData<Group[]>(queryKeys.groups, previous);
+    reportFailure(error, fallbackMessage);
+    return null;
+  }
+}
+
+/** Rename a group, refusing blank and duplicate names before the request. */
+export async function renameGroup(
+  queryClient: QueryClient,
+  id: string,
+  rawName: string,
+): Promise<Group | null> {
+  const validation = validateGroupName(rawName, readGroups(queryClient), { excludeId: id });
+  if (!validation.ok) {
+    toast.error(validation.reason);
+    return null;
+  }
+  return patchGroup(queryClient, id, { name: validation.name }, "Could not rename the group");
+}
+
+export async function recolorGroup(
+  queryClient: QueryClient,
+  id: string,
+  color: string,
+): Promise<Group | null> {
+  return patchGroup(queryClient, id, { color }, "Could not recolor the group");
+}
+
+/**
+ * Delete a group. Deliberately not optimistic: removing the row from the
+ * cache trips the stale-scope self-heal in `active-group`, which persists a
+ * filter change to settings before the server has answered — so a rollback
+ * would restore the group with the operator's filter silently moved.
+ *
+ * Invalidates projects as well as groups: the server orphans member projects
+ * but emits only `group:deleted`, so nothing else refreshes those rows.
+ */
+export async function deleteGroup(queryClient: QueryClient, id: string): Promise<boolean> {
+  try {
+    await api.deleteGroup(id);
+  } catch (error) {
+    reportFailure(error, "Could not delete the group");
+    return false;
+  }
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.groups }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+  ]);
+  return true;
+}

@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("~/lib/api", () => ({
-  api: { createGroup: vi.fn() },
+  api: {
+    createGroup: vi.fn(),
+    updateGroup: vi.fn(),
+    deleteGroup: vi.fn(),
+  },
 }));
 
 vi.mock("sonner", () => ({
@@ -13,9 +17,11 @@ import { toast } from "sonner";
 import { api } from "~/lib/api";
 import { queryKeys } from "~/queries";
 import type { Group } from "~/db/schema";
-import { createGroup } from "../group-mutations";
+import { createGroup, deleteGroup, recolorGroup, renameGroup } from "../group-mutations";
 
 const createGroupRequest = vi.mocked(api.createGroup);
+const updateGroupRequest = vi.mocked(api.updateGroup);
+const deleteGroupRequest = vi.mocked(api.deleteGroup);
 const toastError = vi.mocked(toast.error);
 
 function group(id: string, name: string, color = "#ff5a1f"): Group {
@@ -103,5 +109,130 @@ describe("createGroup", () => {
     expect(created).toBeNull();
     expect(createGroupRequest).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith(expect.stringContaining("Alpha"));
+  });
+});
+
+describe("renameGroup", () => {
+  it("shows the new name before the request resolves", async () => {
+    queryClient.setQueryData(queryKeys.groups, [group("g-alpha", "Alpha")]);
+    let seenDuringRequest: Group[] | undefined;
+    updateGroupRequest.mockImplementation(async () => {
+      seenDuringRequest = read();
+      return { group: group("g-alpha", "Gamma") };
+    });
+
+    await renameGroup(queryClient, "g-alpha", "Gamma");
+
+    expect(seenDuringRequest?.[0]?.name).toBe("Gamma");
+  });
+
+  it("sends the trimmed name", async () => {
+    queryClient.setQueryData(queryKeys.groups, [group("g-alpha", "Alpha")]);
+    updateGroupRequest.mockResolvedValue({ group: group("g-alpha", "Gamma") });
+
+    await renameGroup(queryClient, "g-alpha", "  Gamma  ");
+
+    expect(updateGroupRequest).toHaveBeenCalledWith("g-alpha", { name: "Gamma" });
+  });
+
+  it("restores the previous name and reports a failure", async () => {
+    const before = [group("g-alpha", "Alpha")];
+    queryClient.setQueryData(queryKeys.groups, before);
+    updateGroupRequest.mockRejectedValue(new Error("server said no"));
+
+    const renamed = await renameGroup(queryClient, "g-alpha", "Gamma");
+
+    expect(renamed).toBeNull();
+    expect(read()).toEqual(before);
+    expect(toastError).toHaveBeenCalledWith("server said no");
+  });
+
+  it("refuses a blank name without calling the server", async () => {
+    queryClient.setQueryData(queryKeys.groups, [group("g-alpha", "Alpha")]);
+
+    expect(await renameGroup(queryClient, "g-alpha", "   ")).toBeNull();
+    expect(updateGroupRequest).not.toHaveBeenCalled();
+    expect(read()?.[0]?.name).toBe("Alpha");
+  });
+
+  it("refuses a rename onto another group's name without calling the server", async () => {
+    queryClient.setQueryData(queryKeys.groups, [
+      group("g-alpha", "Alpha"),
+      group("g-beta", "Beta"),
+    ]);
+
+    expect(await renameGroup(queryClient, "g-alpha", "Beta")).toBeNull();
+    expect(updateGroupRequest).not.toHaveBeenCalled();
+  });
+
+  it("lets a group keep its own name", async () => {
+    queryClient.setQueryData(queryKeys.groups, [group("g-alpha", "Alpha")]);
+    updateGroupRequest.mockResolvedValue({ group: group("g-alpha", "Alpha") });
+
+    expect(await renameGroup(queryClient, "g-alpha", "Alpha")).not.toBeNull();
+  });
+});
+
+describe("recolorGroup", () => {
+  it("shows the new color before the request resolves", async () => {
+    queryClient.setQueryData(queryKeys.groups, [group("g-alpha", "Alpha", "#ff5a1f")]);
+    let seenDuringRequest: Group[] | undefined;
+    updateGroupRequest.mockImplementation(async () => {
+      seenDuringRequest = read();
+      return { group: group("g-alpha", "Alpha", "#34d399") };
+    });
+
+    await recolorGroup(queryClient, "g-alpha", "#34d399");
+
+    expect(seenDuringRequest?.[0]?.color).toBe("#34d399");
+  });
+
+  it("restores the previous color when the request fails", async () => {
+    const before = [group("g-alpha", "Alpha", "#ff5a1f")];
+    queryClient.setQueryData(queryKeys.groups, before);
+    updateGroupRequest.mockRejectedValue(new Error("nope"));
+
+    expect(await recolorGroup(queryClient, "g-alpha", "#34d399")).toBeNull();
+    expect(read()).toEqual(before);
+    expect(toastError).toHaveBeenCalled();
+  });
+});
+
+describe("deleteGroup", () => {
+  it("writes nothing optimistically, so a failed delete leaves the scope untouched", async () => {
+    const before = [group("g-alpha", "Alpha"), group("g-beta", "Beta")];
+    queryClient.setQueryData(queryKeys.groups, before);
+    let seenDuringRequest: Group[] | undefined;
+    deleteGroupRequest.mockImplementation(async () => {
+      seenDuringRequest = read();
+      throw new Error("nope");
+    });
+
+    expect(await deleteGroup(queryClient, "g-alpha")).toBe(false);
+    expect(seenDuringRequest).toEqual(before);
+    expect(read()).toEqual(before);
+    expect(toastError).toHaveBeenCalled();
+  });
+
+  it("invalidates the projects cache as well as the groups cache", async () => {
+    queryClient.setQueryData(queryKeys.groups, [group("g-alpha", "Alpha")]);
+    deleteGroupRequest.mockResolvedValue(undefined);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    expect(await deleteGroup(queryClient, "g-alpha")).toBe(true);
+
+    const keys = invalidate.mock.calls.map((call) => JSON.stringify(call[0]?.queryKey));
+    expect(keys).toContain(JSON.stringify(queryKeys.groups));
+    expect(keys).toContain(JSON.stringify(queryKeys.projects));
+  });
+
+  it("does not invalidate when the delete failed", async () => {
+    queryClient.setQueryData(queryKeys.groups, [group("g-alpha", "Alpha")]);
+    deleteGroupRequest.mockRejectedValue(new Error("nope"));
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    await deleteGroup(queryClient, "g-alpha");
+
+    expect(invalidate).not.toHaveBeenCalled();
   });
 });

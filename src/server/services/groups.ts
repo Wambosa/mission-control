@@ -20,13 +20,32 @@ export function listGroups(): Group[] {
   return findAllGroups();
 }
 
+/**
+ * The authoritative name rule. The client checks the same thing before
+ * sending, but an inline field that commits on blur makes the unguarded path
+ * easy to reach, and the request schema accepts any non-empty string — so a
+ * row of spaces would otherwise be stored.
+ *
+ * `ValidationError` rather than a plain `Error` on purpose: only a domain
+ * error reaches the caller as a 400 carrying its message. A plain one becomes
+ * a 500 reading "internal error", which would make the promise that a
+ * rejected name says why true of the client check alone.
+ */
+function validGroupName(raw: string | undefined, excludeId?: string): string {
+  const name = raw?.trim() ?? "";
+  if (!name) throw new ValidationError("Group name is required");
+  const clash = listGroups().some((g) => g.id !== excludeId && g.name === name);
+  if (clash) throw new ValidationError(`A group named "${name}" already exists`);
+  return name;
+}
+
 export function createGroup(input: { name: string; color?: string }): Group {
-  if (!input.name?.trim()) throw new Error("Group name is required");
+  const name = validGroupName(input.name);
   const existing = listGroups();
   const color = input.color || GROUP_COLORS[existing.length % GROUP_COLORS.length] || "#ff5a1f";
   const row: Group = {
     id: newId("g"),
-    name: input.name.trim(),
+    name,
     color,
     // Append to the end of the manual order.
     sortOrder: maxGroupSortOrder() + 1,
@@ -42,6 +61,8 @@ export function updateGroup(id: string, patch: Partial<Pick<Group, "name" | "col
   const existing = findGroupById(id);
   if (!existing) return null;
   const next = { ...existing, ...patch };
+  // A group may keep its own name; only another group's is a clash.
+  if (patch.name !== undefined) next.name = validGroupName(patch.name, id);
   updateGroupRow(id, next);
   // Name and colour are the only patchable fields; report which of them moved
   // rather than firing on a save that changed nothing.
